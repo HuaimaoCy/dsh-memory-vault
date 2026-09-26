@@ -285,7 +285,7 @@ Remove-Item -Recurse "$env:USERPROFILE\.dsh\memory-vault"   # the memories, opti
 ## Development
 
 ```powershell
-# Standalone smoke test: drives tools, the two axes (human input / AI-written / curation scope), priority, the knowledge index, the base-prompt layer, a tunable quota, the v5 origin migration, per-memory application, hiding, watermark summarization, the panel route and the request boundary on a mock ctx, then renders the knowledge view, the board and the new-conversation strip for real (161 checks)
+# Standalone smoke test: drives tools, the two axes (human input / AI-written / curation scope), priority, the knowledge index, the base-prompt layer, a tunable quota, the v5 origin migration, per-memory application, hiding, watermark summarization, the panel route and the request boundary on a mock ctx, then renders the knowledge view, the board and the new-conversation strip for real (162 checks)
 cd <this plugin directory>
 node tests/smoke.mjs
 ```

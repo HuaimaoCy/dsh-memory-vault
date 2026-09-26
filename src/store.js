@@ -69,11 +69,21 @@ const MIGRATIONS = [
     version: 5,
     summary: '区分人工输入与 AI 生成的记忆',
     apply: (db) => {
-      // Memories the model wrote mid-conversation were filed as human input:
-      // the tool recorded `manual` together with a session id, and no
-      // hand-written row has that pair — the panel writes `panel` and no
-      // session. This is the one place where the two can still be told apart.
-      db.exec("UPDATE entries SET source = 'model-write' WHERE source = 'manual' AND session_id IS NOT NULL")
+      // Memories the model wrote mid-conversation were filed as human input: the
+      // tool recorded `manual` together with a session id. That pair alone is not
+      // enough to convict a row, because summarizing with a caller-supplied
+      // body records the same pair — and that body may well have been typed by
+      // a person. The summarizing path is distinguishable: it always writes
+      // `kind = 'summary'` and always leaves a row in `summaries`. Everything
+      // else that is `manual` with a session came from `memory_write`, since the
+      // panel path records `panel`.
+      db.exec(`
+        UPDATE entries SET source = 'model-write'
+        WHERE source = 'manual'
+          AND session_id IS NOT NULL
+          AND kind <> 'summary'
+          AND NOT EXISTS (SELECT 1 FROM summaries s WHERE s.entry_id = entries.id)
+      `)
       // 「AI自动总结」 named only the summarizer, so a model-written memory and a
       // summarized record looked identical. The tag now names the axis.
       db.exec(`UPDATE entries SET tags = replace(tags, '"${AUTO_TAG_GENERATED_LEGACY}"', '"${AUTO_TAG_GENERATED}"') WHERE tags LIKE '%${AUTO_TAG_GENERATED_LEGACY}%'`)

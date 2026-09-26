@@ -597,6 +597,12 @@ console.log('origin migration: 人工输入 vs AI 生成')
   })
   const byPerson = v4.createEntry({ groupId: v4Group.id, content: '人在面板里手写的。', source: 'panel' })
   const bySummary = v4.createEntry({ groupId: v4Group.id, content: '自动总结出来的。', source: 'auto-summary' })
+  // The trap: summarizing with a caller-supplied body records `manual` and a
+  // session id, exactly like a model write — but that body may be a person's
+  // words, so the migration must not convict it.
+  const byManualSummary = v4.createEntry({
+    groupId: v4Group.id, content: '手动总结时由人给出的正文。', source: 'manual', sessionId: 'session-old', kind: 'summary',
+  })
   v4.close()
   const rawV4 = new DatabaseSync(v4Path)
   rawV4.prepare('UPDATE entries SET tags = ? WHERE id = ?').run(JSON.stringify(['人工输入', '架构']), byModel.id)
@@ -623,6 +629,12 @@ console.log('origin migration: 人工输入 vs AI 生成')
     const entry = migrated.findEntry(bySummary.id)
     assert.ok(entry.tags.includes('AI 生成'), JSON.stringify(entry.tags))
     assert.ok(!entry.tags.includes('AI自动总结'), JSON.stringify(entry.tags))
+  })
+  check('a summarizing path that only looks like a model write is left alone', () => {
+    const entry = migrated.findEntry(byManualSummary.id)
+    assert.equal(entry.source, 'manual')
+    assert.equal(entry.modelWritten, false)
+    assert.ok(entry.tags.includes('人工输入'), JSON.stringify(entry.tags))
   })
   check('a caller cannot reintroduce the retired tag', () => {
     const smuggled = migrated.createEntry({
