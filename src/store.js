@@ -24,7 +24,7 @@ export const SCOPES = ['conversation', 'knowledge']
 export const ENTRY_KINDS = ['summary', 'fact', 'preference', 'decision', 'task', 'note']
 
 /** Bumped when a migration below changes the on-disk layout. */
-export const SCHEMA_VERSION = 3
+export const SCHEMA_VERSION = 4
 
 export { MAX_PRIORITY, normalizePriority } from './policy.js'
 /**
@@ -56,6 +56,13 @@ const MIGRATIONS = [
         created_at INTEGER NOT NULL,
         PRIMARY KEY (session_id, entry_id)
       ) STRICT`)
+    },
+  },
+  {
+    version: 4,
+    summary: '底层 prompt 标记',
+    apply: (db) => {
+      addColumnIfMissing(db, 'entries', 'base', 'INTEGER NOT NULL DEFAULT 0')
     },
   },
 ]
@@ -106,6 +113,7 @@ CREATE TABLE IF NOT EXISTS entries (
   tags        TEXT NOT NULL DEFAULT '[]',
   hidden      INTEGER NOT NULL DEFAULT 0,
   priority    INTEGER NOT NULL DEFAULT 0,
+  base        INTEGER NOT NULL DEFAULT 0,
   created_at  INTEGER NOT NULL,
   updated_at  INTEGER NOT NULL
 ) STRICT;
@@ -283,6 +291,9 @@ function entryView(row) {
     autoTag: autoTagFor(String(row.source)),
     hidden: row.hidden === 1,
     priority: Number(row.priority ?? 0),
+    // The base layer rides in every conversation's prompt and is counted
+    // separately from the knowledge a session chooses to apply.
+    base: row.base === 1,
     sessionId: row.session_id ?? null,
     tags: parseTags(/** @type {string} */ (row.tags)),
     createdAt: row.created_at,
@@ -509,6 +520,60 @@ export class MemoryStore {
   }
 
   /**
+   * Read the tunable injection limits.
+   *
+   * The deployment config supplies the defaults; an override stored in the
+   * vault wins, so the count can be changed from the panel without editing a
+   * profile file and restarting the host.
+   * @param {Record<string, number>} defaults - Deployment defaults.
+   * @returns {{ maxEntries: number, maxChars: number, baseMaxEntries: number, baseMaxChars: number }} Resolved limits.
+   */
+  readLimits(defaults) {
+    const stored = this.readMeta('limits')
+    /** @type {Record<string, unknown>} */
+    let parsed = {}
+    if (stored !== undefined) {
+      try {
+        parsed = JSON.parse(stored)
+      } catch (_error) {
+        // A corrupted override must not take the vault down; the defaults win.
+        parsed = {}
+      }
+    }
+    /** @param {string} key - Limit name. @returns {number} Resolved value. */
+    const pick = (key) => {
+      const value = Number(parsed[key])
+      return Number.isFinite(value) && value >= 0 ? Math.trunc(value) : Number(defaults[key] ?? 0)
+    }
+    return {
+      maxEntries: pick('maxEntries'),
+      maxChars: pick('maxChars'),
+      baseMaxEntries: pick('baseMaxEntries'),
+      baseMaxChars: pick('baseMaxChars'),
+    }
+  }
+
+  /**
+   * Store injection-limit overrides.
+   * @param {Record<string, unknown>} patch - Limits to change.
+   * @param {Record<string, number>} defaults - Deployment defaults.
+   * @returns {{ maxEntries: number, maxChars: number, baseMaxEntries: number, baseMaxChars: number }} Stored limits.
+   * @throws {Error} When a value is not a non-negative number.
+   */
+  writeLimits(patch, defaults) {
+    const next = this.readLimits(defaults)
+    for (const key of ['maxEntries', 'maxChars', 'baseMaxEntries', 'baseMaxChars']) {
+      if (patch[key] === undefined) continue
+      const value = Number(patch[key])
+      if (!Number.isFinite(value) || value < 0) throw new Error(`${key} 必须是非负数字`)
+      // 0 is meaningful throughout: it switches a layer off entirely.
+      next[key] = Math.min(1000, Math.trunc(value))
+    }
+    this.writeMeta('limits', JSON.stringify(next))
+    return next
+  }
+
+  /**
    * Whether a group is one of the groups the vault seeds on every open.
    *
    * Seeded groups are recreated whenever the plugin loads, so deleting one
@@ -715,7 +780,7 @@ export class MemoryStore {
    * @param {string|null} [input.scope] - Explicit assignment; defaults to the group's.
    * @returns {Record<string, unknown>} Created entry.
    */
-  createEntry({ groupId, content, title = '', kind = 'note', source = 'manual', sessionId = null, tags = [], scope = null, priority = 0 }) {
+  createEntry({ groupId, content, title = '', kind = 'note', source = 'manual', sessionId = null, tags = [], scope = null, priority = 0, base = false }) {
     const text = String(content ?? '').trim()
     if (text === '') throw new Error('memory entry content must not be empty')
     const group = this.requireGroup(groupId)
@@ -724,12 +789,13 @@ export class MemoryStore {
     const now = Date.now()
     const id = `mem_${randomUUID()}`
     this.#db.prepare(`
-      INSERT INTO entries (id, group_id, scope, assigned, title, content, kind, source, session_id, tags, priority, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO entries (id, group_id, scope, assigned, title, content, kind, source, session_id, tags, priority, base, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       id, group.id, assignment, scope === null ? 'group' : 'manual',
       String(title ?? '').trim(), text, String(kind ?? 'note'), String(source ?? 'manual'),
-      sessionId, JSON.stringify(withAutoTag(tags, String(source ?? 'manual'))), normalizePriority(priority), now, now,
+      sessionId, JSON.stringify(withAutoTag(tags, String(source ?? 'manual'))),
+      normalizePriority(priority), base === true ? 1 : 0, now, now,
     )
     this.#db.prepare('UPDATE groups SET updated_at = ? WHERE id = ?').run(now, group.id)
     return this.requireEntry(id)
@@ -819,6 +885,10 @@ export class MemoryStore {
       sets.push('priority = ?')
       values.push(normalizePriority(patch.priority))
     }
+    if (patch.base !== undefined) {
+      sets.push('base = ?')
+      values.push(patch.base === true ? 1 : 0)
+    }
     if (sets.length === 0) return entry
     sets.push('updated_at = ?')
     values.push(Date.now(), id)
@@ -888,6 +958,10 @@ export class MemoryStore {
     /** @type {unknown[]} */
     const values = []
     if (filter.includeHidden !== true) clauses.push('e.hidden = 0')
+    if (filter.base !== undefined) {
+      clauses.push('e.base = ?')
+      values.push(filter.base === true ? 1 : 0)
+    }
     if (filter.groupId !== undefined) {
       clauses.push('e.group_id = ?')
       values.push(filter.groupId)
@@ -1251,12 +1325,17 @@ export class MemoryStore {
    * @param {object} input - Plan request.
    * @param {string} input.sessionId - Session to plan for.
    * @param {string[]} input.defaults - Groups applied when the session never chose.
-   * @param {number} input.maxEntries - Maximum memories.
+   * @param {number} input.maxEntries - Maximum memories from applied knowledge.
    * @param {number} input.maxChars - Character budget across those memories.
+   * @param {number} [input.baseMaxEntries] - Maximum 底层 prompt memories.
+   * @param {number} [input.baseMaxChars] - Character budget for the base layer.
    * @param {boolean} [input.enabled] - Whether injection is switched on at all.
    * @returns {Record<string, any>} The plan.
    */
-  planInjection({ sessionId, defaults, maxEntries, maxChars, enabled = true }) {
+  planInjection({
+    sessionId, defaults, maxEntries, maxChars, enabled = true,
+    baseMaxEntries = 4, baseMaxChars = 1200,
+  }) {
     const effective = this.effectiveApplications(sessionId, defaults)
     if (enabled !== true) {
       return {
@@ -1264,6 +1343,7 @@ export class MemoryStore {
         enabled: false,
         source: effective.source,
         groups: effective.groups,
+        base: [],
         entries: [],
         skipped: [],
         truncated: false,
@@ -1323,13 +1403,45 @@ export class MemoryStore {
       enabled: true,
       source: effective.source,
       groups: effective.groups,
+      base: this.baseLayer({ maxEntries: baseMaxEntries, maxChars: baseMaxChars, exclude: taken }),
       entries,
       skipped,
       truncated,
       usedChars: maxChars - budget,
       maxEntries,
       maxChars,
+      baseMaxEntries,
+      baseMaxChars,
     }
+  }
+
+  /**
+   * The base layer: memories marked as 底层 prompt.
+   *
+   * They belong to no conversation in particular, so they are injected into
+   * every one of them and are billed against their own budget — a standing
+   * instruction must not be able to consume the room a session reserved for the
+   * knowledge it chose to apply.
+   * @param {object} input - Layer request.
+   * @param {number} input.maxEntries - Cap for the layer.
+   * @param {number} input.maxChars - Character cap for the layer.
+   * @param {Set<string>} [input.exclude] - Ids already injected by another layer.
+   * @returns {Record<string, unknown>[]} Base memories, best first.
+   */
+  baseLayer({ maxEntries, maxChars, exclude }) {
+    if (maxEntries <= 0) return []
+    /** @type {Record<string, unknown>[]} */
+    const selected = []
+    let budget = maxChars
+    for (const entry of this.listEntries({ base: true, limit: maxEntries + 1 })) {
+      if (exclude !== undefined && exclude.has(entry.id)) continue
+      if (selected.length >= maxEntries) break
+      const cost = entry.content.length + entry.title.length
+      if (cost > budget) continue
+      budget -= cost
+      selected.push(entry)
+    }
+    return selected
   }
 
   /**

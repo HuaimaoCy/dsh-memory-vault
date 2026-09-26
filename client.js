@@ -152,6 +152,21 @@ window.__ModuleLoader__.load({
         priorityShort: 'P',
         viaSession: '本会话指定',
         viaGroup: '随组注入',
+        baseLabel: '底层 prompt',
+        baseHint: '标为「底层 prompt」的记忆每次对话都会注入，且不占用本会话可用的知识数量；适合长期有效的基础约定。',
+        baseBadge: '底层',
+        baseTitle: '底层 prompt',
+        baseEmpty: '还没有底层 prompt 记忆。在记忆详情里把长期有效的基础约定标上即可。',
+        baseCount: '不占知识数量',
+        limitsLabel: '可用知识数量',
+        limitsHint: '本会话最多注入多少条已应用的知识；底层 prompt 不计入这个数量。',
+        curateReview: 'AI 整理（预览）',
+        curateApply: '按建议归类',
+        curateBusy: '整理中…',
+        curateHint: '用一次模型调用判断每条记忆是可复用还是单次性，并给出归类建议。',
+        curateEmpty: '模型没有给出可用的判断。',
+        curateReusable: '可复用',
+        curateOneoff: '单次性',
         hide: '隐藏',
         unhide: '恢复',
         hidden: '已隐藏',
@@ -270,6 +285,21 @@ window.__ModuleLoader__.load({
         priorityShort: 'P',
         viaSession: 'picked here',
         viaGroup: 'via group',
+        baseLabel: 'Base prompt',
+        baseHint: 'A base-prompt memory is injected into every conversation and does not consume its knowledge quota. Use it for standing conventions.',
+        baseBadge: 'base',
+        baseTitle: 'Base prompt',
+        baseEmpty: 'No base-prompt memories yet. Mark a standing convention on its detail screen.',
+        baseCount: 'not counted',
+        limitsLabel: 'Knowledge quota',
+        limitsHint: 'How many applied memories this conversation injects; base-prompt memories are not counted.',
+        curateReview: 'AI review',
+        curateApply: 'Apply verdicts',
+        curateBusy: 'Reviewing…',
+        curateHint: 'One model call decides whether each memory is reusable or one-off, and suggests where it belongs.',
+        curateEmpty: 'The model returned no usable verdicts.',
+        curateReusable: 'reusable',
+        curateOneoff: 'one-off',
         hide: 'Hide',
         unhide: 'Restore',
         hidden: 'Hidden',
@@ -750,6 +780,9 @@ window.__ModuleLoader__.load({
           entry.hidden === true ? h(Tag, { tone: 'warning' }, t('hidden')) : null,
           Number(entry.priority ?? 0) > 0
             ? h(Tag, { tone: 'info', title: t('priorityHint') }, `${t('priorityShort')}${String(entry.priority)}`)
+            : null,
+          entry.base === true
+            ? h(Tag, { tone: 'success', title: t('baseHint') }, t('baseBadge'))
             : null,
           selecting === true
             ? h(Tag, null, entry.scope === 'knowledge' ? t('scopeShortKnowledge') : t('scopeShortConversation'))
@@ -1660,6 +1693,21 @@ window.__ModuleLoader__.load({
               }, value === 0 ? '0' : `P${String(value)}`)),
               h('span', { className: 'dsmv-cap' }, `当前 P${String(entry.priority ?? 0)}`),
             )),
+            h('dt', null, t('baseLabel')),
+            h('dd', null, h('div', { className: 'dsmv-row' },
+              h(Pill, {
+                active: entry.base === true,
+                title: t('baseHint'),
+                onClick: () => {
+                  if (busy) return
+                  void mutate(
+                    () => call('entry.update', undefined, { id: entry.id, base: entry.base !== true }),
+                    t('saved'),
+                  )
+                },
+              }, entry.base === true ? t('baseBadge') : '—'),
+              h('span', { className: 'dsmv-cap' }, t('baseHint')),
+            )),
             h('dt', null, t('detailCreated')),
             h('dd', null, stamp(entry.createdAt)),
             h('dt', null, t('detailUpdated')),
@@ -1720,6 +1768,8 @@ window.__ModuleLoader__.load({
       // The drop-area highlight is this view's own state; reaching for the
       // board's copy would reference an identifier that is not in scope here.
       const [over, setOver] = React.useState(null)
+      const [cure, setCure] = React.useState(null)
+      const [curating, setCurating] = React.useState(false)
 
       const load = React.useCallback(async () => {
         if (sessionId === undefined) return
@@ -1780,6 +1830,9 @@ window.__ModuleLoader__.load({
       const effective = applied?.effective ?? 'none'
       const defaults = applied?.defaults ?? []
       const injected = applied?.entries ?? []
+      // The base layer is injected into every conversation and is deliberately
+      // not part of the injected count above: it is the floor, not the quota.
+      const base = applied?.base ?? []
       // The count comes from the Host half, so it stays right even when this
       // client is newer than the process it talks to and the list is absent.
       const injectedCount = applied?.injected ?? injected.length
@@ -1787,6 +1840,42 @@ window.__ModuleLoader__.load({
       const origin = effective === 'explicit'
         ? '本会话选择'
         : effective === 'default' ? t('applyDefault') : t('applyNone')
+
+      /**
+       * Store one injection limit.
+       * @param {Record<string, number>} patch - Limits to change.
+       * @returns {Promise<void>} Resolution after the reload.
+       */
+      const saveLimits = async (patch) => {
+        setBusy(true)
+        try {
+          await call('settings.set', undefined, patch)
+          await load()
+        } catch (failure) {
+          setError(failure instanceof Error ? failure.message : String(failure))
+        } finally {
+          setBusy(false)
+        }
+      }
+
+      /**
+       * Ask the model to sort the vault into reusable knowledge and one-off
+       * notes, and optionally act on the verdicts.
+       * @param {boolean} apply - Whether to write the verdicts.
+       * @returns {Promise<void>} Resolution after the call.
+       */
+      const runCurate = async (apply) => {
+        setCurating(true)
+        try {
+          const result = await call('curate', undefined, { apply, limit: 20 })
+          setCure(result)
+          if (apply) await load()
+        } catch (failure) {
+          setError(failure instanceof Error ? failure.message : String(failure))
+        } finally {
+          setCurating(false)
+        }
+      }
 
       /**
        * Persist one membership change against the current applied set.
@@ -1940,10 +2029,75 @@ window.__ModuleLoader__.load({
 
           h('div', { className: 'dsmv-cap' },
             `${t('applyDefaultNote')}：${defaults.length === 0 ? t('applyNone') : defaults.join('、')}`
-            + (applied?.applyByDefault === true ? '' : `（${t('applyOff')}）`)
-            + (applied === undefined
-              ? ''
-              : ` · ${t('knowledgeLimits')} ${String(applied.maxEntries ?? 0)} ${t('applyEntries')} / ${String(applied.maxChars ?? 0)} 字符`)),
+            + (applied?.applyByDefault === true ? '' : `（${t('applyOff')}）`)),
+
+          // The quota is a number the reader owns, so it is edited here rather
+          // than only in a profile file that needs a host restart.
+          h('div', { className: 'dsmv-card' },
+            h('div', { className: 'dsmv-row' },
+              h('span', { className: 'dsmv-cap' }, t('limitsLabel')),
+              h(Button, {
+                size: 'sm',
+                disabled: busy || (applied?.maxEntries ?? 0) <= 0,
+                onClick: () => { void saveLimits({ maxEntries: Math.max(0, Number(applied?.maxEntries ?? 0) - 1) }) },
+              }, '−'),
+              h('strong', null, String(applied?.maxEntries ?? 0)),
+              h(Button, {
+                size: 'sm',
+                disabled: busy || Number(applied?.maxEntries ?? 0) >= 50,
+                onClick: () => { void saveLimits({ maxEntries: Math.min(50, Number(applied?.maxEntries ?? 0) + 1) }) },
+              }, '+'),
+              h('span', { className: 'dsmv-cap' },
+                `${t('limitsHint')}（${t('baseTitle')} P${String(applied?.baseMaxEntries ?? 0)} ${t('baseCount')}）`),
+            ),
+          ),
+
+          // The base layer: always on, never counted against the quota above.
+          h('div', { className: 'dsmv-card' },
+            h('div', { className: 'dsmv-row' },
+              h('span', { className: 'dsmv-cap' }, t('baseTitle')),
+              h(Tag, { tone: 'success' }, t('baseCount')),
+            ),
+            base.length === 0
+              ? h('div', { className: 'dsmv-empty' }, t('baseEmpty'))
+              : base.map(entry => h('div', { key: entry.id, className: 'dsmv-kitem' },
+                  h('div', { className: 'dsmv-row' },
+                    h('strong', { style: { fontSize: 'var(--dsmv-fs-small)', fontWeight: 600 } },
+                      entry.title === '' ? plainPreview(entry.content, 60) : entry.title),
+                    h(Tag, null, entry.groupName ?? ''),
+                  ),
+                  h('div', { className: 'dsmv-kbody' },
+                    h(MarkdownText, { text: entry.content, labels: props.markdownLabels ?? MARKDOWN_LABELS.zh })),
+                )),
+          ),
+
+          h('div', { className: 'dsmv-card' },
+            h('div', { className: 'dsmv-row' },
+              h('span', { className: 'dsmv-cap' }, t('curateHint')),
+              h('span', { className: 'dsmv-spacer' }),
+              h(Button, {
+                size: 'sm',
+                disabled: curating || busy,
+                onClick: () => { void runCurate(false) },
+              }, curating ? t('curateBusy') : t('curateReview')),
+              cure === null || cure.mode === 'applied'
+                ? null
+                : h(Button, { size: 'sm', disabled: curating, onClick: () => { void runCurate(true) } }, t('curateApply')),
+            ),
+            cure === null
+              ? null
+              : h('div', { className: 'dsmv-col' },
+                  (cure.verdicts ?? []).length === 0
+                    ? h('div', { className: 'dsmv-empty' }, t('curateEmpty'))
+                    : null,
+                  ...(cure.verdicts ?? []).map(item => h('div', { key: item.id, className: 'dsmv-row' },
+                    h(Tag, { tone: item.verdict === 'reusable' ? 'success' : 'quiet' },
+                      item.verdict === 'reusable' ? t('curateReusable') : t('curateOneoff')),
+                    h('span', { className: 'dsmv-cap' }, item.reason),
+                    item.group === '' || item.verdict !== 'reusable' ? null : h(Tag, null, item.group),
+                  )),
+                ),
+          ),
 
           h('div', { className: 'dsmv-card' },
             h('div', { className: 'dsmv-row' },

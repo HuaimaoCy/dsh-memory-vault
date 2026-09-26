@@ -46,8 +46,9 @@ pnpm dsh plugin --profile web remove dsh-memory-vault
 | `memory_group` | 列出 / 创建 / 修改 / 删除记忆组，整体切换一个组的归属，或用 `bind` / `unbind` 把本会话的**总结写入**绑定到某个组。 |
 | `memory_write` | 写入一条或多条记忆，可一次指定归属。正文支持 Markdown 与 LaTeX。 |
 | `memory_recall` | 关键词检索、按 id 读取、按记忆组 / 归属 / 标签列举；`includeHidden` 可连隐藏的一起看。 |
-| `memory_assign` | 调整归属、改挂记忆组、设置**优先级**（0-100），或把没用的记忆隐藏 / 恢复。 |
+| `memory_assign` | 调整归属、改挂记忆组、设置**优先级**（0-100）、设置**底层 prompt** 标记，或把没用的记忆隐藏 / 恢复。 |
 | `memory_apply` | 把知识接进当前会话（跨对话同步记忆）：list / set / reset；`groups` 按组应用，`entries` 按单条记忆应用。 |
+| `memory_curate` | **AI 整理归类**：一次模型调用判断每条记忆是「可复用」还是「单次性」，并给出建议的记忆组；`review` 只给建议，`apply` 才落库。 |
 | `memory_summarize` | 把本段对话固化为一记忆。给了 `content` 就存你写的正文；不给则插件调用模型对**未总结的增量**做一次总结。 |
 
 ### 常驻记忆索引
@@ -109,6 +110,42 @@ pnpm dsh plugin --profile web remove dsh-memory-vault
 索引末尾还会写明可执行的下一步：需要正文用 `memory_recall`、接整组用 `memory_apply groups=[...]`、只接一条用 `memory_apply entries=[...]`、调整优先级用 `memory_assign priority=`。
 
 面板侧：磁贴在优先级大于 0 时显示 `P90` 徽标；「知识」页签里每条被注入的记忆会标明**是本会话指定的还是随组注入的**，让"为什么它在提示里"一目了然。
+
+## 底层 prompt、知识数量与 AI 整理归类
+
+### 底层 prompt：不占配额的那一层
+
+有的记忆是**长期有效的基础约定**（"所有编码任务必须用 git 留痕"），既不该受"这个会话应用了哪些组"影响，也不该挤占会话的知识配额。把它们标为**底层 prompt**：
+
+- 写入时就标：`memory_write` 的 `base: true`；面板里在记忆详情的「底层 prompt」一行点一下。
+- 已存在的记忆：`memory_assign` 的 `base: true/false`，可批量。
+- **每次对话都会注入**，与本次应用了哪些组无关；在提示词里单独成段（`### 底层 prompt（N 条 · 不占用本会话的知识配额）`）。
+- **不占知识数量**：底层条数由 `baseMaxEntries`（默认 4）与 `baseMaxChars`（默认 1200）单独封顶。
+
+### 可自定义的知识数量
+
+「可用知识数量」决定一个会话最多注入多少条**已应用**的知识（默认 12）。它现在存在库里，而不是只写在 profile：
+
+- 面板「知识」页签里有 `− / +` 直接调，改完立即生效，**不需要重启**。
+- 配置里的 `applyMaxEntries` / `applyMaxChars` 仍是部署默认值，面板改的是覆盖值；调回默认即恢复。
+- 底层 prompt 不计入这个数字——两条预算是分开的。
+
+### AI 整理归类
+
+知识库存久了会混进两类东西：值得长期保留的结论，和只对某一次任务成立的细节。插件无法从文本本身分辨，所以提供一次模型调用做判断：
+
+```
+memory_curate action=review     # 只看建议，不写入
+memory_curate action=apply      # 按建议归类
+```
+
+- 判断标准写在提示词里：**可复用**＝结论、事实、约定、偏好、可复用的步骤或排错结论；**单次性**＝进度、临时决定、一次性排查、已被后续结论取代的旧状态。不确定时倾向单次性（宁可少收录）。
+- 每条给出 `verdict`、一句话 `reason`、以及建议的记忆组名（同一批里语义相同的会得到相同名称，便于归并成组）。
+- `apply` 时：**可复用的**提升到知识库并归入建议的记忆组（组不存在就建）；**单次性的**改回对话记忆。加 `applyPriority: true` 可同时把可复用记忆的优先级提到至少 60。
+- 整批落库在**一个事务**内完成，不会出现"整理了一半"的状态。
+- 面板「知识」页签里也有「AI 整理（预览）」与「按建议归类」两个按钮。
+
+> 这是一次真实的模型调用，会消耗额度；一次最多 50 条，默认 20。
 
 ## Web 面板
 
@@ -177,6 +214,8 @@ pnpm dsh plugin --profile web remove dsh-memory-vault
     injectIndex: true               # 是否注入记忆索引段落
     injectMaxGroups: 24             # 索引里最多列出的记忆组数
     indexEntryTitles: 5             # 每组在索引里列出几条记忆标题；0 关闭
+    baseMaxEntries: 4               # 底层 prompt 最多注入几条（不占知识数量）
+    baseMaxChars: 1200              # 底层 prompt 的字符预算
     transcriptRetention: 400        # 每会话保留的已总结对话行数
     searchLimit: 20                 # memory_recall 默认返回上限
     maxEntryChars: 20000            # 单条记忆正文上限
@@ -215,7 +254,7 @@ Remove-Item -Recurse "$env:USERPROFILE\.dsh\memory-vault"   # 记忆数据（可
 ## 开发
 
 ```powershell
-# 独立冒烟测试：用模拟 ctx 驱动工具、优先级、知识索引、按条目应用、隐藏、水位总结、面板路由与请求边界，并真实渲染知识页、看板与新建对话记忆条（131 项检查）
+# 独立冒烟测试：用模拟 ctx 驱动工具、优先级、知识索引、底层 prompt、可调配额、AI 整理归类、按条目应用、隐藏、水位总结、面板路由与请求边界，并真实渲染知识页、看板与新建对话记忆条（150 项检查）
 cd <这个插件目录>
 node tests/smoke.mjs
 ```

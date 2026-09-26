@@ -18,7 +18,8 @@
 
 import { ENTRY_KINDS, SCOPES } from './store.js'
 import {
-  intParam, normalizePriority, normalizeTags, validateEntryWrite, validateGroupDescription, validateGroupName,
+  intParam, limitDefaults, normalizePriority, normalizeTags, validateEntryWrite,
+  validateGroupDescription, validateGroupName,
 } from './policy.js'
 
 /** Route prefix owned by this plugin. */
@@ -49,6 +50,8 @@ const OPERATIONS = {
   'group.delete': { write: true },
   assign: { write: true },
   'apply.set': { write: true },
+  'settings.set': { write: true },
+  curate: { write: true },
   'session.bind': { write: true },
 }
 
@@ -141,8 +144,10 @@ function stateOf(store, config) {
     apply: {
       byDefault: config.applyByDefault,
       defaults: config.applyDefaultGroups,
-      maxEntries: config.applyMaxEntries,
-      maxChars: config.applyMaxChars,
+      // The resolved numbers, not the deployment defaults: the panel edits
+      // these and must show what the next request will actually use.
+      ...store.readLimits(limitDefaults(config)),
+      defaultsApplied: limitDefaults(config),
     },
   }
 }
@@ -156,7 +161,7 @@ function stateOf(store, config) {
  * @param {Record<string, unknown>} body - Parsed request body.
  * @returns {Record<string, unknown>} Operation result.
  */
-function operate({ store, config, notify }, body) {
+async function operate({ store, config, notify, curate }, body) {
   const op = body.op
   switch (op) {
     case 'state':
@@ -200,8 +205,7 @@ function operate({ store, config, notify }, body) {
       const plan = store.planInjection({
         sessionId,
         defaults: config.applyByDefault ? config.applyDefaultGroups : [],
-        maxEntries: config.applyMaxEntries,
-        maxChars: config.applyMaxChars,
+        ...store.readLimits(limitDefaults(config)),
         enabled: config.injectIndex,
       })
       return {
@@ -211,13 +215,14 @@ function operate({ store, config, notify }, body) {
         ...store.appliedGroups(sessionId),
         effective: plan.source,
         enabled: plan.enabled,
-        injected: plan.entries.length,
+        injected: plan.entries.length + plan.base.length,
         truncated: plan.truncated,
         skipped: plan.skipped,
         usedChars: plan.usedChars,
         // The knowledge panel shows what the session actually receives, not
         // just how many memories that is.
         entries: plan.entries,
+        base: plan.base,
         // Groups the effective set resolved to, so the tiles match the正文.
         effectiveGroups: plan.groups.map(group => group.id),
         // Where this session's summaries go; a separate axis from what it reads.
@@ -225,8 +230,7 @@ function operate({ store, config, notify }, body) {
         defaultGroupId: store.readMeta('default_conversation_group') ?? null,
         defaults: config.applyDefaultGroups,
         applyByDefault: config.applyByDefault,
-        maxEntries: config.applyMaxEntries,
-        maxChars: config.applyMaxChars,
+        ...store.readLimits(limitDefaults(config)),
       }
     }
     case 'apply.set': {
@@ -320,8 +324,13 @@ function operate({ store, config, notify }, body) {
       return { entry }
     }
     case 'assign': {
-      // Priority rides the same operation as assignment: both answer "what does
-      // this memory mean to me", and the panel edits them side by side.
+      // A base-layer flag rides the same operation as assignment: both answer
+      // "what does this memory mean to me".
+      if (body.base !== undefined && Array.isArray(body.ids)) {
+        const entries = body.ids.map(String).map(id => store.updateEntry(id, { base: body.base === true }))
+        notify()
+        return { entries, base: body.base === true }
+      }
       if (body.priority !== undefined && Array.isArray(body.ids)) {
         const entries = body.ids.map(String).map(id => store.updateEntry(id, { priority: body.priority }))
         notify()
@@ -339,6 +348,30 @@ function operate({ store, config, notify }, body) {
         scope: typeof body.scope === 'string' && SCOPES.includes(body.scope) ? body.scope : null,
         groupId: typeof body.targetGroup === 'string' && body.targetGroup !== '' ? body.targetGroup : null,
         assignedBy: body.followGroup === true ? 'group' : 'manual',
+      })
+      notify()
+      return result
+    }
+    case 'settings.set': {
+      // Injection limits are stored in the vault rather than only in the profile
+      // file, so the count can be tuned from the panel without a host restart.
+      const defaults = limitDefaults(config)
+      const limits = store.writeLimits({
+        ...(body.maxEntries === undefined ? {} : { maxEntries: body.maxEntries }),
+        ...(body.maxChars === undefined ? {} : { maxChars: body.maxChars }),
+        ...(body.baseMaxEntries === undefined ? {} : { baseMaxEntries: body.baseMaxEntries }),
+        ...(body.baseMaxChars === undefined ? {} : { baseMaxChars: body.baseMaxChars }),
+      }, defaults)
+      notify()
+      return { limits, defaults }
+    }
+    case 'curate': {
+      const result = await curate({
+        ids: Array.isArray(body.ids) ? body.ids.map(String) : undefined,
+        group: typeof body.group === 'string' && body.group !== '' ? body.group : undefined,
+        limit: intParam(body.limit, { min: 1, max: 50, fallback: 20 }, 'limit'),
+        apply: body.apply === true,
+        applyPriority: body.applyPriority === true,
       })
       notify()
       return result
@@ -410,7 +443,7 @@ export function registerVaultRoutes(ctx, deps) {
       }
 
       try {
-        sendJson(res, 200, { ok: true, result: operate(deps, body) })
+        sendJson(res, 200, { ok: true, result: await operate(deps, body) })
       } catch (error) {
         sendJson(res, 400, { ok: false, error: error instanceof Error ? error.message : String(error) })
       }

@@ -1,6 +1,6 @@
 {
   "name": "dsh-memory-vault",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "Knowledge and memory vault for DSH: memory groups with automatic summarization and free assignment between conversation memory and the knowledge base.",
   "type": "module",
   "main": "index.js",

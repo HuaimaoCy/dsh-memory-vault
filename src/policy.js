@@ -95,6 +95,23 @@ export function validateEntryWrite(input, kinds, config) {
     kind,
     tags: normalizeTags(input.tags),
     priority: normalizePriority(input.priority),
+    // A base-layer memory rides in every conversation's prompt; it is a flag,
+    // never a value, so anything but an explicit true is off.
+    base: input.base === true,
+  }
+}
+
+/**
+ * The injection limits the vault may override at runtime.
+ * @param {{ applyMaxEntries: number, applyMaxChars: number, baseMaxEntries: number, baseMaxChars: number }} config - Resolved plugin config.
+ * @returns {Record<string, number>} Deployment defaults for the four limits.
+ */
+export function limitDefaults(config) {
+  return {
+    maxEntries: config.applyMaxEntries,
+    maxChars: config.applyMaxChars,
+    baseMaxEntries: config.baseMaxEntries,
+    baseMaxChars: config.baseMaxChars,
   }
 }
 

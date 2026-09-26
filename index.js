@@ -24,6 +24,7 @@ import { buildTools } from './src/tools.js'
 import { registerIndexSection } from './src/prompt.js'
 import { registerVaultRoutes } from './src/http.js'
 import { validateEntryWrite } from './src/policy.js'
+import { curateWithModel, parseCuration, targetGroupFor } from './src/curate.js'
 import { routeFromSession, summarizeWithModel, titleFromRecord } from './src/summarize.js'
 
 export { Config, CONFIG_DEFAULTS } from './src/config.js'
@@ -298,9 +299,77 @@ export function apply(ctx, config) {
     }
   }
 
+  /**
+   * Curate a batch of memories with one model call.
+   *
+   * The vault cannot tell a conclusion that will matter for months from a
+   * detail that mattered once — both look like text. The model judges; this
+   * function decides what to do with the judgement, and never writes when the
+   * caller only asked for a review.
+   * @param {object} request - Curation request.
+   * @param {Record<string, any>} [request.session] - Session whose route the call uses.
+   * @param {string[]} [request.ids] - Specific memories to judge.
+   * @param {string} [request.group] - Group to judge instead.
+   * @param {number} [request.limit] - Batch cap.
+   * @param {boolean} [request.apply] - Whether to write the verdicts.
+   * @param {boolean} [request.applyPriority] - Whether reusable memories also get a priority bump.
+   * @param {AbortSignal} [request.signal] - Caller cancellation.
+   * @returns {Promise<Record<string, unknown>>} The verdicts and, when applied, what changed.
+   */
+  const curate = async ({ session, ids, group, limit = 20, apply = false, applyPriority = false, signal }) => {
+    const cap = Math.max(1, Math.min(50, Math.trunc(Number(limit) || 20)))
+    const candidates = Array.isArray(ids) && ids.length > 0
+      ? ids.map(id => store.findEntry(String(id))).filter(entry => entry !== undefined).slice(0, cap)
+      : store.listEntries({
+          groupId: group === undefined || group === '' ? undefined : store.requireGroup(group).id,
+          limit: cap,
+        })
+    if (candidates.length === 0) {
+      throw new Error('没有可整理的记忆：换一个记忆组，或先用 memory_write 写入内容')
+    }
+    const route = config.summarizerProvider !== null && config.summarizerModel !== null
+      ? { provider: config.summarizerProvider, model: config.summarizerModel }
+      : session === undefined
+        ? undefined
+        : routeFromSession(session)
+    if (route === undefined) {
+      throw new Error('没有可用的 provider/model 来做整理：请在会话内调用，或配置 summarizerProvider 与 summarizerModel')
+    }
+    const record = await curateWithModel(ctx, {
+      route,
+      entries: candidates,
+      sessionId: session?.id,
+      maxTokens: config.summarizerMaxTokens,
+      timeoutMs: config.summarizerTimeoutMs,
+      signal,
+    })
+    const known = new Map(candidates.map(entry => [entry.id, entry]))
+    const verdicts = parseCuration(record.text).filter(verdict => known.has(verdict.id))
+    const model = { provider: record.provider, model: record.model }
+    if (!apply) return { mode: 'review', candidates, verdicts, applied: [], model }
+
+    // Every verdict lands in one transaction: a half-curated batch would leave
+    // the vault in a state neither the old nor the new reading explains.
+    const applied = store.transaction(() => verdicts.map(verdict => {
+      const entry = /** @type {Record<string, any>} */ (known.get(verdict.id))
+      if (verdict.verdict === 'oneoff') {
+        store.assignEntries({ ids: [entry.id], scope: 'conversation', groupId: null, assignedBy: 'manual' })
+        return { id: entry.id, verdict: 'oneoff', scope: 'conversation', group: entry.groupName ?? '', reason: verdict.reason }
+      }
+      const name = targetGroupFor(verdict, config.knowledgeGroupName)
+      const target = store.findGroup(name)
+        ?? store.createGroup({ name, scope: 'knowledge', description: '由 AI 整理归类建立' })
+      store.assignEntries({ ids: [entry.id], scope: 'knowledge', groupId: target.id, assignedBy: 'manual' })
+      if (applyPriority) store.updateEntry(entry.id, { priority: Math.max(60, Number(entry.priority ?? 0)) })
+      return { id: entry.id, verdict: 'reusable', scope: 'knowledge', group: target.name, reason: verdict.reason }
+    }))
+    notify()
+    return { mode: 'applied', candidates, verdicts, applied, model }
+  }
+
   // Tools are the vault's primary surface: everything a person can do from the
   // Web panel, the model can do from a turn.
-  for (const definition of buildTools({ store, config, summarize, notify })) {
+  for (const definition of buildTools({ store, config, summarize, curate, notify })) {
     ctx.tools.register(definition)
   }
 
@@ -310,7 +379,7 @@ export function apply(ctx, config) {
   }, 'memory-vault: prompt index')
 
   ctx.effect(() => {
-    const dispose = registerVaultRoutes(ctx, { store, config, notify })
+    const dispose = registerVaultRoutes(ctx, { store, config, notify, curate })
     return () => { dispose?.() }
   }, 'memory-vault: panel routes')
 

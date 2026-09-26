@@ -55,6 +55,8 @@ const DEFAULTS = Object.freeze({
   injectIndex: true,
   injectMaxGroups: 24,
   indexEntryTitles: 5,
+  baseMaxEntries: 4,
+  baseMaxChars: 1200,
   summarizer: 'llm',
   summarizerProvider: null,
   summarizerModel: null,
@@ -167,6 +169,8 @@ function normalize(value) {
     injectIndex: booleanField(raw, 'injectIndex', DEFAULTS.injectIndex, issues),
     injectMaxGroups: countField(raw, 'injectMaxGroups', DEFAULTS.injectMaxGroups, issues),
     indexEntryTitles: countField(raw, 'indexEntryTitles', DEFAULTS.indexEntryTitles, issues),
+    baseMaxEntries: countField(raw, 'baseMaxEntries', DEFAULTS.baseMaxEntries, issues),
+    baseMaxChars: countField(raw, 'baseMaxChars', DEFAULTS.baseMaxChars, issues),
     summarizer: /** @type {VaultConfig['summarizer']} */ (
       typeof summarizer === 'string' && SUMMARIZER_MODES.includes(summarizer) ? summarizer : DEFAULTS.summarizer
     ),

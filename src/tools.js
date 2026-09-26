@@ -12,7 +12,7 @@
  */
 
 import { ENTRY_KINDS, SCOPES, normalizePriority } from './store.js'
-import { validateEntryBatch } from './policy.js'
+import { limitDefaults, validateEntryBatch } from './policy.js'
 
 /** Output declaration shared by every tool: an open object the renderer turns into text. */
 const OPEN_OBJECT_OUTPUT = { type: 'object', additionalProperties: true }
@@ -94,7 +94,7 @@ function scopeDescription(subject) {
  * @param {() => void} deps.notify - Invalidate the memory index and Web page.
  * @returns {Record<string, unknown>[]} Definitions to register.
  */
-export function buildTools({ store, config, summarize, notify }) {
+export function buildTools({ store, config, summarize, curate, notify }) {
   /** @type {Record<string, unknown>[]} */
   const definitions = []
 
@@ -108,23 +108,23 @@ export function buildTools({ store, config, summarize, notify }) {
     const defaults = config.applyByDefault ? config.applyDefaultGroups : []
     // The tools read the same injection plan the prompt renderer reads, so a
     // tool result can never claim a memory the model did not receive.
+    const limits = store.readLimits(limitDefaults(config))
     const plan = store.planInjection({
       sessionId,
       defaults,
-      maxEntries: config.applyMaxEntries,
-      maxChars: config.applyMaxChars,
+      ...limits,
       enabled: config.injectIndex,
     })
     return {
       source: plan.source,
       groups: plan.groups,
       entries: plan.entries,
+      base: plan.base,
       defaults: config.applyDefaultGroups,
       applyByDefault: config.applyByDefault,
-      injected: plan.entries.length,
+      injected: plan.entries.length + plan.base.length,
       truncated: plan.truncated,
-      maxEntries: plan.maxEntries,
-      maxChars: plan.maxChars,
+      ...limits,
     }
   }
 
@@ -292,6 +292,10 @@ export function buildTools({ store, config, summarize, notify }) {
                 type: 'number',
                 description: '优先级 0-100，越大越优先；写入重要结论时给高分，注入预算不够时它不会被新记忆挤掉。',
               },
+              base: {
+                type: 'boolean',
+                description: '设为 true 时这条记忆进入「底层 prompt」：每次对话都会注入，且不占用该会话可用的知识配额。适合长期有效的基础约定。',
+              },
               tags: { type: 'array', items: { type: 'string' }, description: '条目标签。' },
             },
             required: ['content'],
@@ -427,9 +431,31 @@ export function buildTools({ store, config, summarize, notify }) {
           type: 'number',
           description: '配合 ids 使用：把这批记忆的优先级设为 0-100。给出时只改优先级，不动归属。',
         },
+        base: {
+          type: 'boolean',
+          description: '配合 ids 使用：true 把这些记忆标为「底层 prompt」（每次对话都注入、不占知识配额），false 取消。',
+        },
       },
     },
     execute: async (args) => {
+      if (args.base !== undefined) {
+        if (!Array.isArray(args.ids) || args.ids.length === 0) {
+          throw new Error('memory_assign 用 base 调整底层 prompt 时，必须给出 ids')
+        }
+        /** @type {Record<string, unknown>[]} */
+        const entries = []
+        /** @type {string[]} */
+        const missing = []
+        for (const id of args.ids) {
+          if (store.findEntry(id) === undefined) {
+            missing.push(id)
+            continue
+          }
+          entries.push(store.updateEntry(id, { base: args.base === true }))
+        }
+        notify()
+        return { mode: 'base', base: args.base === true, entries, missing }
+      }
       if (args.priority !== undefined) {
         if (!Array.isArray(args.ids) || args.ids.length === 0) {
           throw new Error('memory_assign 用 priority 调整优先级时，必须给出 ids')
@@ -477,6 +503,16 @@ export function buildTools({ store, config, summarize, notify }) {
       return { mode: 'entries', ...result }
     },
     render: (_args, value) => {
+      if (value.mode === 'base') {
+        const entries = /** @type {Record<string, any>[]} */ (value.entries)
+        const missing = /** @type {string[]} */ (value.missing)
+        const absent = missing.length === 0 ? '' : `\n未找到 ${missing.length} 个 id：${missing.join(', ')}`
+        return value.base === true
+          ? `已把 ${entries.length} 条记忆设为「底层 prompt」：每次对话都会注入，且不占用会话可用的知识配额。\n`
+            + entries.map(entry => entryLine(entry, false)).join('\n') + absent
+          : `已取消 ${entries.length} 条记忆的「底层 prompt」标记：\n`
+            + entries.map(entry => entryLine(entry, false)).join('\n') + absent
+      }
       if (value.mode === 'priority') {
         const entries = /** @type {Record<string, any>[]} */ (value.entries)
         const missing = /** @type {string[]} */ (value.missing)
@@ -620,6 +656,62 @@ export function buildTools({ store, config, summarize, notify }) {
         entryLine(entry),
         `归属：${group.scope === 'knowledge' ? '知识库' : '对话记忆'} · 记忆组「${group.name}」`,
       ].join('\n')
+    },
+  }))
+
+  definitions.push(tool({
+    name: 'memory_curate',
+    description: [
+      '用一次模型调用整理知识库：逐条判断记忆属于「可复用」（跨会话仍然成立的结论、事实、约定、偏好、可复用步骤）还是「单次性」（只对某次任务或临时环境成立的细节、进度与过程）。',
+      'action=review 只给出分类建议、理由与建议的记忆组，不写入任何东西；action=apply 才按建议落库：可复用的提升到知识库并归入建议的记忆组，单次性的改回对话记忆。',
+      '一次最多处理 50 条，默认 20；用 group 指定某个记忆组，或用 ids 指定具体几条。',
+      '整理会改变归属与分组，建议先 review 看一眼再 apply；对同一批反复 apply 是幂等的。',
+    ].join('\n'),
+    parameters: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        action: { type: 'string', enum: ['review', 'apply'], description: 'review 只给建议；apply 按建议落库。' },
+        group: { type: 'string', description: '要整理的记忆组名称或 id；省略时按 limit 取全库最新的若干条。' },
+        ids: { type: 'array', items: { type: 'string' }, description: '只整理这些记忆 id。' },
+        limit: { type: 'number', description: '一次最多整理多少条，默认 20，上限 50。' },
+        applyPriority: {
+          type: 'boolean',
+          description: 'action=apply 时，是否同时把判定为可复用的记忆优先级提到至少 60（默认 false）。',
+        },
+      },
+      required: ['action'],
+    },
+    execute: async (args, exec) => {
+      if (exec.agent === undefined) throw new Error('memory_curate 需要在一个会话内调用')
+      const result = await curate({
+        session: exec.agent.session,
+        ids: args.ids,
+        group: args.group,
+        limit: args.limit,
+        apply: args.action === 'apply',
+        applyPriority: args.applyPriority === true,
+        signal: exec.signal,
+      })
+      return { action: args.action, ...result }
+    },
+    render: (_args, value) => {
+      const verdicts = /** @type {Record<string, any>[]} */ (value.verdicts)
+      const head = value.mode === 'review'
+        ? `整理建议（模型 ${String(value.model?.provider)}/${String(value.model?.model)}，共 ${String(value.candidates.length)} 条，未写入）：`
+        : `已整理 ${String(value.applied.length)} 条记忆（模型 ${String(value.model?.provider)}/${String(value.model?.model)}）：`
+      if (verdicts.length === 0) return `${head}\n模型没有给出可用的判断，请重试或缩小整理范围。`
+      const reusable = verdicts.filter(item => item.verdict === 'reusable')
+      const oneoff = verdicts.filter(item => item.verdict === 'oneoff')
+      const lines = [
+        head,
+        `可复用 ${String(reusable.length)} 条：`,
+        ...reusable.map(item => `- ${item.id} → 记忆组「${item.group}」：${item.reason}`),
+        `单次性 ${String(oneoff.length)} 条：`,
+        ...oneoff.map(item => `- ${item.id}：${item.reason}`),
+      ]
+      if (value.mode === 'review') lines.push('确认无误后用 action=apply 落库。')
+      return lines.join('\n')
     },
   }))
 

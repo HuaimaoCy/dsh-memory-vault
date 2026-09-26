@@ -46,8 +46,9 @@ pnpm dsh plugin --profile web remove dsh-memory-vault
 | `memory_group` | List, create, update, or delete memory groups, switch a whole group's assignment, or `bind` / `unbind` where this conversation's summaries are filed. |
 | `memory_write` | Write one or more memories, optionally assigning them in the same call. Bodies accept Markdown and LaTeX. |
 | `memory_recall` | Keyword search, read one entry by id, or list by group, assignment, or tag; `includeHidden` reaches hidden memories too. |
-| `memory_assign` | Reassign, move between groups, set a **priority** (0–100), or hide and restore memories. |
+| `memory_assign` | Reassign, move between groups, set a **priority** (0–100), mark a **base prompt** memory, or hide and restore memories. |
 | `memory_apply` | Apply knowledge to the current conversation (cross-conversation sync): list / set / reset; `groups` applies whole groups, `entries` applies single memories. |
+| `memory_curate` | **AI curation**: one model call decides whether each memory is reusable knowledge or a one-off note and suggests a group; `review` only reports, `apply` files. |
 | `memory_summarize` | Settle this conversation into one memory. With `content`, your text is stored as written; without it, the plugin calls a model over the **unsummarized increment**. |
 
 ### Standing memory index
@@ -109,6 +110,42 @@ Beside each group's name and count, the index lists that group's **highest-prior
 The section ends by naming the step it can take next: `memory_recall` for the bodies, `memory_apply groups=[...]` to plug in a whole group, `memory_apply entries=[...]` to carry a single memory across, and `memory_assign priority=` to raise one.
 
 On the panel side a tile shows a `P90` badge when its priority is raised, and the 知识 tab marks every injected memory as **picked here** or **via group**, so why a memory is in the prompt is never a mystery.
+
+## Base prompt, a tunable quota, and AI curation
+
+### The base prompt is a floor, not a preference
+
+Some memories are standing conventions — "every coding task leaves a git trail". They should not depend on which groups a conversation applied, and they should not eat the room it reserved for what it chose. Mark them as **base prompt**:
+
+- On write: `memory_write` with `base: true`; in the panel, the Base prompt row on a memory's detail screen.
+- Afterwards: `memory_assign` with `base: true/false`, in bulk if needed.
+- They are injected into **every** conversation regardless of what it applied, in a section of their own.
+- They are **not counted** against the knowledge quota: the layer has its own caps (`baseMaxEntries`, default 4, and `baseMaxChars`, default 1200).
+
+### The knowledge quota is editable
+
+The quota decides how many *applied* memories a conversation injects (12 by default). It now lives in the vault rather than only in a profile file:
+
+- `− / +` in the panel's 知识 tab, effective immediately, **no restart**.
+- `applyMaxEntries` / `applyMaxChars` in the config remain the deployment defaults; the panel writes an override, and setting it back to the default restores it.
+- The base layer is not part of that number — the two budgets are separate.
+
+### AI curation
+
+A vault collects two kinds of thing that look identical as text: conclusions worth keeping for months, and details that mattered once. The vault cannot tell them apart by itself, so one model call does:
+
+```
+memory_curate action=review     # verdicts only, nothing written
+memory_curate action=apply      # file them
+```
+
+- **Reusable** means a conclusion, fact, convention, preference or step that still holds in another session; **one-off** means progress, a temporary decision, a one-time investigation, a superseded state. Doubt resolves to one-off.
+- Each item gets a verdict, a one-line reason, and a suggested group name (identical meanings get identical names so they merge cleanly).
+- On `apply`, reusable memories move to the knowledge base under that group (created if needed) and one-off memories go back to conversation memory; `applyPriority: true` also lifts the reusable ones to priority 60.
+- The whole batch commits in **one transaction**, so the vault is never left half-sorted.
+- The panel's 知识 tab has the same two actions as buttons.
+
+> It is a real model call and spends quota; 50 memories at most, 20 by default.
 
 ## Web panel
 
@@ -177,6 +214,8 @@ Override the shipped layer from `~/.dsh/profiles/web/cordis.patch.yml`:
     injectIndex: true               # inject the memory index section
     injectMaxGroups: 24             # groups listed at most
     indexEntryTitles: 5             # memory titles listed per group; 0 turns the catalogue off
+    baseMaxEntries: 4               # base-prompt memories injected (not part of the quota)
+    baseMaxChars: 1200              # character budget for the base layer
     transcriptRetention: 400        # summarized transcript rows kept per session
     searchLimit: 20                 # default `memory_recall` result cap
     maxEntryChars: 20000            # longest entry body
@@ -215,7 +254,7 @@ Remove-Item -Recurse "$env:USERPROFILE\.dsh\memory-vault"   # the memories, opti
 ## Development
 
 ```powershell
-# Standalone smoke test: drives tools, priority, the knowledge index, per-memory application, hiding, watermark summarization, the panel route and the request boundary on a mock ctx, then renders the knowledge view, the board and the new-conversation memory strip for real (131 checks)
+# Standalone smoke test: drives tools, priority, the knowledge index, the base-prompt layer, a tunable quota, AI curation, per-memory application, hiding, watermark summarization, the panel route and the request boundary on a mock ctx, then renders the knowledge view, the board and the new-conversation strip for real (150 checks)
 cd <this plugin directory>
 node tests/smoke.mjs
 ```

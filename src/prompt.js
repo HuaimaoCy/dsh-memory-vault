@@ -4,14 +4,15 @@
  * the memories this session has applied from the rest of the vault.
  *
  * The index is rendered at each assembly from live store state, but its
- * ordering is name-sorted and its size is capped, so writing a memory does not
- * reshuffle the prompt and invalidate the provider's prefix cache. The applied
- * block is the one part that grows with the vault: it is bounded by
- * `applyMaxEntries` and `applyMaxChars`, and a session that applies nothing
- * pays nothing.
+ * ordering is priority-sorted and its size is capped, so writing a memory does
+ * not reshuffle the prompt and invalidate the provider's prefix cache. The one
+ * part that grows with the vault is the applied block: it is bounded by the
+ * resolved injection limits, and a session that applies nothing pays nothing.
  *
  * @module dsh-memory-vault/src/prompt
  */
+
+import { limitDefaults } from './policy.js'
 
 /** Section order: after the session-query tool section, before the tool sections that follow it. */
 export const MEMORY_INDEX_ORDER = 2500
@@ -33,17 +34,28 @@ function appliedBlock({ store, config, sessionId }) {
   const plan = store.planInjection({
     sessionId,
     defaults: config.applyByDefault ? config.applyDefaultGroups : [],
-    maxEntries: config.applyMaxEntries,
-    maxChars: config.applyMaxChars,
+    ...store.readLimits(limitDefaults(config)),
     enabled: config.injectIndex,
   })
-  if (plan.groups.length === 0) return []
+  // The base layer comes first and is deliberately not conditional on anything
+  // a session chose: that is what makes it a floor rather than a preference.
+  const baseLines = plan.base.length === 0 ? [] : [
+    '',
+    `### 底层 prompt（${String(plan.base.length)} 条 · 不占用本会话的知识配额）`,
+    '这些是长期有效的基础约定，与本次对话选用了哪些知识无关：始终遵守。',
+    ...plan.base.flatMap(entry => [
+      `- 【${entry.groupName ?? ''}】${entry.title === '' ? entry.kind : entry.title}`,
+      `  ${String(entry.content).replace(/\n/g, '\n  ')}`,
+    ]),
+  ]
+  if (plan.groups.length === 0) return baseLines
   const names = plan.groups.map(group => group.name).join('、')
   const origin = plan.source === 'default' ? '按默认设置应用' : '本会话选择应用'
   const lines = [
+    ...baseLines,
     '',
     `### 已应用的知识（${names} · ${origin}）`,
-    '下面的记忆来自其他会话或此前的整理，已直接应用到本会话：直接采用，不必再检索。需要更多细节时可用 `memory_recall` 检索对应记忆组。',
+    `下面的记忆来自其他会话或此前的整理，已直接应用到本会话（配额 ${String(plan.maxEntries)} 条）：直接采用，不必再检索。需要更多细节时可用 \`memory_recall\` 检索对应记忆组。`,
   ]
   if (plan.entries.length === 0) {
     lines.push(`（「${names}」目前没有可见的记忆。）`)

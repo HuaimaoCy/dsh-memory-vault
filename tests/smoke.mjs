@@ -95,6 +95,21 @@ function sessionStub(id) {
 }
 
 /**
+ * One stub answers both out-of-band calls the vault makes: the summarizer asks
+ * for prose, the curator asks for JSON, and the system prompt says which.
+ * @param {{ messages?: unknown }} options - Call options.
+ * @returns {string} The answer to yield.
+ */
+function curationAnswer(options) {
+  const body = JSON.stringify(options.messages ?? [])
+  const ids = [...body.matchAll(/id:\s*(mem_[0-9a-f-]+)/g)].map(match => match[1])
+  const items = ids.map((id, index) => index === 0
+    ? { id, verdict: 'reusable', reason: '换个会话仍然成立', group: '整理产出的知识' }
+    : { id, verdict: 'oneoff', reason: '只对本次任务成立', group: '' })
+  return JSON.stringify({ items })
+}
+
+/**
  * A streaming LLM stub that answers with one fixed record.
  * @param {string} text - Text the stream yields.
  * @param {{ calls: Record<string, unknown>[] }} sink - Collector for call options.
@@ -104,7 +119,8 @@ function llmStub(text, sink) {
   return {
     stream: async function* stream(options) {
       sink.calls.push(options)
-      yield { type: 'text-delta', text }
+      const answer = String(options.system ?? '').includes('知识库整理器') ? curationAnswer(options) : text
+      yield { type: 'text-delta', text: answer }
       yield { type: 'usage', usage: { inputTokens: 10, outputTokens: 20 } }
       yield { type: 'finish', reason: { kind: 'stop' } }
     },
@@ -173,6 +189,9 @@ const validated = Config['~standard'].validate({
   // Small enough that an oversized body is cheap to produce in a test, and
   // large enough for every other record this file writes.
   maxEntryChars: 200,
+  // Pinned so the panel's curation op has a route without a session.
+  summarizerProvider: 'test-provider',
+  summarizerModel: 'test-model',
   conversationGroupName: '对话记忆',
   knowledgeGroupName: '知识库',
 })
@@ -189,9 +208,10 @@ const panelRoute = routes.find(entry => entry.kind === 'prefix')
 const indexSection = () => routes.find(entry => entry.kind === 'prompt-section').section
 
 console.log('registration')
-check('six tools are registered', () => {
+check('seven tools are registered', () => {
   assert.deepEqual([...harness.tools.keys()].sort(), [
-    'memory_apply', 'memory_assign', 'memory_group', 'memory_recall', 'memory_summarize', 'memory_write',
+    'memory_apply', 'memory_assign', 'memory_curate', 'memory_group', 'memory_recall',
+    'memory_summarize', 'memory_write',
   ])
 })
 check('a session/event listener is installed', () => {
@@ -829,7 +849,7 @@ console.log('browser half')
   const sampleEntry = {
     id: 'mem-1', groupId: 'grp-1', groupName: '知识库', scope: 'knowledge', assigned: 'group',
     title: '构建约定', content: '**统一用 pnpm**。', kind: 'decision', source: 'manual', sessionId: null,
-    tags: ['人工输入', '构建'], hidden: false, priority: 90, autoTag: '人工输入', createdAt: 1, updatedAt: 2,
+    tags: ['人工输入', '构建'], hidden: false, priority: 90, base: true, autoTag: '人工输入', createdAt: 1, updatedAt: 2,
   }
   globalThis.fetch = async (url) => {
     const op = new URL(String(url)).searchParams.get('op')
@@ -925,7 +945,9 @@ console.log('browser half')
   check('a prioritised memory shows its priority on the tile', () => {
     // Expanded, because the badge lives inside the Tile component rather than
     // in the element the board itself builds.
-    assert.ok(JSON.stringify(allElements(boardTree)).includes('P90'), 'the tile must mark a raised priority')
+    const tree = JSON.stringify(allElements(boardTree))
+    assert.ok(tree.includes('P90'), 'the tile must mark a raised priority')
+    assert.ok(tree.includes('baseBadge'), 'and mark a base-prompt memory')
   })
   check('board tiles are operable without a pointer', () => {
     const tile = withClass(boardTree, 'dsmv-tile')[0]
@@ -1312,6 +1334,122 @@ check('the prompt index is a catalogue, not just a table of contents', () => {
   assert.ok(text.includes('高优先级的重要结论。'), 'titles are listed so the model can choose')
   assert.ok(text.includes('memory_apply'), 'and the index says how to act on it')
   assert.ok(text.includes('priority=0-100'), 'including how to raise a memory')
+})
+
+console.log('base prompt layer, custom quota and AI curation')
+
+// The base layer is a floor, not a preference: it reaches a conversation that
+// applies nothing at all, and it is not billed against that conversation.
+const baseGroup = await tool('memory_group').execute({ action: 'create', name: '底层样本', scope: 'knowledge' }, exec)
+const baseEntry = await tool('memory_write').execute({
+  group: '底层样本',
+  entries: [{ content: '底层约定：所有编码任务都要用 git 留痕。', base: true }],
+}, exec)
+check('a memory can be written straight into the base layer', () => {
+  assert.equal(baseEntry.entries[0].base, true)
+})
+const baseOnly = await request(panelRoute, 'GET', '/memory-vault?op=apply.get&sessionId=session-base-only')
+check('the base layer is injected separately from the applied quota', () => {
+  assert.ok(baseOnly.payload.result.base.some(entry => entry.id === baseEntry.entries[0].id))
+  assert.ok(!baseOnly.payload.result.entries.some(entry => entry.id === baseEntry.entries[0].id))
+})
+const unflagged = await tool('memory_assign').execute({ ids: [baseEntry.entries[0].id], base: false }, exec)
+check('the base flag can be taken off again', () => {
+  assert.equal(unflagged.base, false)
+  assert.equal(unflagged.entries[0].base, false)
+})
+await tool('memory_assign').execute({ ids: [baseEntry.entries[0].id], base: true }, exec)
+check('the base flag round-trips', () => {
+  assert.equal(renderOf('memory_assign', { base: true },
+    { mode: 'base', base: true, entries: [baseEntry.entries[0]], missing: [] }).includes('底层'), true)
+})
+
+// The quota is editable at runtime rather than only from a profile file.
+const quotaBefore = (await request(panelRoute, 'GET', '/memory-vault?op=state')).payload.result.apply
+check('the panel can read the resolved quota', () => {
+  assert.ok(Number.isFinite(quotaBefore.maxEntries))
+  assert.ok(quotaBefore.defaultsApplied.maxEntries > 0)
+})
+const quotaSet = await request(panelRoute, 'POST', '/memory-vault', { op: 'settings.set', maxEntries: 3 })
+check('the knowledge quota can be changed without a restart', () => {
+  assert.equal(quotaSet.payload.result.limits.maxEntries, 3)
+})
+const capped = await request(panelRoute, 'GET', '/memory-vault?op=apply.get&sessionId=session-priority')
+check('the plan uses the custom quota', () => {
+  assert.equal(capped.payload.result.maxEntries, 3)
+  assert.equal(capped.payload.result.entries.length, 3)
+})
+check('the base layer still rides outside that quota', () => {
+  assert.ok(capped.payload.result.base.some(entry => entry.id === baseEntry.entries[0].id))
+  assert.equal(capped.payload.result.truncated, true)
+})
+const quotaBad = await request(panelRoute, 'POST', '/memory-vault', { op: 'settings.set', maxEntries: 'many' })
+check('a non-numeric quota is refused', () => {
+  assert.equal(quotaBad.status, 400)
+})
+const quotaRestored = await request(panelRoute, 'POST', '/memory-vault', {
+  op: 'settings.set', maxEntries: quotaBefore.defaultsApplied.maxEntries,
+})
+check('the quota can be restored to the deployment default', () => {
+  assert.equal(quotaRestored.payload.result.limits.maxEntries, quotaBefore.defaultsApplied.maxEntries)
+})
+
+// AI curation: one model call sorts reusable knowledge from one-off notes.
+const curation = await tool('memory_curate').execute({ action: 'review', group: '优先级测试', limit: 3 }, exec)
+check('a curation review decides without writing', () => {
+  assert.equal(curation.mode, 'review')
+  assert.equal(curation.applied.length, 0)
+  assert.equal(curation.verdicts.length, 3)
+  assert.ok(curation.verdicts.some(item => item.verdict === 'reusable'))
+  assert.ok(curation.verdicts.some(item => item.verdict === 'oneoff'))
+})
+check('the review names the group a reusable memory should move to', () => {
+  const reusable = curation.verdicts.find(item => item.verdict === 'reusable')
+  assert.equal(reusable.group, '整理产出的知识')
+})
+const beforeApply = await tool('memory_recall').execute({ group: '优先级测试', limit: 3 }, exec)
+check('the review leaves the memory where it was', () => {
+  assert.ok(beforeApply.entries.every(entry => entry.groupName === '优先级测试'))
+})
+const curationApplied = await tool('memory_curate').execute({
+  action: 'apply', group: '优先级测试', limit: 3, applyPriority: true,
+}, exec)
+check('applying the verdicts files reusable knowledge and demotes one-off notes', () => {
+  assert.equal(curationApplied.mode, 'applied')
+  const reusable = curationApplied.applied.find(item => item.verdict === 'reusable')
+  const oneoff = curationApplied.applied.find(item => item.verdict === 'oneoff')
+  assert.equal(reusable.scope, 'knowledge')
+  assert.equal(oneoff.scope, 'conversation')
+})
+const afterCuration = await tool('memory_group').execute({ action: 'list' }, exec)
+check('curation creates the group it decided on', () => {
+  assert.ok(afterCuration.groups.some(group => group.name === '整理产出的知识'))
+})
+const movedItem = curationApplied.applied.find(item => item.verdict === 'reusable')
+const movedEntry = movedItem === undefined
+  ? { entries: [{ scope: 'missing', priority: 0 }] }
+  : await tool('memory_recall').execute({ id: movedItem.id }, exec)
+check('a curated reusable memory carries the raised priority', () => {
+  assert.equal(movedEntry.entries[0].scope, 'knowledge')
+  assert.ok(Number(movedEntry.entries[0].priority) >= 60, String(movedEntry.entries[0].priority))
+})
+const curationRendered = renderOf('memory_curate', { action: 'review' }, curation)
+check('the curation result separates the two verdicts', () => {
+  assert.ok(curationRendered.includes('可复用'))
+  assert.ok(curationRendered.includes('单次性'))
+})
+const panelCuration = await request(panelRoute, 'POST', '/memory-vault', {
+  op: 'curate', group: '优先级测试', limit: 2, apply: false,
+})
+check('the panel can run a curation review', () => {
+  assert.equal(panelCuration.status, 200)
+  assert.equal(panelCuration.payload.result.mode, 'review')
+  assert.equal(panelCuration.payload.result.verdicts.length, 2)
+})
+const emptyCuration = await tool('memory_curate').execute({ action: 'review', ids: ['mem_missing'] }, exec)
+  .then(() => 'resolved', (error) => error.message)
+check('a curation over nothing explains why instead of failing silently', () => {
+  assert.ok(String(emptyCuration).includes('没有可整理的记忆'), String(emptyCuration))
 })
 
 console.log('disposal')
