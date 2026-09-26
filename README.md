@@ -46,13 +46,13 @@ pnpm dsh plugin --profile web remove dsh-memory-vault
 | `memory_group` | List, create, update, or delete memory groups, switch a whole group's assignment, or `bind` / `unbind` where this conversation's summaries are filed. |
 | `memory_write` | Write one or more memories, optionally assigning them in the same call. Bodies accept Markdown and LaTeX. |
 | `memory_recall` | Keyword search, read one entry by id, or list by group, assignment, or tag; `includeHidden` reaches hidden memories too. |
-| `memory_assign` | Reassign, move between groups, or hide and restore memories. |
-| `memory_apply` | Apply memory groups to the current session (cross-conversation sync): list / set / reset. |
+| `memory_assign` | Reassign, move between groups, set a **priority** (0–100), or hide and restore memories. |
+| `memory_apply` | Apply knowledge to the current conversation (cross-conversation sync): list / set / reset; `groups` applies whole groups, `entries` applies single memories. |
 | `memory_summarize` | Settle this conversation into one memory. With `content`, your text is stored as written; without it, the plugin calls a model over the **unsummarized increment**. |
 
 ### Standing memory index
 
-The plugin registers one system-prompt section naming the groups, their assignments, their entry counts, their auto-summary switch, the group this session is bound to, and **the knowledge this session has applied** (below). The index is name-sorted and size-capped, so writing a memory does not reshuffle the prompt prefix.
+The plugin registers one system-prompt section naming the groups, their assignments, their entry counts, their priorities, their auto-summary switch, **each group's highest-priority memory titles** (see "Knowledge priority and the knowledge index"), the group this session is bound to, and **the knowledge this session has applied**. The index is priority-sorted and size-capped — priority is set deliberately, so the order only moves when somebody moves it and writing a memory does not reshuffle the prompt prefix.
 
 ## Automatic summarization
 
@@ -64,18 +64,51 @@ The plugin registers one system-prompt section naming the groups, their assignme
 
 > Automatic summarization spends real model quota. Set `autoSummary` to `false` to keep only manual summarization, or `summarizer` to `off`.
 
-## Knowledge: the conversation's third tab
+## Knowledge: choose it when the conversation starts, keep tuning it after
 
-Beside **Chat** and **Trajectory**, the conversation header carries a **Knowledge** tab (a `conversation.view` entry with `order: 20`, after chat at 0 and the trajectory at 10). It is not a setting but a panel of its own for the conversation at hand:
+The memory choice appears in **two places**, covering the whole life of a conversation:
+
+**On the new-conversation screen, above the composer.** The shell renders `conversation.input.dock` for a blank session too, while conversation views are not rendered at all until a session has content — so this case gets its own row: one pill per memory group, lit when applied, with `Use defaults` to clear the choice. It reads the session snapshot it receives and **hides itself the moment the conversation starts**, handing over to the tab below.
+
+**Once the conversation has started: the 知识 tab** beside **Chat** and **Trajectory**, a `conversation.view` entry at `order: 20` (after chat at 0 and the trajectory at 10):
 
 - **Two drop areas**: `Applied` and `Available`. Memory groups appear as tiles, and **dragging a tile across the two areas applies or removes it**. Clicking a tile toggles it as well, so touch and keyboard readers are not locked out of the interaction.
 - A **group tile** shows its name, its assignment, and how many memories it holds; drop it into `Applied` to plug the whole group into this conversation.
 - Header actions: `Use defaults`, `Apply nothing` (an explicit empty set), and refresh.
 - Below, the panel lists **the memories it actually injects**, rendered with the shell's own Markdown/KaTeX — literally what the model can see — and says so when the injection cap is reached.
 
+Both surfaces read and write **the same per-session state**, so a group chosen on the creation screen is exactly what the tab shows once the conversation begins.
+
 Three outcomes stay distinct: **apply a set**, **apply nothing on purpose**, and **fall back to the default**. By default (`applyByDefault: true`) a new conversation applies `applyDefaultGroups` (default `["知识库"]`); an empty knowledge base injects nothing, so the default costs nothing. Injection is capped (`applyMaxEntries` / `applyMaxChars`).
 
 That is the cross-conversation sync: a conclusion settled into the knowledge base from conversation A is available in conversation B immediately. The model does the same thing through `memory_apply`.
+
+## Knowledge priority and the knowledge index
+
+The injection budget is finite (12 memories / 2400 characters by default), so *which* memory gets in has to be decided by importance rather than by when it happened to be written.
+
+**Priority is 0–100, one scale for groups and memories alike:**
+
+- In the **prompt index**, groups sort by priority and so do the memories inside them.
+- In the **injection plan**, the highest priority takes the budget first, so an important older conclusion is not starved by newer noise.
+- A memory a conversation **applied by hand always comes first**, ahead of anything inferred.
+- Set it with `memory_assign priority=` (one memory) or `memory_group action=update priority=` (a whole group); in the panel, pick a level on the priority row of a memory, or step a group by 10 with −/+ in Manage groups.
+
+**The knowledge index** is what that section of the prompt now lists:
+
+```
+知识库（2 组）：
+- DSH 插件开发 [DSH, 插件开发] · P40 · 组内 16 条 — 为 DSH 开发插件的可复用知识
+  · [P90] 界面必须用外壳自己的基元与设计令牌
+  · [P70] Host 半要重启、浏览器半会热更
+  · …
+```
+
+Beside each group's name and count, the index lists that group's **highest-priority memory titles** (`indexEntryTitles`, 5 by default, 0 to switch the catalogue off). That is what lets the model judge whether a group is worth reading — or worth applying to this conversation — without spending a search on it first: the index stops being a table of contents and becomes a menu, which is the point of having one.
+
+The section ends by naming the step it can take next: `memory_recall` for the bodies, `memory_apply groups=[...]` to plug in a whole group, `memory_apply entries=[...]` to carry a single memory across, and `memory_assign priority=` to raise one.
+
+On the panel side a tile shows a `P90` badge when its priority is raised, and the 知识 tab marks every injected memory as **picked here** or **via group**, so why a memory is in the prompt is never a mystery.
 
 ## Web panel
 
@@ -143,6 +176,7 @@ Override the shipped layer from `~/.dsh/profiles/web/cordis.patch.yml`:
     summarizerTimeoutMs: 120000
     injectIndex: true               # inject the memory index section
     injectMaxGroups: 24             # groups listed at most
+    indexEntryTitles: 5             # memory titles listed per group; 0 turns the catalogue off
     transcriptRetention: 400        # summarized transcript rows kept per session
     searchLimit: 20                 # default `memory_recall` result cap
     maxEntryChars: 20000            # longest entry body
@@ -181,7 +215,7 @@ Remove-Item -Recurse "$env:USERPROFILE\.dsh\memory-vault"   # the memories, opti
 ## Development
 
 ```powershell
-# Standalone smoke test: drives tools, tags, hiding, knowledge application, watermark summarization, the panel route and the request boundary on a mock ctx, then renders the knowledge view and the board for real (105 checks)
+# Standalone smoke test: drives tools, priority, the knowledge index, per-memory application, hiding, watermark summarization, the panel route and the request boundary on a mock ctx, then renders the knowledge view, the board and the new-conversation memory strip for real (131 checks)
 cd <this plugin directory>
 node tests/smoke.mjs
 ```

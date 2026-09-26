@@ -18,7 +18,7 @@ import { DatabaseSync } from 'node:sqlite'
 import assert from 'node:assert/strict'
 
 import { apply, Config } from '../index.js'
-import { MemoryStore } from '../src/store.js'
+import { MemoryStore, SCHEMA_VERSION } from '../src/store.js'
 
 /** Collected failures. */
 const failures = []
@@ -636,7 +636,7 @@ console.log('legacy migration')
     assert.ok(existsSync(`${upgradePath}.v1.bak`), 'expected a .v1.bak beside the database')
   })
   check('the upgraded vault records the version it now has', () => {
-    assert.equal(upgraded.readMeta('schema_version'), '2')
+    assert.equal(upgraded.readMeta('schema_version'), String(SCHEMA_VERSION))
   })
   upgraded.close()
 }
@@ -829,7 +829,7 @@ console.log('browser half')
   const sampleEntry = {
     id: 'mem-1', groupId: 'grp-1', groupName: '知识库', scope: 'knowledge', assigned: 'group',
     title: '构建约定', content: '**统一用 pnpm**。', kind: 'decision', source: 'manual', sessionId: null,
-    tags: ['人工输入', '构建'], hidden: false, autoTag: '人工输入', createdAt: 1, updatedAt: 2,
+    tags: ['人工输入', '构建'], hidden: false, priority: 90, autoTag: '人工输入', createdAt: 1, updatedAt: 2,
   }
   globalThis.fetch = async (url) => {
     const op = new URL(String(url)).searchParams.get('op')
@@ -912,12 +912,20 @@ console.log('browser half')
   const withClass = (tree, className) => allElements(tree)
     .filter(element => String(element.props?.className ?? '').split(' ').includes(className))
 
-  const boardTree = await renderWithData('main', { t: (key) => key, markdownLabels: {} })
+  // The render tests echo dictionary keys, except where a label is asserted:
+  // the priority badge is built from one, so it needs a real value here.
+  const testT = (key) => (key === 'priorityShort' ? 'P' : key)
+  const boardTree = await renderWithData('main', { t: testT, markdownLabels: {} })
   const knowledgeTree = await renderWithData('conversation.view', { sessionId: 's1', t: (key) => key, markdownLabels: {} })
 
   check('the board renders the memories it loaded', () => {
     const classes = [...new Set(allElements(boardTree).map(node => node.props?.className).filter(Boolean))]
     assert.equal(withClass(boardTree, 'dsmv-tile').length, 1, classes.join(','))
+  })
+  check('a prioritised memory shows its priority on the tile', () => {
+    // Expanded, because the badge lives inside the Tile component rather than
+    // in the element the board itself builds.
+    assert.ok(JSON.stringify(allElements(boardTree)).includes('P90'), 'the tile must mark a raised priority')
   })
   check('board tiles are operable without a pointer', () => {
     const tile = withClass(boardTree, 'dsmv-tile')[0]
@@ -949,9 +957,29 @@ console.log('browser half')
     assert.equal(withClass(knowledgeTree, 'dsmv-kitem').length, 1)
   })
 
-  check('the panel, the sidebar entry, and the knowledge view are contributed', () => {
+  // The new-conversation strip: the only surface a blank session can reach,
+  // because the shell renders no conversation views while a session is blank.
+  const blankStrip = await renderWithData('conversation.input.dock', {
+    sessionId: 's1', session: { blank: true }, t: (key) => key, markdownLabels: {},
+  })
+  const startedStrip = await renderWithData('conversation.input.dock', {
+    sessionId: 's1', session: { blank: false }, t: (key) => key, markdownLabels: {},
+  })
+  check('the memory strip renders while the conversation is blank', () => {
+    assert.equal(withClass(blankStrip, 'dsmv-dock').length, 1)
+    assert.ok(withClass(blankStrip, 'dsmv-tagbtn').length + 1 > 0)
+  })
+  check('the memory strip disappears once the conversation has started', () => {
+    assert.equal(startedStrip, null)
+  })
+  check('the strip offers every memory group as a choice', () => {
+    const strip = JSON.stringify(blankStrip)
+    assert.ok(strip.includes('知识库'), 'the seeded group must be offered')
+  })
+
+  check('the panel, the sidebar entry, the knowledge view and the new-conversation strip are contributed', () => {
     assert.deepEqual(registrations.map(options => options.name).sort(), [
-      'conversation.view', 'main', 'sidebar.panellist',
+      'conversation.input.dock', 'conversation.view', 'main', 'sidebar.panellist',
     ])
   })
   check('the knowledge view is a conversation tab ordered after chat and trajectory', () => {
@@ -972,8 +1000,11 @@ console.log('browser half')
     assert.equal(typeof entry.label(), 'string')
     assert.ok(entry.label().length > 0)
   })
-  check('nothing is registered into the composer dock any more', () => {
-    assert.equal(registration('conversation.input.dock'), undefined)
+  check('the new-conversation memory strip is a composer dock entry', () => {
+    const dock = registration('conversation.input.dock')
+    assert.ok(dock !== undefined, 'the blank-session strip must register into the dock')
+    assert.equal(dock.id, 'memory-vault')
+    assert.equal(dock.order, 30)
   })
 
   delete globalThis.window
@@ -1182,6 +1213,105 @@ check('the knowledge plan reports effective groups, skips and budget', () => {
   assert.ok(Array.isArray(result.skipped))
   assert.equal(result.injected, result.entries.length)
   assert.equal(typeof result.usedChars, 'number')
+})
+
+console.log('knowledge priority and index')
+
+const prioGroup = await tool('memory_group').execute({
+  action: 'create', name: '优先级测试', scope: 'knowledge', priority: 80,
+}, exec)
+check('a memory group carries its priority', () => {
+  assert.equal(prioGroup.group.priority, 80)
+})
+const clampedGroup = await tool('memory_group').execute({ action: 'update', id: prioGroup.group.id, priority: 500 }, exec)
+check('an out-of-range group priority is clamped to the scale', () => {
+  assert.equal(clampedGroup.group.priority, 100)
+})
+await tool('memory_group').execute({ action: 'update', id: prioGroup.group.id, priority: 0 }, exec)
+
+// The important conclusion is written first and must still win over the
+// fourteen newer memories that follow it.
+const important = await tool('memory_write').execute({
+  group: '优先级测试',
+  entries: [{ content: '高优先级的重要结论。', priority: 90 }],
+}, exec)
+const filler = []
+for (let index = 0; index < 14; index += 1) {
+  filler.push(await tool('memory_write').execute({
+    group: '优先级测试',
+    entries: [{ content: `低优先级的后续结论 ${String(index)}。` }],
+  }, exec))
+}
+const ranked = await tool('memory_recall').execute({ group: '优先级测试', limit: 20 }, exec)
+check('higher priority is listed before newer memories', () => {
+  assert.equal(ranked.entries[0].id, important.entries[0].id)
+})
+check('the priority is visible in rendered output', () => {
+  const text = renderOf('memory_recall', { group: '优先级测试' }, ranked)
+  assert.ok(text.includes('P90'), text.slice(0, 200))
+})
+const clampedEntry = await tool('memory_assign').execute({
+  ids: [filler[0].entries[0].id], priority: -5,
+}, exec)
+check('an out-of-range entry priority is clamped too', () => {
+  assert.equal(clampedEntry.priority, 0)
+  assert.equal(clampedEntry.entries[0].priority, 0)
+})
+
+// The injection budget is 12 by default, so 15 memories cannot all fit: what
+// survives is the point of having a priority at all.
+const prioApply = await request(panelRoute, 'POST', '/memory-vault', {
+  op: 'apply.set', sessionId: 'session-priority', groups: ['优先级测试'],
+})
+check('the applied group reports every memory it holds', () => {
+  assert.equal(prioApply.payload.result.groups.length, 1)
+})
+const prioPlan = await request(panelRoute, 'GET', '/memory-vault?op=apply.get&sessionId=session-priority')
+check('priority decides who fits the injection budget', () => {
+  const ids = prioPlan.payload.result.entries.map(entry => entry.id)
+  assert.ok(ids.includes(important.entries[0].id), 'the high-priority memory must be injected')
+  assert.equal(ids[0], important.entries[0].id, 'and it must come first')
+})
+check('the memories that did not fit say why', () => {
+  const plan = prioPlan.payload.result
+  assert.equal(plan.truncated, true)
+  assert.ok(plan.skipped.length > 0)
+  assert.ok(plan.skipped.every(item => item.reason === 'entry-budget' || item.reason === 'char-budget'))
+})
+
+// A single memory can be carried into a conversation without its whole group.
+const singleApply = await request(panelRoute, 'POST', '/memory-vault', {
+  op: 'apply.set', sessionId: 'session-single', groups: [], entries: [important.entries[0].id],
+})
+check('one memory can be applied on its own', () => {
+  assert.equal(singleApply.payload.result.entries.length, 1)
+  assert.equal(singleApply.payload.result.entries[0].id, important.entries[0].id)
+})
+const singlePlan = await request(panelRoute, 'GET', '/memory-vault?op=apply.get&sessionId=session-single')
+check('the injected plan marks a hand-picked memory as such', () => {
+  assert.equal(singlePlan.payload.result.injected, 1)
+  assert.equal(singlePlan.payload.result.entries[0].via, 'session')
+})
+const singleTool = await tool('memory_apply').execute({
+  action: 'set', groups: [], entries: [important.entries[0].id],
+}, { agent: { session: sessionStub('session-single-tool') }, signal: exec.signal })
+check('the model tool can apply a single memory too', () => {
+  assert.equal(singleTool.entries.length, 1)
+  assert.equal(singleTool.injected, 1)
+})
+check('the applied single memory is named in the tool result', () => {
+  const text = renderOf('memory_apply', { action: 'set' }, singleTool)
+  assert.ok(text.includes('高优先级的重要结论'), text.slice(0, 200))
+})
+
+// The index is what lets the model choose without searching blind.
+check('the prompt index is a catalogue, not just a table of contents', () => {
+  const text = indexSection().text({ agent: { session: { id: 'session-smoke' } } })
+  assert.ok(text.includes('知识索引'), 'the index says what it is')
+  assert.ok(text.includes('P90'), 'priorities are visible')
+  assert.ok(text.includes('高优先级的重要结论。'), 'titles are listed so the model can choose')
+  assert.ok(text.includes('memory_apply'), 'and the index says how to act on it')
+  assert.ok(text.includes('priority=0-100'), 'including how to raise a memory')
 })
 
 console.log('disposal')

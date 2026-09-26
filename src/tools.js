@@ -11,7 +11,7 @@
  * @module dsh-memory-vault/src/tools
  */
 
-import { ENTRY_KINDS, SCOPES } from './store.js'
+import { ENTRY_KINDS, SCOPES, normalizePriority } from './store.js'
 import { validateEntryBatch } from './policy.js'
 
 /** Output declaration shared by every tool: an open object the renderer turns into text. */
@@ -53,10 +53,11 @@ function entryLine(entry, withContent = true) {
   const assignment = entry.scope === 'knowledge' ? '知识库' : '对话记忆'
   const manual = entry.assigned === 'manual' ? '（手动）' : ''
   const hidden = entry.hidden === true ? '（已隐藏）' : ''
+  const priority = Number(entry.priority ?? 0) > 0 ? ` · P${String(entry.priority)}` : ''
   const group = entry.groupName === undefined || entry.groupName === null || entry.groupName === assignment
     ? ''
     : ` · 记忆组「${entry.groupName}」`
-  const head = `- ${entry.id} · 归属 ${assignment}${manual}${hidden}${group} · ${entry.kind}${tags}`
+  const head = `- ${entry.id} · 归属 ${assignment}${manual}${hidden}${group} · ${entry.kind}${priority}${tags}`
   const title = entry.title === '' ? '' : `\n  标题: ${entry.title}`
   return withContent ? `${head}${title}\n  ${entry.content.replace(/\n/g, '\n  ')}` : `${head}${title}`
 }
@@ -70,8 +71,9 @@ function entryLine(entry, withContent = true) {
 function groupLine(group) {
   const tags = group.tags.length === 0 ? '' : ` [${group.tags.join(', ')}]`
   const auto = group.autoSummary ? ' · 自动总结' : ''
+  const priority = Number(group.priority ?? 0) > 0 ? ` · P${String(group.priority)}` : ''
   const description = group.description === '' ? '' : ` — ${group.description}`
-  return `- ${group.id} · ${group.scope === 'knowledge' ? '知识库' : '对话记忆'} · ${group.name}${tags}${auto} · 组内 ${group.entryCount} 条${description}`
+  return `- ${group.id} · ${group.scope === 'knowledge' ? '知识库' : '对话记忆'} · ${group.name}${tags}${auto}${priority} · 组内 ${group.entryCount} 条${description}`
 }
 
 /**
@@ -104,19 +106,25 @@ export function buildTools({ store, config, summarize, notify }) {
    */
   const describeApplications = (sessionId) => {
     const defaults = config.applyByDefault ? config.applyDefaultGroups : []
-    const effective = store.effectiveApplications(sessionId, defaults)
-    const read = store.appliedEntries({
-      groupIds: effective.groups.map(group => group.id),
+    // The tools read the same injection plan the prompt renderer reads, so a
+    // tool result can never claim a memory the model did not receive.
+    const plan = store.planInjection({
+      sessionId,
+      defaults,
       maxEntries: config.applyMaxEntries,
       maxChars: config.applyMaxChars,
+      enabled: config.injectIndex,
     })
     return {
-      source: effective.source,
-      groups: effective.groups,
+      source: plan.source,
+      groups: plan.groups,
+      entries: plan.entries,
       defaults: config.applyDefaultGroups,
       applyByDefault: config.applyByDefault,
-      injected: read.entries.length,
-      truncated: read.truncated,
+      injected: plan.entries.length,
+      truncated: plan.truncated,
+      maxEntries: plan.maxEntries,
+      maxChars: plan.maxChars,
     }
   }
 
@@ -145,6 +153,10 @@ export function buildTools({ store, config, summarize, notify }) {
           type: 'boolean',
           description: '是否把本会话的阈值自动总结写入该组（通常只对一个对话记忆组开启）。',
         },
+        priority: {
+          type: 'number',
+          description: '记忆组优先级 0-100，越大越优先：索引里排得更前，注入预算不够时先取该组的记忆。',
+        },
         sessionId: {
           type: 'string',
           description: '可选的会话 id：把该组限定为这个会话的对话记忆容器。',
@@ -169,6 +181,7 @@ export function buildTools({ store, config, summarize, notify }) {
             tags: args.tags ?? [],
             sessionId,
             autoSummary: args.autoSummary === true,
+            priority: args.priority ?? 0,
           })
           notify()
           return { action: 'create', group }
@@ -186,6 +199,7 @@ export function buildTools({ store, config, summarize, notify }) {
             ...(args.description === undefined ? {} : { description: args.description }),
             ...(args.tags === undefined ? {} : { tags: args.tags }),
             ...(args.autoSummary === undefined ? {} : { autoSummary: args.autoSummary }),
+            ...(args.priority === undefined ? {} : { priority: args.priority }),
           })
           notify()
           return { action: args.action, group, movedEntries }
@@ -273,6 +287,10 @@ export function buildTools({ store, config, summarize, notify }) {
                 type: 'string',
                 enum: ENTRY_KINDS,
                 description: '条目类型：summary 摘要、fact 事实、preference 偏好、decision 决策、task 任务、note 其他。',
+              },
+              priority: {
+                type: 'number',
+                description: '优先级 0-100，越大越优先；写入重要结论时给高分，注入预算不够时它不会被新记忆挤掉。',
               },
               tags: { type: 'array', items: { type: 'string' }, description: '条目标签。' },
             },
@@ -383,10 +401,11 @@ export function buildTools({ store, config, summarize, notify }) {
   definitions.push(tool({
     name: 'memory_assign',
     description: [
-      '调整记忆的归档状态：把指定条目（或整个记忆组）在「对话记忆」与「知识库」之间移动、改挂到另一个记忆组，或把没用的记忆隐藏起来。',
+      '调整记忆的归档状态：把指定条目（或整个记忆组）在「对话记忆」与「知识库」之间移动、改挂到另一个记忆组、设置优先级，或把没用的记忆隐藏起来。',
       '归属的移动是显式决定：被移动的条目会标记为手动归属，之后不再随记忆组的归属变化而整体移动。',
+      '优先级是 0-100，越大越优先：决定记忆在提示索引里的排序，以及注入预算不够时谁先进入系统提示——把真正重要的结论调高，它就不会被后来的新记忆挤掉。',
       '隐藏是可逆的下架：条目、标签与记忆组都保留，但默认不再出现在检索与提示索引里，随时可以恢复。',
-      '典型用法：把当前会话里已沉淀为通用结论的记忆提升到知识库；把过时或走错方向的记忆隐藏掉。',
+      '典型用法：把当前会话里已沉淀为通用结论的记忆提升到知识库；把反复要用到的结论调到高优先级；把过时或走错方向的记忆隐藏掉。',
     ].join('\n'),
     parameters: {
       type: 'object',
@@ -404,9 +423,31 @@ export function buildTools({ store, config, summarize, notify }) {
           type: 'boolean',
           description: '配合 ids 使用：true 隐藏这些记忆，false 恢复显示。给出时只改可见性，不动归属。',
         },
+        priority: {
+          type: 'number',
+          description: '配合 ids 使用：把这批记忆的优先级设为 0-100。给出时只改优先级，不动归属。',
+        },
       },
     },
     execute: async (args) => {
+      if (args.priority !== undefined) {
+        if (!Array.isArray(args.ids) || args.ids.length === 0) {
+          throw new Error('memory_assign 用 priority 调整优先级时，必须给出 ids')
+        }
+        /** @type {Record<string, unknown>[]} */
+        const entries = []
+        /** @type {string[]} */
+        const missing = []
+        for (const id of args.ids) {
+          if (store.findEntry(id) === undefined) {
+            missing.push(id)
+            continue
+          }
+          entries.push(store.updateEntry(id, { priority: args.priority }))
+        }
+        notify()
+        return { mode: 'priority', priority: normalizePriority(args.priority), entries, missing }
+      }
       if (args.hidden !== undefined) {
         if (!Array.isArray(args.ids) || args.ids.length === 0) {
           throw new Error('memory_assign 用 hidden 调整可见性时，必须给出 ids')
@@ -436,6 +477,13 @@ export function buildTools({ store, config, summarize, notify }) {
       return { mode: 'entries', ...result }
     },
     render: (_args, value) => {
+      if (value.mode === 'priority') {
+        const entries = /** @type {Record<string, any>[]} */ (value.entries)
+        const missing = /** @type {string[]} */ (value.missing)
+        const absent = missing.length === 0 ? '' : `\n未找到 ${missing.length} 个 id：${missing.join(', ')}`
+        return `已把 ${entries.length} 条记忆的优先级设为 P${String(value.priority)}`
+          + `（越高越优先：索引里排得更前，注入预算不够时先取）：\n${entries.map(entry => entryLine(entry, false)).join('\n')}${absent}`
+      }
       if (value.mode === 'hidden') {
         const entries = /** @type {Record<string, any>[]} */ (value.entries)
         const missing = /** @type {string[]} */ (value.missing)
@@ -473,6 +521,11 @@ export function buildTools({ store, config, summarize, notify }) {
           items: { type: 'string' },
           description: 'action=set 时的记忆组名称或 id；空数组表示明确不应用任何知识。',
         },
+        entries: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'action=set 时额外按条目应用的单条记忆 id：把一条具体结论接进本会话，而不必应用它所在的整个组。',
+        },
       },
       required: ['action'],
     },
@@ -481,7 +534,7 @@ export function buildTools({ store, config, summarize, notify }) {
       const sessionId = exec.agent.session.id
       if (args.action === 'set') {
         if (!Array.isArray(args.groups)) throw new Error('action=set 需要 `groups`')
-        store.setApplications(sessionId, args.groups)
+        store.setApplications(sessionId, args.groups, Array.isArray(args.entries) ? args.entries : [])
         notify()
         return { action: 'set', sessionId, ...describeApplications(sessionId) }
       }
@@ -494,11 +547,12 @@ export function buildTools({ store, config, summarize, notify }) {
     },
     render: (_args, value) => {
       const groups = /** @type {Record<string, any>[]} */ (value.groups)
+      const single = /** @type {Record<string, any>[]} */ (value.entries ?? [])
       const defaults = /** @type {string[]} */ (value.defaults)
       const origin = value.source === 'explicit'
         ? '本会话选择'
         : value.source === 'default' ? '部署默认' : '无'
-      if (groups.length === 0) {
+      if (groups.length === 0 && single.length === 0) {
         return [
           '本会话当前没有应用任何记忆组。',
           value.applyByDefault === true
@@ -508,8 +562,12 @@ export function buildTools({ store, config, summarize, notify }) {
       }
       return [
         `本会话应用了 ${groups.length} 个记忆组（来源：${origin}）：${groups.map(group => group.name).join('、')}`,
+        single.length === 0 ? '' : `另有单独应用的记忆 ${single.length} 条：`
+          + single.map(entry => entry.title === ''
+            ? String(entry.content).replace(/\s+/g, ' ').slice(0, 24)
+            : entry.title).join('、'),
         `已注入 ${String(value.injected)} 条记忆到系统提示${value.truncated === true ? '（已达上限，其余内容可用 memory_recall 检索）' : ''}。`,
-      ].join('\n')
+      ].filter(line => line !== '').join('\n')
     },
   }))
 

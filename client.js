@@ -143,6 +143,15 @@ window.__ModuleLoader__.load({
         bindLabel: '总结写入',
         bindDefault: '默认组',
         bindHint: '指定本会话的自动总结与默认手动总结写入哪个记忆组；与上面"应用哪些知识"是两件事。',
+        newChatLabel: '记忆',
+        newChatHint: '选中的记忆组会直接进入这个新对话的系统提示；不选则按默认设置。',
+        newChatManage: '对话开始后，可在顶部的「知识」页签里继续调整。',
+        newChatNone: '这个新对话还没有应用任何记忆组。',
+        priorityLabel: '优先级',
+        priorityHint: '越高越优先：在提示索引里排得更前，注入预算不够时先进入系统提示。',
+        priorityShort: 'P',
+        viaSession: '本会话指定',
+        viaGroup: '随组注入',
         hide: '隐藏',
         unhide: '恢复',
         hidden: '已隐藏',
@@ -252,6 +261,15 @@ window.__ModuleLoader__.load({
         bindLabel: 'Summaries go to',
         bindDefault: 'Default group',
         bindHint: 'Which group this conversation\'s summaries are filed into — a different question from which knowledge it reads.',
+        newChatLabel: 'Memory',
+        newChatHint: 'Checked groups go straight into this new conversation\'s system prompt; nothing checked means the deployment default applies.',
+        newChatManage: 'Once the conversation starts, the 知识 tab at the top continues the same choice.',
+        newChatNone: 'This new conversation applies no memory groups yet.',
+        priorityLabel: 'Priority',
+        priorityHint: 'Higher wins: it sorts earlier in the prompt index and is injected first when the budget is tight.',
+        priorityShort: 'P',
+        viaSession: 'picked here',
+        viaGroup: 'via group',
         hide: 'Hide',
         unhide: 'Restore',
         hidden: 'Hidden',
@@ -282,7 +300,7 @@ window.__ModuleLoader__.load({
     /** Stylesheet for the page, rendered as a React element so unmounting removes it. */
     function StyleSheet() {
       return h('style', null, `
-.dsmv {
+.dsmv, .dsmv-dock {
   --dsmv-ease-out: cubic-bezier(.23, 1, .32, 1);
   /* Type scales with the reader's text-size setting instead of a fixed px
      ladder, so the panel grows with the rest of the shell. */
@@ -293,8 +311,16 @@ window.__ModuleLoader__.load({
   --dsmv-lh-body: calc(var(--dsh-content-font-size, 14px) + 8px);
   --dsmv-lh-small: calc(var(--dsh-content-font-size, 14px) + 6px);
   --dsmv-material: var(--dsw-menu-backdrop-filter, blur(40px) saturate(150%));
-  height: 100%; display: flex; flex-direction: column;
   color: var(--dsw-alias-label-primary); font-family: var(--dsw-font-family);
+}
+.dsmv {
+  height: 100%; display: flex; flex-direction: column;
+}
+/* The new-conversation strip sits above the composer, so it flows instead of
+   filling: a panel that claimed the full height would push the composer away. */
+.dsmv-dock {
+  display: flex; flex-direction: column; gap: 6px; align-items: flex-start;
+  padding: 0 2px 6px; max-width: 100%;
 }
 .dsmv-scroll {
   flex: 1 1 auto; overflow: auto; padding: 20px 24px 32px; display: flex; flex-direction: column; gap: 14px;
@@ -722,6 +748,9 @@ window.__ModuleLoader__.load({
         h(TagRow, { entry, activeTags, onTag, max: 4 }),
         h('div', { className: 'dsmv-tile-foot' },
           entry.hidden === true ? h(Tag, { tone: 'warning' }, t('hidden')) : null,
+          Number(entry.priority ?? 0) > 0
+            ? h(Tag, { tone: 'info', title: t('priorityHint') }, `${t('priorityShort')}${String(entry.priority)}`)
+            : null,
           selecting === true
             ? h(Tag, null, entry.scope === 'knowledge' ? t('scopeShortKnowledge') : t('scopeShortConversation'))
             : h('span', { className: 'dsmv-seg' },
@@ -1204,6 +1233,29 @@ window.__ModuleLoader__.load({
                 h('strong', { style: { fontSize: '13px' } }, group.name),
                 h(Tag, null, group.scope === 'knowledge' ? t('knowledge') : t('conversation')),
                 h('span', { className: 'dsmv-cap' }, `${String(group.entryCount)} ${t('entries')}`),
+                h('span', { className: 'dsmv-cap' }, `${t('priorityLabel')} P${String(group.priority ?? 0)}`),
+                h(Button, {
+                  size: 'sm',
+                  title: t('priorityHint'),
+                  disabled: Number(group.priority ?? 0) <= 0,
+                  onClick: () => {
+                    void mutate(() => call('group.update', undefined, {
+                      id: group.id,
+                      priority: Math.max(0, Number(group.priority ?? 0) - 10),
+                    }))
+                  },
+                }, '−'),
+                h(Button, {
+                  size: 'sm',
+                  title: t('priorityHint'),
+                  disabled: Number(group.priority ?? 0) >= 100,
+                  onClick: () => {
+                    void mutate(() => call('group.update', undefined, {
+                      id: group.id,
+                      priority: Math.min(100, Number(group.priority ?? 0) + 10),
+                    }))
+                  },
+                }, '+'),
                 group.description === '' ? null : h('span', { className: 'dsmv-cap' }, group.description),
                 h('span', { className: 'dsmv-spacer' }),
                 h(Button, {
@@ -1595,6 +1647,19 @@ window.__ModuleLoader__.load({
             h('dd', null, `${entry.source} · ${autoTagOf(entry)}${entry.assigned === 'manual' ? ' · 手动归属' : ''}`),
             h('dt', null, t('visibility')),
             h('dd', null, entry.hidden === true ? h(Tag, { tone: 'warning' }, t('hidden')) : t('visible')),
+            h('dt', null, t('priorityLabel')),
+            h('dd', null, h('div', { className: 'dsmv-row' },
+              ...[0, 40, 70, 90].map(value => h(Pill, {
+                key: value,
+                active: Number(entry.priority ?? 0) === value,
+                title: t('priorityHint'),
+                onClick: () => {
+                  if (Number(entry.priority ?? 0) === value || busy) return
+                  void mutate(() => call('entry.update', undefined, { id: entry.id, priority: value }), t('saved'))
+                },
+              }, value === 0 ? '0' : `P${String(value)}`)),
+              h('span', { className: 'dsmv-cap' }, `当前 P${String(entry.priority ?? 0)}`),
+            )),
             h('dt', null, t('detailCreated')),
             h('dd', null, stamp(entry.createdAt)),
             h('dt', null, t('detailUpdated')),
@@ -1798,6 +1863,9 @@ window.__ModuleLoader__.load({
         h('div', { className: 'dsmv-row', style: { gap: '6px' } },
           h(Tag, null, group.scope === 'knowledge' ? t('knowledge') : t('conversation')),
           h('span', { className: 'dsmv-cap' }, `${String(group.entryCount)} ${t('entries')}`),
+          Number(group.priority ?? 0) > 0
+            ? h(Tag, { tone: 'info', title: t('priorityHint') }, `${t('priorityShort')}${String(group.priority)}`)
+            : null,
         ),
         group.description === '' ? null : h('div', { className: 'dsmv-gtile-desc' }, group.description),
       )
@@ -1893,12 +1961,117 @@ window.__ModuleLoader__.load({
                     h(Tag, null, entry.groupName ?? ''),
                     h(Tag, { tone: entry.hidden === true ? 'warning' : 'outline' },
                       entry.scope === 'knowledge' ? t('knowledge') : t('conversation')),
+                    // Why this memory is here: picked for this session, or
+                    // carried in by a group. Priority explains the order.
+                    h(Tag, { tone: entry.via === 'session' ? 'success' : 'quiet' },
+                      entry.via === 'session' ? t('viaSession') : t('viaGroup')),
+                    Number(entry.priority ?? 0) > 0
+                      ? h(Tag, { tone: 'info', title: t('priorityHint') }, `${t('priorityShort')}${String(entry.priority)}`)
+                      : null,
                   ),
                   h('div', { className: 'dsmv-kbody' },
                     h(MarkdownText, { text: entry.content, labels: props.markdownLabels ?? MARKDOWN_LABELS.zh })),
                 )),
           ),
         ),
+      )
+    }
+
+    /**
+     * The memory choice offered while a conversation is still blank.
+     *
+     * The 知识 tab cannot cover this case: the shell does not render conversation
+     * views for a blank session. The composer dock is rendered in both the
+     * new-conversation screen and an established conversation, and the session
+     * snapshot it receives carries `blank`, so the same choice can be offered
+     * where a conversation starts and then hand over to the tab once it has
+     * content.
+     * @param {Record<string, any>} props - Dock props: session id, session snapshot, dictionary.
+     * @returns {unknown} React element, or null once the conversation has started.
+     */
+    function NewConversationKnowledge(props) {
+      const t = props.t
+      const sessionId = props.sessionId
+      const blank = props.session?.blank === true
+      const [data, setData] = React.useState(null)
+      const [busy, setBusy] = React.useState(false)
+      const [error, setError] = React.useState(null)
+
+      const load = React.useCallback(async () => {
+        if (sessionId === undefined) return
+        try {
+          const [applied, vault] = await Promise.all([
+            call('apply.get', { sessionId }),
+            call('state'),
+          ])
+          setData({ applied, groups: vault.groups ?? [] })
+          setError(null)
+        } catch (failure) {
+          setError(failure instanceof Error ? failure.message : String(failure))
+        }
+      }, [sessionId])
+
+      React.useEffect(() => { if (blank) void load() }, [load, blank])
+
+      /**
+       * Persist one application choice for the session about to start.
+       * @param {string[]|null} next - Group ids, or null to fall back to the deployment default.
+       * @returns {Promise<void>} Resolution after the reload.
+       */
+      const save = async (next) => {
+        setBusy(true)
+        try {
+          await call('apply.set', undefined, { sessionId, groups: next })
+          await load()
+        } catch (failure) {
+          setError(failure instanceof Error ? failure.message : String(failure))
+        } finally {
+          setBusy(false)
+        }
+      }
+
+      // Only the blank state: an established conversation keeps the 知识 tab,
+      // and showing both would be the same choice twice.
+      if (sessionId === undefined || !blank) return null
+      const applied = data?.applied
+      const all = data?.groups ?? []
+      const appliedIds = new Set((applied?.groups ?? []).map(group => group.id))
+      const defaults = applied?.defaults ?? []
+
+      /**
+       * Toggle one group's membership.
+       * @param {Record<string, any>} group - Group that was pressed.
+       * @returns {void}
+       */
+      const toggle = (group) => {
+        const next = new Set(appliedIds)
+        if (next.has(group.id)) next.delete(group.id)
+        else next.add(group.id)
+        void save(all.filter(item => next.has(item.id)).map(item => item.id))
+      }
+
+      return h('div', { className: 'dsmv-dock' },
+        h(StyleSheet),
+        h('div', { className: 'dsmv-row' },
+          h('span', { className: 'dsmv-cap' }, t('newChatLabel')),
+          ...all.slice(0, 12).map(group => h(Pill, {
+            key: group.id,
+            active: appliedIds.has(group.id),
+            title: `${group.name}（${String(group.entryCount)} ${t('entries')}）`,
+            onClick: () => { if (!busy) toggle(group) },
+          }, group.name)),
+          all.length === 0 ? h('span', { className: 'dsmv-cap' }, t('boardEmpty')) : null,
+          h(Button, {
+            size: 'sm',
+            disabled: busy || applied === undefined,
+            onClick: () => { void save(null) },
+          }, t('applyReset')),
+        ),
+        h('div', { className: 'dsmv-cap' },
+          `${appliedIds.size === 0 ? `${t('newChatNone')} ` : ''}${t('newChatHint')}`),
+        h('div', { className: 'dsmv-cap' },
+          `${t('applyDefaultNote')}：${defaults.length === 0 ? t('applyNone') : defaults.join('、')} · ${t('newChatManage')}`),
+        error === null ? null : h('div', { className: 'dsmv-error' }, error),
       )
     }
 
@@ -1965,6 +2138,16 @@ window.__ModuleLoader__.load({
           label: () => t('apply'),
           inject: () => ({ t, markdownLabels }),
         }, KnowledgeView))
+
+        // The blank new-conversation screen renders no conversation views, so
+        // the same choice is offered there through the composer dock; the entry
+        // hides itself as soon as the session stops being blank.
+        ctx.slots.inject('conversation.input.dock', () => ctx.slots.register({
+          name: 'conversation.input.dock',
+          id: PANEL_ID,
+          order: 30,
+          inject: () => ({ t }),
+        }, NewConversationKnowledge))
 
         ctx.slots.inject('sidebar.panellist', () => ctx.slots.register({
           name: 'sidebar.panellist',

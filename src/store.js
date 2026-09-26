@@ -15,6 +15,7 @@ import { copyFileSync, existsSync, mkdirSync } from 'node:fs'
 import { dirname } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import { randomUUID } from 'node:crypto'
+import { normalizePriority } from './policy.js'
 
 /** The two assignments a group or an entry can carry. */
 export const SCOPES = ['conversation', 'knowledge']
@@ -23,8 +24,9 @@ export const SCOPES = ['conversation', 'knowledge']
 export const ENTRY_KINDS = ['summary', 'fact', 'preference', 'decision', 'task', 'note']
 
 /** Bumped when a migration below changes the on-disk layout. */
-const SCHEMA_VERSION = 2
+export const SCHEMA_VERSION = 3
 
+export { MAX_PRIORITY, normalizePriority } from './policy.js'
 /**
  * Ordered layout upgrades.
  *
@@ -40,6 +42,20 @@ const MIGRATIONS = [
     apply: (db) => {
       addColumnIfMissing(db, 'entries', 'hidden', 'INTEGER NOT NULL DEFAULT 0')
       addColumnIfMissing(db, 'sessions', 'apply_explicit', 'INTEGER NOT NULL DEFAULT 0')
+    },
+  },
+  {
+    version: 3,
+    summary: '优先级列与按条目应用',
+    apply: (db) => {
+      addColumnIfMissing(db, 'groups', 'priority', 'INTEGER NOT NULL DEFAULT 0')
+      addColumnIfMissing(db, 'entries', 'priority', 'INTEGER NOT NULL DEFAULT 0')
+      db.exec(`CREATE TABLE IF NOT EXISTS entry_applications (
+        session_id TEXT NOT NULL,
+        entry_id   TEXT NOT NULL,
+        created_at INTEGER NOT NULL,
+        PRIMARY KEY (session_id, entry_id)
+      ) STRICT`)
     },
   },
 ]
@@ -72,6 +88,7 @@ CREATE TABLE IF NOT EXISTS groups (
   tags         TEXT NOT NULL DEFAULT '[]',
   session_id   TEXT,
   auto_summary INTEGER NOT NULL DEFAULT 0,
+  priority     INTEGER NOT NULL DEFAULT 0,
   created_at   INTEGER NOT NULL,
   updated_at   INTEGER NOT NULL
 ) STRICT;
@@ -88,6 +105,7 @@ CREATE TABLE IF NOT EXISTS entries (
   session_id  TEXT,
   tags        TEXT NOT NULL DEFAULT '[]',
   hidden      INTEGER NOT NULL DEFAULT 0,
+  priority    INTEGER NOT NULL DEFAULT 0,
   created_at  INTEGER NOT NULL,
   updated_at  INTEGER NOT NULL
 ) STRICT;
@@ -103,6 +121,18 @@ CREATE TABLE IF NOT EXISTS applications (
 ) STRICT;
 
 CREATE INDEX IF NOT EXISTS applications_group ON applications(group_id);
+
+-- Memories a session picked out one by one, independent of any group: the
+-- model can bring a single conclusion into a conversation without applying the
+-- whole group it happens to be filed in.
+CREATE TABLE IF NOT EXISTS entry_applications (
+  session_id TEXT NOT NULL,
+  entry_id   TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  PRIMARY KEY (session_id, entry_id)
+) STRICT;
+
+CREATE INDEX IF NOT EXISTS entry_applications_entry ON entry_applications(entry_id);
 
 CREATE TABLE IF NOT EXISTS transcript (
   session_id TEXT NOT NULL,
@@ -227,6 +257,7 @@ function groupView(row, entryCount) {
     tags: parseTags(/** @type {string} */ (row.tags)),
     sessionId: row.session_id ?? null,
     autoSummary: row.auto_summary === 1,
+    priority: Number(row.priority ?? 0),
     entryCount,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -251,6 +282,7 @@ function entryView(row) {
     source: row.source,
     autoTag: autoTagFor(String(row.source)),
     hidden: row.hidden === 1,
+    priority: Number(row.priority ?? 0),
     sessionId: row.session_id ?? null,
     tags: parseTags(/** @type {string} */ (row.tags)),
     createdAt: row.created_at,
@@ -376,11 +408,18 @@ export class MemoryStore {
         .prepare('DELETE FROM applications WHERE group_id NOT IN (SELECT id FROM groups)').run()
       const sessions = this.#db
         .prepare('UPDATE sessions SET group_id = NULL WHERE group_id IS NOT NULL AND group_id NOT IN (SELECT id FROM groups)').run()
-      return { applications: Number(applications.changes), sessions: Number(sessions.changes) }
+      const entryApplications = this.#db
+        .prepare('DELETE FROM entry_applications WHERE entry_id NOT IN (SELECT id FROM entries)').run()
+      return {
+        applications: Number(applications.changes),
+        sessions: Number(sessions.changes),
+        entryApplications: Number(entryApplications.changes),
+      }
     })
-    if (cleaned.applications > 0 || cleaned.sessions > 0) {
+    if (cleaned.applications > 0 || cleaned.sessions > 0 || cleaned.entryApplications > 0) {
       this.logger?.warn(
-        `memory-vault: 清理了 ${String(cleaned.applications)} 条悬空的知识应用与 `
+        `memory-vault: 清理了 ${String(cleaned.applications)} 条悬空的知识应用、`
+        + `${String(cleaned.entryApplications)} 条失效的单条记忆应用与 `
         + `${String(cleaned.sessions)} 条失效的会话绑定`,
       )
     }
@@ -539,7 +578,7 @@ export class MemoryStore {
    * @returns {Record<string, unknown>} Created group.
    * @throws {Error} When the name is taken by another group.
    */
-  createGroup({ name, scope, description = '', tags = [], sessionId = null, autoSummary = false }) {
+  createGroup({ name, scope, description = '', tags = [], sessionId = null, autoSummary = false, priority = 0 }) {
     const trimmed = String(name).trim()
     if (trimmed === '') throw new Error('memory group name must not be empty')
     if (!SCOPES.includes(scope)) throw new Error(`memory group scope must be one of ${SCOPES.join(', ')}`)
@@ -547,9 +586,12 @@ export class MemoryStore {
     const now = Date.now()
     const id = `grp_${randomUUID()}`
     this.#db.prepare(`
-      INSERT INTO groups (id, name, scope, description, tags, session_id, auto_summary, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(id, trimmed, scope, String(description ?? ''), JSON.stringify(normalizeTags(tags)), sessionId, autoSummary ? 1 : 0, now, now)
+      INSERT INTO groups (id, name, scope, description, tags, session_id, auto_summary, priority, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      id, trimmed, scope, String(description ?? ''), JSON.stringify(normalizeTags(tags)),
+      sessionId, autoSummary ? 1 : 0, normalizePriority(priority), now, now,
+    )
     return this.requireGroup(id)
   }
 
@@ -591,6 +633,10 @@ export class MemoryStore {
     if (patch.autoSummary !== undefined) {
       sets.push('auto_summary = ?')
       values.push(patch.autoSummary ? 1 : 0)
+    }
+    if (patch.priority !== undefined) {
+      sets.push('priority = ?')
+      values.push(normalizePriority(patch.priority))
     }
     if (sets.length === 0) return { group, movedEntries: 0 }
     sets.push('updated_at = ?')
@@ -647,11 +693,11 @@ export class MemoryStore {
     const rows = filter.scope === undefined
       ? this.#db.prepare(`
           SELECT g.*, (SELECT COUNT(*) FROM entries e WHERE e.group_id = g.id AND e.hidden = 0) AS entry_count
-          FROM groups g ORDER BY g.updated_at DESC
+          FROM groups g ORDER BY g.priority DESC, g.name
         `).all()
       : this.#db.prepare(`
           SELECT g.*, (SELECT COUNT(*) FROM entries e WHERE e.group_id = g.id AND e.hidden = 0) AS entry_count
-          FROM groups g WHERE g.scope = ? ORDER BY g.updated_at DESC
+          FROM groups g WHERE g.scope = ? ORDER BY g.priority DESC, g.name
         `).all(filter.scope)
     return rows.map(row => groupView(row, Number(row.entry_count)))
   }
@@ -669,7 +715,7 @@ export class MemoryStore {
    * @param {string|null} [input.scope] - Explicit assignment; defaults to the group's.
    * @returns {Record<string, unknown>} Created entry.
    */
-  createEntry({ groupId, content, title = '', kind = 'note', source = 'manual', sessionId = null, tags = [], scope = null }) {
+  createEntry({ groupId, content, title = '', kind = 'note', source = 'manual', sessionId = null, tags = [], scope = null, priority = 0 }) {
     const text = String(content ?? '').trim()
     if (text === '') throw new Error('memory entry content must not be empty')
     const group = this.requireGroup(groupId)
@@ -678,12 +724,12 @@ export class MemoryStore {
     const now = Date.now()
     const id = `mem_${randomUUID()}`
     this.#db.prepare(`
-      INSERT INTO entries (id, group_id, scope, assigned, title, content, kind, source, session_id, tags, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO entries (id, group_id, scope, assigned, title, content, kind, source, session_id, tags, priority, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       id, group.id, assignment, scope === null ? 'group' : 'manual',
       String(title ?? '').trim(), text, String(kind ?? 'note'), String(source ?? 'manual'),
-      sessionId, JSON.stringify(withAutoTag(tags, String(source ?? 'manual'))), now, now,
+      sessionId, JSON.stringify(withAutoTag(tags, String(source ?? 'manual'))), normalizePriority(priority), now, now,
     )
     this.#db.prepare('UPDATE groups SET updated_at = ? WHERE id = ?').run(now, group.id)
     return this.requireEntry(id)
@@ -768,6 +814,10 @@ export class MemoryStore {
     if (patch.hidden !== undefined) {
       sets.push('hidden = ?')
       values.push(patch.hidden ? 1 : 0)
+    }
+    if (patch.priority !== undefined) {
+      sets.push('priority = ?')
+      values.push(normalizePriority(patch.priority))
     }
     if (sets.length === 0) return entry
     sets.push('updated_at = ?')
@@ -860,7 +910,7 @@ export class MemoryStore {
       SELECT e.*, g.name AS group_name FROM entries e
       LEFT JOIN groups g ON g.id = e.group_id
       ${where}
-      ORDER BY e.updated_at DESC LIMIT ? OFFSET ?
+      ORDER BY e.priority DESC, e.updated_at DESC LIMIT ? OFFSET ?
     `).all(...values)
     return rows.map(entryView)
   }
@@ -972,7 +1022,7 @@ export class MemoryStore {
       SELECT e.*, g.name AS group_name, ${score} AS score FROM entries e
       LEFT JOIN groups g ON g.id = e.group_id
       ${where}
-      ORDER BY score DESC, e.updated_at DESC LIMIT ? OFFSET ?
+      ORDER BY score DESC, e.priority DESC, e.updated_at DESC LIMIT ? OFFSET ?
     `).all(...scoreValues, ...clauseValues, Math.max(1, Math.min(200, limit)), Math.max(0, offset))
     return rows.map(entryView)
   }
@@ -1165,17 +1215,23 @@ export class MemoryStore {
    * @param {string[]|null} groupReferences - Group ids or names; an empty list applies nothing, null clears the choice.
    * @returns {{ sessionId: string, explicit: boolean, groups: Record<string, unknown>[] }} The stored set.
    */
-  setApplications(sessionId, groupReferences) {
+  setApplications(sessionId, groupReferences, entryReferences = []) {
     const ids = groupReferences === null
       ? []
       : groupReferences.map(reference => this.requireGroup(reference).id)
+    const entryIds = groupReferences === null
+      ? []
+      : (entryReferences ?? []).map(reference => this.requireEntry(reference).id)
     // Replace and record as one unit: a failure between the delete and the
     // insert would otherwise leave a session applying nothing at all.
     this.transaction(() => {
       this.#db.prepare('DELETE FROM applications WHERE session_id = ?').run(sessionId)
+      this.#db.prepare('DELETE FROM entry_applications WHERE session_id = ?').run(sessionId)
       const now = Date.now()
       const insert = this.#db.prepare('INSERT OR IGNORE INTO applications (session_id, group_id, created_at) VALUES (?, ?, ?)')
       for (const id of ids) insert.run(sessionId, id, now)
+      const insertEntry = this.#db.prepare('INSERT OR IGNORE INTO entry_applications (session_id, entry_id, created_at) VALUES (?, ?, ?)')
+      for (const id of entryIds) insertEntry.run(sessionId, id, now)
       this.#db.prepare(`
         INSERT INTO sessions (session_id, group_id, last_seq, summarized_seq, apply_explicit, updated_at)
         VALUES (?, NULL, 0, 0, ?, ?)
@@ -1222,23 +1278,44 @@ export class MemoryStore {
     const skipped = []
     let budget = maxChars
     let truncated = false
+    /** @type {Set<string>} */
+    const taken = new Set()
+
+    /**
+     * Take one memory if it fits the budget.
+     * @param {Record<string, any>} entry - Candidate memory.
+     * @returns {void}
+     */
+    const take = (entry) => {
+      if (taken.has(entry.id)) return
+      if (entries.length >= maxEntries) {
+        skipped.push({ id: entry.id, title: entry.title, reason: 'entry-budget' })
+        truncated = true
+        return
+      }
+      const cost = entry.content.length + entry.title.length
+      if (cost > budget) {
+        skipped.push({ id: entry.id, title: entry.title, reason: 'char-budget' })
+        truncated = true
+        return
+      }
+      budget -= cost
+      taken.add(entry.id)
+      entries.push({ ...entry, via: 'session' })
+    }
+
+    // Memories the session picked by name come first: an explicit choice
+    // outranks any ordering the vault could infer.
+    for (const entry of this.appliedEntriesOf(sessionId)) take(entry)
+
+    // Then the applied groups, highest-priority group first; within a group the
+    // store already orders by entry priority and only then by recency, so an
+    // important older memory is not starved by newer noise.
     for (const group of effective.groups) {
       // One row past the budget tells us whether anything was left behind,
       // which a query bounded exactly at the budget cannot reveal.
       for (const entry of this.listEntries({ groupId: group.id, limit: maxEntries + 1 })) {
-        if (entries.length >= maxEntries) {
-          skipped.push({ id: entry.id, title: entry.title, reason: 'entry-budget' })
-          truncated = true
-          continue
-        }
-        const cost = entry.content.length + entry.title.length
-        if (cost > budget) {
-          skipped.push({ id: entry.id, title: entry.title, reason: 'char-budget' })
-          truncated = true
-          continue
-        }
-        budget -= cost
-        entries.push(entry)
+        take({ ...entry, via: 'group' })
       }
     }
     return {
@@ -1308,13 +1385,31 @@ export class MemoryStore {
     const rows = this.#db.prepare(`
       SELECT g.*, (SELECT COUNT(*) FROM entries e WHERE e.group_id = g.id AND e.hidden = 0) AS entry_count
       FROM applications a JOIN groups g ON g.id = a.group_id
-      WHERE a.session_id = ? ORDER BY g.name
+      WHERE a.session_id = ? ORDER BY g.priority DESC, g.name
     `).all(sessionId)
     return {
       sessionId,
       explicit: state !== undefined && Number(state.apply_explicit) === 1,
       groups: rows.map(row => groupView(row, Number(row.entry_count))),
+      // A session can also carry memories it picked one by one; they ride
+      // alongside the groups rather than replacing them.
+      entries: this.appliedEntriesOf(sessionId),
     }
+  }
+
+  /**
+   * Read the memories a session applied individually.
+   * @param {string} sessionId - Session id.
+   * @returns {Record<string, unknown>[]} Applied entries, highest priority first.
+   */
+  appliedEntriesOf(sessionId) {
+    const rows = this.#db.prepare(`
+      SELECT e.*, g.name AS group_name FROM entry_applications a
+      JOIN entries e ON e.id = a.entry_id
+      LEFT JOIN groups g ON g.id = e.group_id
+      WHERE a.session_id = ? ORDER BY e.priority DESC, e.updated_at DESC
+    `).all(sessionId)
+    return rows.map(entryView)
   }
 
   /**
@@ -1337,36 +1432,24 @@ export class MemoryStore {
   }
 
   /**
-   * Read the newest visible memories of the applied groups, which is what the
-   * session's prompt receives.
-   * @param {object} input - Read request.
-   * @param {string[]} input.groupIds - Groups to read.
-   * @param {number} input.maxEntries - Maximum entries.
-   * @param {number} input.maxChars - Maximum characters across all entries.
-   * @returns {{ entries: Record<string, unknown>[], truncated: boolean }} The applied memory text sources.
+   * The catalogue the prompt index renders: for one set of groups, each group's
+   * highest-priority memories.
+   *
+   * Titles are what let the model decide whether a group is worth reading or
+   * applying *before* spending a search on it — without them the index can only
+   * say how many memories exist, which is not enough to choose.
+   * @param {object} input - Catalogue request.
+   * @param {string[]} input.groupIds - Groups to describe.
+   * @param {number} input.perGroup - Memories listed per group.
+   * @returns {Map<string, Record<string, unknown>[]>} Entries by group id, best first.
    */
-  appliedEntries({ groupIds, maxEntries, maxChars }) {
-    /** @type {Record<string, unknown>[]} */
-    const entries = []
-    let budget = maxChars
-    let truncated = false
+  indexEntries({ groupIds, perGroup }) {
+    /** @type {Map<string, Record<string, unknown>[]>} */
+    const byGroup = new Map()
     for (const groupId of groupIds) {
-      if (entries.length >= maxEntries) {
-        truncated = true
-        break
-      }
-      const rows = this.listEntries({ groupId, limit: maxEntries - entries.length })
-      for (const entry of rows) {
-        const cost = entry.content.length + entry.title.length
-        if (cost > budget) {
-          truncated = true
-          continue
-        }
-        budget -= cost
-        entries.push(entry)
-      }
+      byGroup.set(groupId, this.listEntries({ groupId, limit: Math.max(1, perGroup) }))
     }
-    return { entries, truncated }
+    return byGroup
   }
 
   /**

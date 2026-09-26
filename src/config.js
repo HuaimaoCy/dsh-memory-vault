@@ -24,6 +24,7 @@ export const SUMMARIZER_MODES = ['llm', 'off']
  * @property {number} autoSummaryChars Unsummarized transcript characters that trip a summarization.
  * @property {boolean} injectIndex Whether the system prompt carries the memory-group index.
  * @property {number} injectMaxGroups Maximum groups listed in that index.
+ * @property {number} indexEntryTitles Memories titled per group in the index; 0 turns the catalogue off.
  * @property {'llm'|'off'} summarizer Active summarization strategy.
  * @property {string|null} summarizerProvider Provider override for summarization.
  * @property {string|null} summarizerModel Model override for summarization.
@@ -53,6 +54,7 @@ const DEFAULTS = Object.freeze({
   autoSummaryChars: 4000,
   injectIndex: true,
   injectMaxGroups: 24,
+  indexEntryTitles: 5,
   summarizer: 'llm',
   summarizerProvider: null,
   summarizerModel: null,
@@ -164,6 +166,7 @@ function normalize(value) {
     autoSummaryChars: countField(raw, 'autoSummaryChars', DEFAULTS.autoSummaryChars, issues),
     injectIndex: booleanField(raw, 'injectIndex', DEFAULTS.injectIndex, issues),
     injectMaxGroups: countField(raw, 'injectMaxGroups', DEFAULTS.injectMaxGroups, issues),
+    indexEntryTitles: countField(raw, 'indexEntryTitles', DEFAULTS.indexEntryTitles, issues),
     summarizer: /** @type {VaultConfig['summarizer']} */ (
       typeof summarizer === 'string' && SUMMARIZER_MODES.includes(summarizer) ? summarizer : DEFAULTS.summarizer
     ),

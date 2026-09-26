@@ -23,6 +23,25 @@ export const LIMITS = {
   groupDescription: 500,
 }
 
+/** Highest priority a group or an entry may carry. */
+export const MAX_PRIORITY = 100
+
+/**
+ * Clamp a caller-supplied priority into the scale.
+ *
+ * One scale for groups and memories alike: higher wins, both in the prompt
+ * index and when the injection budget cannot fit everything.
+ * @param {unknown} value - Raw value.
+ * @returns {number} An integer in `[0, MAX_PRIORITY]`.
+ * @throws {Error} When the value is present but not a number.
+ */
+export function normalizePriority(value) {
+  if (value === undefined || value === null || value === '') return 0
+  const parsed = Number(value)
+  if (!Number.isFinite(parsed)) throw new Error('priority 必须是 0-100 之间的数字')
+  return Math.max(0, Math.min(MAX_PRIORITY, Math.trunc(parsed)))
+}
+
 /**
  * Normalise a tag list: trimmed, non-empty, de-duplicated, length-capped.
  * @param {unknown} tags - Caller-supplied tags.
@@ -70,7 +89,13 @@ export function validateEntryWrite(input, kinds, config) {
   if (title.length > LIMITS.title) throw new Error(`标题超过 ${LIMITS.title} 字符上限`)
   const kind = String(input.kind ?? '').trim() === '' ? 'note' : String(input.kind).trim()
   if (!kinds.includes(kind)) throw new Error(`kind 必须是 ${kinds.join(' / ')} 之一，收到「${kind}」`)
-  return { content, title, kind, tags: normalizeTags(input.tags) }
+  return {
+    content,
+    title,
+    kind,
+    tags: normalizeTags(input.tags),
+    priority: normalizePriority(input.priority),
+  }
 }
 
 /**

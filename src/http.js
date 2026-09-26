@@ -18,7 +18,7 @@
 
 import { ENTRY_KINDS, SCOPES } from './store.js'
 import {
-  intParam, validateEntryWrite, validateGroupDescription, validateGroupName, normalizeTags,
+  intParam, normalizePriority, normalizeTags, validateEntryWrite, validateGroupDescription, validateGroupName,
 } from './policy.js'
 
 /** Route prefix owned by this plugin. */
@@ -233,10 +233,12 @@ function operate({ store, config, notify }, body) {
       const sessionId = String(body.sessionId ?? '')
       if (sessionId === '') throw new Error('apply.set requires `sessionId`')
       // `groups: null` clears the session's choice so the deployment default
-      // applies again; `groups: []` applies nothing on purpose.
+      // applies again; `groups: []` applies nothing on purpose. `entries` adds
+      // memories picked one by one alongside whatever groups were chosen.
       const groups = body.groups === null ? null : Array.isArray(body.groups) ? body.groups.map(String) : undefined
       if (groups === undefined) throw new Error('apply.set requires `groups` (an array, or null to reset)')
-      const stored = store.setApplications(sessionId, groups)
+      const entries = Array.isArray(body.entries) ? body.entries.map(String) : []
+      const stored = store.setApplications(sessionId, groups, entries)
       notify()
       return { sessionId, ...stored }
     }
@@ -248,6 +250,7 @@ function operate({ store, config, notify }, body) {
         tags: normalizeTags(body.tags),
         sessionId: typeof body.sessionId === 'string' && body.sessionId !== '' ? body.sessionId : null,
         autoSummary: body.autoSummary === true,
+        priority: normalizePriority(body.priority),
       })
       notify()
       return { group }
@@ -259,6 +262,7 @@ function operate({ store, config, notify }, body) {
         ...(body.description === undefined ? {} : { description: validateGroupDescription(body.description) }),
         ...(body.tags === undefined ? {} : { tags: normalizeTags(body.tags) }),
         ...(typeof body.autoSummary === 'boolean' ? { autoSummary: body.autoSummary } : {}),
+        ...(body.priority === undefined ? {} : { priority: normalizePriority(body.priority) }),
       })
       notify()
       return { group, movedEntries }
@@ -290,6 +294,7 @@ function operate({ store, config, notify }, body) {
         title: body.title === undefined ? current.title : body.title,
         kind: body.kind === undefined || body.kind === '' ? current.kind : body.kind,
         tags: body.tags === undefined ? current.tags : body.tags,
+        priority: body.priority === undefined ? current.priority : body.priority,
       }, ENTRY_KINDS, config)
       const entry = store.updateEntry(current.id, fields)
       notify()
@@ -315,6 +320,13 @@ function operate({ store, config, notify }, body) {
       return { entry }
     }
     case 'assign': {
+      // Priority rides the same operation as assignment: both answer "what does
+      // this memory mean to me", and the panel edits them side by side.
+      if (body.priority !== undefined && Array.isArray(body.ids)) {
+        const entries = body.ids.map(String).map(id => store.updateEntry(id, { priority: body.priority }))
+        notify()
+        return { entries, priority: normalizePriority(body.priority) }
+      }
       if (typeof body.group === 'string' && body.group !== '' && !Array.isArray(body.ids)) {
         const { group, movedEntries } = store.updateGroup(body.group, {
           scope: /** @type {string} */ (body.scope),
