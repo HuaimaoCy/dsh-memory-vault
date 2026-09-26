@@ -1,0 +1,16 @@
+# Editor and OS noise
+.DS_Store
+Thumbs.db
+*.swp
+
+# Node
+node_modules/
+npm-debug.log*
+pnpm-debug.log*
+
+# Vault data: memories and their upgrade backups are not source
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+*.sqlite.v*.bak
+memory-vault/

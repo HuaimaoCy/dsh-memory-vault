@@ -1,0 +1,30 @@
+# Layer contributed by the dsh-memory-vault bundle. Every key below can be
+# overridden from the profile's own cordis.patch.yml, which is applied after
+# this layer.
+- insert:
+    - id: memory-vault
+      name: 'dsh-memory-vault'
+      config:
+        # Conversation memory and knowledge base are the same store; these two
+        # names only seed the default groups a fresh database starts with.
+        conversationGroupName: '对话记忆'
+        knowledgeGroupName: '知识库'
+        # Threshold-driven incremental summarization of the conversation this
+        # session is bound to.
+        autoSummary: true
+        autoSummaryTurns: 6
+        autoSummaryChars: 4000
+        # System-prompt index of the memory groups available right now.
+        injectIndex: true
+        injectMaxGroups: 24
+        # Set to '<dshHome>/memory-vault/vault.sqlite' by default; an absolute
+        # path keeps the vault outside the workspace it describes.
+        databasePath: null
+        # 'llm' summarizes out of band through ctx.llm.stream using this
+        # session's routed provider/model; 'off' leaves summarization entirely
+        # to the memory_summarize tool call.
+        summarizer: 'llm'
+        summarizerProvider: null
+        summarizerModel: null
+        summarizerMaxTokens: 1600
+        summarizerTimeoutMs: 120000
