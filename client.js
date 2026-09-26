@@ -93,6 +93,9 @@ window.__ModuleLoader__.load({
         scopeShortKnowledge: '知识',
         newEntry: '新建记忆',
         newGroup: '新建记忆组',
+        parentLabel: '父组',
+        parentTop: '顶层（无父组）',
+        parentHint: '子记忆组最多三层。应用父组时会连它的所有子组一起应用；按组检索默认也连带子组。',
         groupName: '记忆组名称',
         create: '创建',
         cancel: '取消',
@@ -236,6 +239,9 @@ window.__ModuleLoader__.load({
         scopeShortKnowledge: 'Knowledge',
         newEntry: 'New memory',
         newGroup: 'New group',
+        parentLabel: 'parent',
+        parentTop: 'top level',
+        parentHint: 'Sub-groups nest up to three deep. Applying a parent applies its whole subtree, and reading a group reads its sub-groups.',
         groupName: 'Group name',
         create: 'Create',
         cancel: 'Cancel',
@@ -398,6 +404,18 @@ window.__ModuleLoader__.load({
 .dsmv-sub { font-size: var(--dsmv-fs-small); line-height: var(--dsmv-lh-body); color: var(--dsw-alias-label-tertiary); }
 .dsmv-meta { font-size: var(--dsmv-fs-small); line-height: var(--dsmv-lh-small); color: var(--dsw-alias-label-tertiary); }
 .dsmv-cap { font-size: var(--dsmv-fs-cap); line-height: var(--dsmv-lh-small); letter-spacing: .012em; color: var(--dsw-alias-label-caption); }
+.dsmv-select {
+  font: inherit;
+  font-size: var(--dsmv-fs-small);
+  color: var(--dsw-alias-label-primary);
+  background: var(--dsw-alias-bg-layer-2);
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: var(--dsmv-radius-sm, 6px);
+  padding: 4px 6px;
+  max-width: 220px;
+}
+.dsmv-select--sm { padding: 2px 4px; max-width: 160px; }
+.dsmv-select:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: 1px; }
 .dsmv-col { display: flex; flex-direction: column; gap: 10px; }
 .dsmv-bar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .dsmv-facets { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
@@ -782,7 +800,7 @@ window.__ModuleLoader__.load({
      */
     function Tile({
       entry, terms, activeTags, onTag, onOpen, onScope, onHide, onRestore, onDelete,
-      selecting, selected, onSelect, canHide, t,
+      selecting, selected, onSelect, canHide, t, groupLabel,
     }) {
       const title = entry.title === '' ? plainPreview(entry.content, 60) : entry.title
       const classes = ['dsmv-tile']
@@ -818,6 +836,9 @@ window.__ModuleLoader__.load({
         h('div', { className: 'dsmv-tile-body' }, highlighted(plainPreview(entry.content, 220), terms)),
         h(TagRow, { entry, activeTags, onTag, max: 4 }),
         h('div', { className: 'dsmv-tile-foot' },
+          // The section names the root group; a tile that came from a sub-group
+          // says which one, so merging the tree into few sections loses nothing.
+          groupLabel === undefined || groupLabel === '' ? null : h(Tag, null, groupLabel),
           entry.hidden === true ? h(Tag, { tone: 'warning' }, t('hidden')) : null,
           Number(entry.priority ?? 0) > 0
             ? h(Tag, { tone: 'info', title: t('priorityHint') }, `${t('priorityShort')}${String(entry.priority)}`)
@@ -1195,6 +1216,11 @@ window.__ModuleLoader__.load({
 
       /**
        * Group the visible tiles for display.
+       *
+       * With sub-groups, a section per group is unreadable long before a vault
+       * is big: what the reader wants is one heading per heading. So a section
+       * is a **root** group and swallows its whole subtree, and each tile says
+       * which sub-group it came from. Grouping by tag is unaffected.
        * @param {Record<string, any>[]} rows - Tiles of the board.
        * @returns {{ key: string, label: string, rows: Record<string, any>[] }[]} Sections in display order.
        */
@@ -1203,7 +1229,7 @@ window.__ModuleLoader__.load({
         /** @type {Map<string, Record<string, any>[]>} */
         const buckets = new Map()
         for (const row of rows) {
-          const keys = groupBy === 'tag' ? tagsOf(row) : [row.groupName ?? row.groupId]
+          const keys = groupBy === 'tag' ? tagsOf(row) : [rootNameOf(row)]
           for (const key of keys) {
             if (!buckets.has(key)) buckets.set(key, [])
             buckets.get(key).push(row)
@@ -1215,6 +1241,21 @@ window.__ModuleLoader__.load({
               (rank.get(left) ?? Number.MAX_SAFE_INTEGER) - (rank.get(right) ?? Number.MAX_SAFE_INTEGER))
           : [...buckets.keys()].sort((left, right) => (left < right ? -1 : 1))
         return order.map(key => ({ key, label: key, rows: buckets.get(key) }))
+      }
+
+      /**
+       * The top-level group a tile belongs to: a sub-group files under its root.
+       * @param {Record<string, any>} row - Entry tile.
+       * @returns {string} Root group name, or the entry's own group at the top level.
+       */
+      const rootNameOf = (row) => {
+        const group = groups.find(item => item.id === row.groupId)
+        if (group === undefined) return row.groupName ?? row.groupId
+        // `path` only exists once the Host half that knows about sub-groups is
+        // running, and this half reloads without a restart — so an older Host
+        // must simply read as a flat list rather than crash the board.
+        const path = Array.isArray(group.path) ? group.path : []
+        return path.length > 0 ? path[0] : group.name
       }
 
       const sections = sectionsFor(visible)
@@ -1442,8 +1483,24 @@ window.__ModuleLoader__.load({
                     }
                   },
                 }, t('remove')),
+                // Moving an existing group is what turns a flat list into a
+                // tree without deleting and recreating anything.
+                h('select', {
+                  className: 'dsmv-select dsmv-select--sm',
+                  value: group.parentId ?? '',
+                  title: t('parentHint'),
+                  onChange: (event) => {
+                    void mutate(() => call('group.update', undefined, { id: group.id, parent: event.target.value }))
+                  },
+                },
+                  h('option', { value: '' }, t('parentTop')),
+                  ...groups
+                    .filter(candidate => candidate.id !== group.id && Number(candidate.depth ?? 1) < 3)
+                    .map(candidate => h('option', { key: candidate.id, value: candidate.id },
+                      `${'　'.repeat(Math.max(0, Number(candidate.depth ?? 1) - 1))}${candidate.name}`)),
+                ),
               )),
-              h(GroupCreator, { t, busy, mutate }),
+              h(GroupCreator, { t, busy, mutate, groups }),
             ),
           ),
 
@@ -1457,7 +1514,9 @@ window.__ModuleLoader__.load({
                 label: section.label,
                 count: section.rows.length,
                 unit: t('entries'),
-                open: groupBy !== 'group' || sections.length <= 3,
+                // Sections are roots now, so there are few of them and hiding
+                // the content by default would only add a second click.
+                open: groupBy !== 'group' || sections.length <= 6,
               }, h('div', { className: 'dsmv-board' }, section.rows.map(entry => h(Tile, {
                 key: entry.id,
                 entry,
@@ -1467,6 +1526,8 @@ window.__ModuleLoader__.load({
                 selecting,
                 selected: selected.includes(entry.id),
                 canHide,
+                // Only worth showing when the section is a parent heading.
+                groupLabel: groupBy === 'group' && entry.groupName !== section.key ? entry.groupName : undefined,
                 onSelect: toggleSelected,
                 onTag: toggleTag,
                 onScope: (target, scope) => { void assign([target.id], scope) },
@@ -1558,15 +1619,19 @@ window.__ModuleLoader__.load({
      * @param {Record<string, any>} props - Creator props.
      * @returns {unknown} React element.
      */
-    function GroupCreator({ t, busy, mutate }) {
+    function GroupCreator({ t, busy, mutate, groups = [] }) {
       const [open, setOpen] = React.useState(false)
       const [name, setName] = React.useState('')
       const [scope, setScope] = React.useState('conversation')
+      const [parent, setParent] = React.useState('')
       if (!open) {
         return h('div', { className: 'dsmv-row' },
           h(Button, { size: 'sm', icon: h(IconPlusOutlineMedium, null), onClick: () => { setOpen(true) } }, t('newGroup')),
         )
       }
+      // Only groups that can still take a child: the depth ceiling is what keeps
+      // the tree readable, which is the point of having one.
+      const candidates = groups.filter(group => Number(group.depth ?? 1) < 3)
       return h('div', { className: 'dsmv-row' },
         h('div', { style: { width: '180px' } },
           h(Input, {
@@ -1577,16 +1642,30 @@ window.__ModuleLoader__.load({
         ),
         h(Pill, { active: scope === 'conversation', onClick: () => { setScope('conversation') } }, t('conversation')),
         h(Pill, { active: scope === 'knowledge', onClick: () => { setScope('knowledge') } }, t('knowledge')),
+        h('span', { className: 'dsmv-cap' }, t('parentLabel')),
+        h('select', {
+          className: 'dsmv-select',
+          value: parent,
+          title: t('parentHint'),
+          onChange: (event) => { setParent(event.target.value) },
+        },
+          h('option', { value: '' }, t('parentTop')),
+          ...candidates.map(group => h('option', { key: group.id, value: group.id },
+            `${'　'.repeat(Math.max(0, Number(group.depth ?? 1) - 1))}${group.name}`)),
+        ),
         h(Button, {
           variant: 'primary',
           size: 'sm',
           disabled: busy || name.trim() === '',
           onClick: () => {
-            void mutate(() => call('group.create', undefined, { name: name.trim(), scope }))
-              .then((ok) => { if (ok) { setName(''); setOpen(false) } })
+            void mutate(() => call('group.create', undefined, {
+              name: name.trim(),
+              scope,
+              ...(parent === '' ? {} : { parent }),
+            })).then((ok) => { if (ok) { setName(''); setParent(''); setOpen(false) } })
           },
         }, t('create')),
-        h(Button, { size: 'sm', onClick: () => { setOpen(false); setName('') } }, t('cancel')),
+        h(Button, { size: 'sm', onClick: () => { setOpen(false); setName(''); setParent('') } }, t('cancel')),
       )
     }
 

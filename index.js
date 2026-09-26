@@ -365,6 +365,9 @@ export function apply(ctx, config) {
     const record = await curateWithModel(ctx, {
       route,
       entries: candidates,
+      // The existing tree, so a new group can be hung under a heading instead
+      // of adding another peer to a flat list that is already too long.
+      groups: store.listGroups(),
       sessionId: session?.id,
       maxTokens: config.summarizerMaxTokens,
       timeoutMs: config.summarizerTimeoutMs,
@@ -389,8 +392,18 @@ export function apply(ctx, config) {
         return { id: entry.id, verdict: 'oneoff', scope: 'conversation', group: entry.groupName ?? '', reason: verdict.reason, origin: originLabel }
       }
       const name = targetGroupFor(verdict, config.knowledgeGroupName)
-      const target = store.findGroup(name)
-        ?? store.createGroup({ name, scope: 'knowledge', description: '由 AI 整理归类建立' })
+      let target = store.findGroup(name)
+      if (target === undefined) {
+        // A group the model invented is nested where it said it belongs, and
+        // falls back to the top level when that name is not a real group.
+        const parent = verdict.parent === '' ? undefined : store.findGroup(String(verdict.parent))
+        target = store.createGroup({
+          name,
+          scope: 'knowledge',
+          description: '由 AI 整理归类建立',
+          parent: parent === undefined ? null : parent.id,
+        })
+      }
       store.assignEntries({ ids: [entry.id], scope: 'knowledge', groupId: target.id, assignedBy: 'manual' })
       if (applyPriority) store.updateEntry(entry.id, { priority: Math.max(60, Number(entry.priority ?? 0)) })
       return { id: entry.id, verdict: 'reusable', scope: 'knowledge', group: target.name, reason: verdict.reason, origin: originLabel }

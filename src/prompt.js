@@ -86,7 +86,17 @@ export function renderIndex({ store, config, sessionId }) {
   if (groups.length === 0) return ''
   const stats = store.stats()
   const bound = sessionId === undefined ? null : store.sessionState(sessionId).groupId
-  const shown = groups.slice(0, config.injectMaxGroups)
+  // Pre-order by ancestry, so a sub-group is printed directly under its
+  // heading; a child listed far from its parent is worse than no nesting at
+  // all. The sort is stable and keys only on the parent path, so the incoming
+  // priority order survives among siblings.
+  const pathKey = (/** @type {Record<string, any>} */ group) => (Array.isArray(group.path) ? group.path.join('\u0000') : '')
+  const ordered = [...groups].sort((left, right) => {
+    const a = pathKey(left)
+    const b = pathKey(right)
+    return a < b ? -1 : a > b ? 1 : 0
+  })
+  const shown = ordered.slice(0, config.injectMaxGroups)
   const omitted = groups.length - shown.length
   const mark = (/** @type {Record<string, any>} */ group) => group.id === bound ? ' ← 本会话' : ''
   // The catalogue is what turns the index from a table of contents into a menu:
@@ -100,10 +110,11 @@ export function renderIndex({ store, config, sessionId }) {
     const auto = group.autoSummary ? ' · 自动总结' : ''
     const priority = group.priority > 0 ? ` · P${String(group.priority)}` : ''
     const description = group.description === '' ? '' : ` — ${group.description}`
-    const head = `- ${group.name}${tags}${auto}${priority} · 组内 ${group.entryCount} 条${description}${mark(group)}`
+    const indent = '  '.repeat(Math.max(0, Number(group.depth ?? 1) - 1))
+    const head = `${indent}- ${group.name}${tags}${auto}${priority} · 组内 ${group.entryCount} 条${description}${mark(group)}`
     const titles = (catalogue.get(group.id) ?? []).map((/** @type {Record<string, any>} */ entry) => {
       const title = entry.title === '' ? String(entry.content).slice(0, 40) : entry.title
-      return entry.priority > 0 ? `  · [P${String(entry.priority)}] ${title}` : `  · ${title}`
+      return `${indent}  · ${entry.priority > 0 ? `[P${String(entry.priority)}] ` : ''}${title}`
     })
     return [head, ...titles].join('\n')
   }
@@ -115,7 +126,8 @@ export function renderIndex({ store, config, sessionId }) {
   const header = `记忆库：${stats.totals.groups} 个记忆组；按归属计 ${stats.totals.entries} 条记忆`
     + `（对话记忆 ${stats.entries.conversation} 条、知识库 ${stats.entries.knowledge} 条）。`
   const usage = '下面按优先级列出记忆组（P 后的数字越大越优先）以及每组里优先级最高的几条记忆标题——这是当前可用的知识索引。'
-    + '需要正文时用 `memory_recall`（可按记忆组、标签、归属或关键词检索）；把某个组接进本会话用 `memory_apply` action=set groups=["组名"]；'
+    + '缩进表示子记忆组：**应用父组会连它的所有子组一起应用**，所以平铺的组多了应当收进父组（用 `memory_group` 的 `parent` 参数）。'
+    + '需要正文时用 `memory_recall`（可按记忆组、标签、归属或关键词检索；按组检索默认连带子组）；把某个组接进本会话用 `memory_apply` action=set groups=["组名"]；'
     + '只接某一条记忆用 `memory_apply` action=set entries=["mem_..."]；调整优先级用 `memory_assign` priority=0-100（单条）或 `memory_group` action=update priority=0-100（整组）。'
   return [
     '## 知识与记忆库',

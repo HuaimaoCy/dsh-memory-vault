@@ -17,7 +17,7 @@ export const CURATE_SYSTEM_PROMPT = [
   '你是知识库整理器。你会收到一批记忆条目，请逐条判断它的性质，并只输出一个 JSON 对象，不要任何解释或代码块标记。',
   '',
   '输出格式：',
-  '{"items":[{"id":"mem_...","verdict":"reusable|oneoff","reason":"一句话理由","group":"建议的记忆组名称"}]}',
+  '{"items":[{"id":"mem_...","verdict":"reusable|oneoff","reason":"一句话理由","group":"建议的记忆组名称","parent":"该组应挂在哪个现有父组下，没有合适的就留空字符串"}]}',
   '',
   '判断标准：',
   '- reusable（可复用）：结论、事实、约定、偏好、可复用的操作步骤或排错结论——换个任务、换个会话仍然成立，值得长期保留。',
@@ -28,6 +28,7 @@ export const CURATE_SYSTEM_PROMPT = [
   '- 输入标着「人工输入」的记忆是人特意写下的，已经被人整理过一次：除非它明显只对某一次任务成立，否则倾向 reusable。',
   '- 输入标着「AI 生成」的记忆是模型写的（自动总结或在会话中写入），它们才是主要需要判断的对象：进度、过程与临时状态多半在这里。',
   '- group 用简短的中文名词短语（4-12 字），同一批里语义相同的必须用完全相同的名称，便于归并成组；不要用「其他」「杂项」这类无信息量的名称。',
+  '- parent 只能从「现有记忆组」里原样挑一个名称，或留空。平铺的组已经太多了，所以**只要语义上说得通，就把新组挂到已有父组下**，不要每批都新建一个顶层组。',
   '- reason 不超过 30 字，说清判断依据。',
   '- 不要编造 id，只能使用输入里出现过的 id。',
 ].join('\n')
@@ -35,9 +36,10 @@ export const CURATE_SYSTEM_PROMPT = [
 /**
  * Render the batch the model decides on.
  * @param {Record<string, any>[]} entries - Candidate memories.
+ * @param {Record<string, any>[]} [groups] - Existing groups, so a new group can be nested under one.
  * @returns {string} The user message.
  */
-export function buildCurationMessage(entries) {
+export function buildCurationMessage(entries, groups = []) {
   const lines = entries.map(entry => {
     const title = entry.title === '' ? '(无标题)' : entry.title
     const body = String(entry.content).replace(/\s+/g, ' ').slice(0, 400)
@@ -51,7 +53,13 @@ export function buildCurationMessage(entries) {
       `正文: ${body}`,
     ].join('\n')
   })
-  return `共 ${String(entries.length)} 条记忆，请逐条判断：\n\n${lines.join('\n\n')}`
+  // The group list is what lets the answer reuse the tree instead of adding
+  // another dozen peers to it, so it is shown as the tree it is.
+  const groupList = groups.length === 0
+    ? '（暂无记忆组）'
+    : groups.map(group => `${'  '.repeat(Math.max(0, Number(group.depth ?? 1) - 1))}- ${String(group.name)}`
+      + `（${group.scope === 'knowledge' ? '知识库' : '对话记忆'} · ${String(group.entryCount)} 条）`).join('\n')
+  return `现有记忆组：\n${groupList}\n\n共 ${String(entries.length)} 条记忆，请逐条判断：\n\n${lines.join('\n\n')}`
 }
 
 /**
@@ -85,6 +93,9 @@ export function parseCuration(text) {
       verdict,
       reason: String(item?.reason ?? '').slice(0, 120),
       group: String(item?.group ?? '').trim().slice(0, 40),
+      // Where the suggested group should hang. Kept as a name: the caller
+      // resolves it and falls back to the top level when it names nothing real.
+      parent: String(item?.parent ?? '').trim().slice(0, 40),
     }
   }).filter(item => item.id !== '')
 }
@@ -121,8 +132,7 @@ export async function curateWithModel(ctx, request) {
   const llm = ctx.get('llm')
   if (llm === undefined || llm === null || typeof llm.stream !== 'function') {
     throw new Error('当前宿主没有提供可用的模型服务（ctx.llm），无法做 AI 整理')
-  }
-  const deadline = withDeadline(request.signal, request.timeoutMs)
+  }  const deadline = withDeadline(request.signal, request.timeoutMs)
   try {
     let text = ''
     let usage
@@ -134,7 +144,7 @@ export async function curateWithModel(ctx, request) {
       system: CURATE_SYSTEM_PROMPT,
       messages: [{
         role: 'user',
-        content: [{ type: 'text', text: buildCurationMessage(request.entries) }],
+        content: [{ type: 'text', text: buildCurationMessage(request.entries, request.groups ?? []) }],
       }],
       maxTokens: request.maxTokens,
       signal: deadline.signal,

@@ -178,6 +178,25 @@ memory_curate action=apply origin=all          # include human input
 
 > It is a real model call and spends quota; 50 memories at most, 20 by default.
 
+## Sub-groups
+
+Groups nest, **three levels at most**. A flat list of groups stops being readable long before it stops being correct — a dozen peers is a wall in the panel and in the prompt index alike — so past a handful they belong inside a parent.
+
+- **Creating one**: pick a parent in the panel's group manager, or pass `parent` to `memory_group`.
+- **Moving an existing one**: each group row has a dropdown; choosing a parent nests it, choosing 顶层 lifts it out. Nothing is deleted and recreated, and the memories travel with the group.
+- **Applying a parent applies the whole subtree**: ticking 父组样本 injects its children and grandchildren, so a heading is ticked once. That is what nesting is for.
+- **Reading a group reads its sub-groups**: `memory_recall` with `group` includes them; pass `includeChildren: false` for that group alone.
+- **The board groups by root**: a section is a root group, and the tiles of its sub-groups land in it carrying their own group name — so a dozen groups read as a few sections.
+- **The prompt index is a tree too**: indented, a child printed directly under its parent, siblings still ordered by priority.
+- **Curation respects the tree**: the pass sees the existing groups (indented) and is asked to hang a new group under an existing heading rather than adding another peer every batch.
+
+Two hard limits, both there to keep the tree readable:
+
+- Nothing may be created below the third level.
+- A group may not be moved under its own descendant (that would form a cycle).
+
+Deleting is stricter as well: **deleting a parent that still has children is refused**, with a message telling you to move or delete them first — silently promoting children to the top level is exactly what sub-groups exist to fix.
+
 ## Web panel
 
 A **Memory Vault** entry appears in the sidebar. The knowledge base and conversation memory are **one tile board**; assignment survives only as a filter.
@@ -285,7 +304,7 @@ Remove-Item -Recurse "$env:USERPROFILE\.dsh\memory-vault"   # the memories, opti
 ## Development
 
 ```powershell
-# Standalone smoke test: drives tools, the two axes (human input / AI-written / curation scope), priority, the knowledge index, the base-prompt layer, a tunable quota, the v5 origin migration, per-memory application, hiding, watermark summarization, the panel route and the request boundary on a mock ctx, then renders the knowledge view, the board and the new-conversation strip for real (162 checks)
+# Standalone smoke test: drives tools, the two axes (human input / AI-written / curation scope), sub-groups (three-level ceiling, cycle refusal, delete protection, subtree application), priority, the knowledge index, the base-prompt layer, a tunable quota, the v5 origin migration, per-memory application, hiding, watermark summarization, the panel route and the request boundary on a mock ctx, then renders the knowledge view, the board and the new-conversation strip for real (174 checks)
 cd <this plugin directory>
 node tests/smoke.mjs
 ```

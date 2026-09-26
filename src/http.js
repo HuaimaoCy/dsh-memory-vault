@@ -255,6 +255,9 @@ async function operate({ store, config, notify, curate }, body) {
         sessionId: typeof body.sessionId === 'string' && body.sessionId !== '' ? body.sessionId : null,
         autoSummary: body.autoSummary === true,
         priority: normalizePriority(body.priority),
+        // A panel-created group can be born inside another one; an empty value
+        // means the top level.
+        parent: typeof body.parent === 'string' && body.parent !== '' ? body.parent : null,
       })
       notify()
       return { group }
@@ -267,6 +270,9 @@ async function operate({ store, config, notify, curate }, body) {
         ...(body.tags === undefined ? {} : { tags: normalizeTags(body.tags) }),
         ...(typeof body.autoSummary === 'boolean' ? { autoSummary: body.autoSummary } : {}),
         ...(body.priority === undefined ? {} : { priority: normalizePriority(body.priority) }),
+        // Moves are explicit: only a supplied `parent` changes the tree, and
+        // null/'' is how the panel says "make this a top-level group".
+        ...(body.parent === undefined ? {} : { parent: typeof body.parent === 'string' && body.parent !== '' ? body.parent : null }),
       })
       notify()
       return { group, movedEntries }

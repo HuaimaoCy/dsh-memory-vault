@@ -73,7 +73,13 @@ function groupLine(group) {
   const auto = group.autoSummary ? ' · 自动总结' : ''
   const priority = Number(group.priority ?? 0) > 0 ? ` · P${String(group.priority)}` : ''
   const description = group.description === '' ? '' : ` — ${group.description}`
-  return `- ${group.id} · ${group.scope === 'knowledge' ? '知识库' : '对话记忆'} · ${group.name}${tags}${auto}${priority} · 组内 ${group.entryCount} 条${description}`
+  // Indentation is the whole point of sub-groups: the list has to read as a
+  // tree without the reader holding the parent column in their head.
+  const indent = '  '.repeat(Math.max(0, Number(group.depth ?? 1) - 1))
+  const under = group.depth > 1 && Array.isArray(group.path) && group.path.length > 0
+    ? `（${group.path.join(' / ')} 下）`
+    : ''
+  return `${indent}- ${group.id} · ${group.scope === 'knowledge' ? '知识库' : '对话记忆'} · ${group.name}${under}${tags}${auto}${priority} · 组内 ${group.entryCount} 条${description}`
 }
 
 /**
@@ -131,9 +137,10 @@ export function buildTools({ store, config, summarize, curate, notify }) {
   definitions.push(tool({
     name: 'memory_group',
     description: [
-      '管理知识与记忆库的记忆组：列出、创建、修改、删除，或整体切换一个记忆组的归属（对话记忆 / 知识库）。',
+      '管理知识与记忆库的记忆组：列出、创建、修改、移动（改挂父组）、删除，或整体切换一个记忆组的归属（对话记忆 / 知识库）。',
       '记忆组是记忆条目的一级容器；条目既可以在组之间移动，也可以单独改归属。',
-      'action=list 查看全部记忆组（含条目数），其余 action 需要 name 或 id 定位目标组。',
+      '记忆组可以嵌套成子记忆组（最多三层）：用 parent 指定父组，**应用父组时会连它的所有子组一起应用**，所以平铺的组多了以后应当收进父组。',
+      'action=list 查看全部记忆组（按树形缩进显示，含条目数与层级），其余 action 需要 name 或 id 定位目标组。',
     ].join('\n'),
     parameters: {
       type: 'object',
@@ -146,6 +153,10 @@ export function buildTools({ store, config, summarize, curate, notify }) {
         },
         name: { type: 'string', description: '记忆组名称：创建时必填；其他操作可与 id 二选一。' },
         id: { type: 'string', description: '记忆组 id；与 name 二选一。' },
+        parent: {
+          type: 'string',
+          description: '父记忆组的名称或 id：创建时给出就成为它的子记忆组；update 时给出就是移动过去。传空字符串表示移到顶层。最多三层。',
+        },
         scope: { type: 'string', enum: SCOPES, description: scopeDescription('整个组及其默认归属') },
         description: { type: 'string', description: '记忆组用途说明，写入后出现在记忆索引里。' },
         tags: { type: 'array', items: { type: 'string' }, description: '记忆组标签。' },
@@ -182,6 +193,7 @@ export function buildTools({ store, config, summarize, curate, notify }) {
             sessionId,
             autoSummary: args.autoSummary === true,
             priority: args.priority ?? 0,
+            parent: args.parent ?? null,
           })
           notify()
           return { action: 'create', group }
@@ -200,6 +212,9 @@ export function buildTools({ store, config, summarize, curate, notify }) {
             ...(args.tags === undefined ? {} : { tags: args.tags }),
             ...(args.autoSummary === undefined ? {} : { autoSummary: args.autoSummary }),
             ...(args.priority === undefined ? {} : { priority: args.priority }),
+            // `parent: ''` is a deliberate move to the top level, so only an
+            // omitted parameter means "leave it where it is".
+            ...(args.parent === undefined ? {} : { parent: args.parent }),
           })
           notify()
           return { action: args.action, group, movedEntries }
@@ -362,6 +377,10 @@ export function buildTools({ store, config, summarize, curate, notify }) {
         limit: { type: 'integer', description: `返回条数上限，默认 ${config.searchLimit}。` },
         withContent: { type: 'boolean', description: '是否返回正文，默认 true；只做目录浏览时可设 false。' },
         includeHidden: { type: 'boolean', description: '是否连已隐藏的记忆一起返回，默认 false。' },
+        includeChildren: {
+          type: 'boolean',
+          description: '按记忆组检索时是否连它的子记忆组一起检索，默认 true（子组里的记忆也算这个组的记忆）；设 false 只看该组自己。',
+        },
       },
     },
     execute: async (args) => {
@@ -373,14 +392,21 @@ export function buildTools({ store, config, summarize, curate, notify }) {
       const group = args.group === undefined ? undefined : store.requireGroup(args.group)
       const tag = args.tag === undefined ? undefined : String(args.tag).trim()
       const includeHidden = args.includeHidden === true
+      // Reading a heading reads what is filed under it, unless the caller asks
+      // for that group alone.
+      const groupIds = group === undefined
+        ? undefined
+        : args.includeChildren === false
+          ? [group.id]
+          : [group.id, ...store.descendantIds(group.id)]
       if (args.query === undefined || String(args.query).trim() === '') {
-        const entries = store.listEntries({ groupId: group?.id, scope: args.scope, tag, includeHidden, limit })
+        const entries = store.listEntries({ groupIds, scope: args.scope, tag, includeHidden, limit })
         return { mode: 'list', entries, total: entries.length, group: group ?? null, tag: tag ?? null }
       }
       const entries = store.searchEntries({
         query: args.query,
         scope: args.scope,
-        groupId: group?.id,
+        groupIds,
         tag,
         includeHidden,
         limit,

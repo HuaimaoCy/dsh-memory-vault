@@ -1032,6 +1032,11 @@ console.log('browser half')
     assert.ok(tree.includes('curateScopeAll'))
     assert.ok(tree.includes('select'))
   })
+  check('the group manager can nest and move groups', () => {
+    const tree = JSON.stringify(allElements(boardTree))
+    assert.ok(tree.includes('parentTop'), 'creating a group must offer a parent')
+    assert.ok(tree.includes('parentHint'), 'moving an existing group must be possible')
+  })
   check('board tiles are operable without a pointer', () => {
     const tile = withClass(boardTree, 'dsmv-tile')[0]
     assert.equal(tile.props.role, 'button')
@@ -1575,6 +1580,85 @@ const emptyCuration = await tool('memory_curate').execute({ action: 'review', id
 check('a curation over nothing explains why instead of failing silently', () => {
   assert.ok(String(emptyCuration).includes('没有可整理的记忆'), String(emptyCuration))
 })
+
+console.log('sub-groups')
+{
+  const root = await tool('memory_group').execute({ action: 'create', name: '父组样本', scope: 'knowledge' }, exec)
+  const child = await tool('memory_group').execute({
+    action: 'create', name: '子组样本', scope: 'knowledge', parent: '父组样本',
+  }, exec)
+  check('a group can be created inside another one', () => {
+    assert.equal(child.group.parentId, root.group.id)
+    assert.equal(child.group.depth, 2)
+    assert.deepEqual(child.group.path, ['父组样本'])
+  })
+  check('a group list renders the tree by indentation', () => {
+    const rendered = renderOf('memory_group', { action: 'list' }, {
+      action: 'list', count: 2, groups: [root.group, child.group],
+    })
+    assert.ok(rendered.includes('\n  - '), rendered)
+    assert.ok(rendered.includes('父组样本 下'), rendered)
+  })
+
+  // Applying the heading is what makes nesting worth having.
+  await tool('memory_write').execute({
+    group: '子组样本', entries: [{ content: '子组里的一条知识。', title: '子组条目' }],
+  }, exec)
+  await tool('memory_apply').execute({ session: sessionStub('session-subgroup'), action: 'set', groups: ['父组样本'] }, {
+    agent: { session: sessionStub('session-subgroup') },
+    signal: new AbortController().signal,
+  })
+  const plan = await request(panelRoute, 'GET', '/memory-vault?op=apply.get&sessionId=session-subgroup')
+  check('applying a parent applies its sub-groups too', () => {
+    // `groups` is what the session picked; `effectiveGroups` is what that
+    // resolves to once the subtree is folded in.
+    assert.deepEqual(plan.payload.result.groups.map(group => group.name), ['父组样本'])
+    assert.ok(plan.payload.result.effectiveGroups.includes(root.group.id), JSON.stringify(plan.payload.result.effectiveGroups))
+    assert.ok(plan.payload.result.effectiveGroups.includes(child.group.id), JSON.stringify(plan.payload.result.effectiveGroups))
+  })
+  const wide = await tool('memory_recall').execute({ group: '父组样本' }, exec)
+  check('reading a group reads its sub-groups', () => {
+    assert.ok(wide.entries.some(entry => entry.groupName === '子组样本'))
+  })
+  const exact = await tool('memory_recall').execute({ group: '父组样本', includeChildren: false }, exec)
+  check('a caller can read one group alone', () => {
+    assert.ok(!exact.entries.some(entry => entry.groupName === '子组样本'))
+  })
+
+  const deep = await tool('memory_group').execute({
+    action: 'create', name: '孙组样本', scope: 'knowledge', parent: '子组样本',
+  }, exec)
+  check('a third level is allowed', () => {
+    assert.equal(deep.group.depth, 3)
+    assert.deepEqual(deep.group.path, ['父组样本', '子组样本'])
+  })
+  const tooDeep = await tool('memory_group').execute({
+    action: 'create', name: '曾孙组', scope: 'knowledge', parent: '孙组样本',
+  }, exec).then(() => 'resolved', (error) => error.message)
+  check('a fourth level is refused by the depth ceiling', () => {
+    assert.ok(String(tooDeep).includes('最多 3 层'), String(tooDeep))
+  })
+  const cycle = await tool('memory_group').execute({ action: 'update', name: '父组样本', parent: '孙组样本' }, exec)
+    .then(() => 'resolved', (error) => error.message)
+  check('a group cannot be moved under its own descendant', () => {
+    assert.ok(String(cycle).includes('不能反过来'), String(cycle))
+  })
+  const orphan = await tool('memory_group').execute({ action: 'delete', name: '父组样本' }, exec)
+    .then(() => 'resolved', (error) => error.message)
+  check('deleting a parent with children is refused rather than orphaning them', () => {
+    assert.ok(String(orphan).includes('子记忆组'), String(orphan))
+  })
+  const moved = await tool('memory_group').execute({ action: 'update', name: '子组样本', parent: '' }, exec)
+  check('a sub-group can be moved back to the top level', () => {
+    assert.equal(moved.group.parentId, null)
+    assert.equal(moved.group.depth, 1)
+  })
+  const prompt = await request(panelRoute, 'GET', '/memory-vault?op=apply.get&sessionId=session-subgroup')
+  check('the knowledge plan still resolves after the tree moved', () => {
+    assert.equal(prompt.status, 200)
+    assert.ok(Array.isArray(prompt.payload.result.groups))
+  })
+}
 
 console.log('disposal')
 harness.dispose()
