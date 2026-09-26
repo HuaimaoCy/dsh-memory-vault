@@ -299,6 +299,10 @@ async function operate({ store, config, notify, curate }, body) {
         kind: body.kind === undefined || body.kind === '' ? current.kind : body.kind,
         tags: body.tags === undefined ? current.tags : body.tags,
         priority: body.priority === undefined ? current.priority : body.priority,
+        // Base-layer membership has to round-trip through the validator too:
+        // leaving it out defaulted every save to `false`, which silently
+        // cleared the flag on any edit and made the panel's toggle a no-op.
+        base: body.base === undefined ? current.base : body.base,
       }, ENTRY_KINDS, config)
       const entry = store.updateEntry(current.id, fields)
       notify()
@@ -372,6 +376,9 @@ async function operate({ store, config, notify, curate }, body) {
         limit: intParam(body.limit, { min: 1, max: 50, fallback: 20 }, 'limit'),
         apply: body.apply === true,
         applyPriority: body.applyPriority === true,
+        // Default generated: a memory a person typed in is left alone unless
+        // the panel explicitly widens the pass.
+        origin: body.origin === 'all' || body.origin === 'manual' ? body.origin : 'generated',
       })
       notify()
       return result

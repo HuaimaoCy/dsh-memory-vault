@@ -24,7 +24,7 @@ export const SCOPES = ['conversation', 'knowledge']
 export const ENTRY_KINDS = ['summary', 'fact', 'preference', 'decision', 'task', 'note']
 
 /** Bumped when a migration below changes the on-disk layout. */
-export const SCHEMA_VERSION = 4
+export const SCHEMA_VERSION = 5
 
 export { MAX_PRIORITY, normalizePriority } from './policy.js'
 /**
@@ -63,6 +63,21 @@ const MIGRATIONS = [
     summary: '底层 prompt 标记',
     apply: (db) => {
       addColumnIfMissing(db, 'entries', 'base', 'INTEGER NOT NULL DEFAULT 0')
+    },
+  },
+  {
+    version: 5,
+    summary: '区分人工输入与 AI 生成的记忆',
+    apply: (db) => {
+      // Memories the model wrote mid-conversation were filed as human input:
+      // the tool recorded `manual` together with a session id, and no
+      // hand-written row has that pair — the panel writes `panel` and no
+      // session. This is the one place where the two can still be told apart.
+      db.exec("UPDATE entries SET source = 'model-write' WHERE source = 'manual' AND session_id IS NOT NULL")
+      // 「AI自动总结」 named only the summarizer, so a model-written memory and a
+      // summarized record looked identical. The tag now names the axis.
+      db.exec(`UPDATE entries SET tags = replace(tags, '"${AUTO_TAG_GENERATED_LEGACY}"', '"${AUTO_TAG_GENERATED}"') WHERE tags LIKE '%${AUTO_TAG_GENERATED_LEGACY}%'`)
+      db.exec(`UPDATE entries SET tags = replace(tags, '"${AUTO_TAG_MANUAL}"', '"${AUTO_TAG_GENERATED}"') WHERE source = 'model-write' AND tags LIKE '%${AUTO_TAG_MANUAL}%'`)
     },
   },
 ]
@@ -210,8 +225,8 @@ export function normalizeTags(tags) {
   return [...seen]
 }
 
-/** System tag every model- or threshold-generated memory carries. */
-export const AUTO_TAG_GENERATED = 'AI自动总结'
+/** System tag every model-written memory carries, however it was produced. */
+export const AUTO_TAG_GENERATED = 'AI 生成'
 
 /** System tag every human-written memory carries. */
 export const AUTO_TAG_MANUAL = '人工输入'
@@ -220,14 +235,43 @@ export const AUTO_TAG_MANUAL = '人工输入'
 export const AUTO_TAGS = [AUTO_TAG_GENERATED, AUTO_TAG_MANUAL]
 
 /**
+ * The tag this one replaced.
+ *
+ * 「AI自动总结」 described only the summarizer, so a memory the model wrote
+ * during a conversation and a record the threshold produced looked identical —
+ * and worse, a model-initiated `memory_write` was filed as human input. The
+ * rename is what makes origin a real distinction; existing rows are rewritten
+ * by the migration in this same file.
+ */
+export const AUTO_TAG_GENERATED_LEGACY = 'AI自动总结'
+
+/**
+ * Tags the vault owns.
+ *
+ * Callers may not set them, and the retired name is stripped as well: leaving
+ * it settable would let a write reintroduce a tag the migration just removed.
+ */
+const RESERVED_TAGS = [...AUTO_TAGS, AUTO_TAG_GENERATED_LEGACY]
+
+/**
  * Provenance markers whose body was written by a model rather than by a person.
  *
- * `auto-summary` is the threshold-driven run and `model-summary` is a
- * summarization a person asked for; both produce machine-written text, so both
- * carry the generated tag. Which one ran is recorded on the summary record,
- * not in the tag.
+ * `auto-summary` is the threshold-driven run, `model-summary` is a
+ * summarization a person asked for, and `model-write` is the model calling
+ * `memory_write` mid-turn; all three produce machine-written text, so all three
+ * carry the generated tag. Which one ran stays on the row's `source`, so the
+ * detail view can still say precisely where the text came from.
  */
-const MODEL_SOURCES = ['auto-summary', 'model-summary']
+const MODEL_SOURCES = ['auto-summary', 'model-summary', 'model-write']
+
+/**
+ * Whether one provenance marker means a model wrote the text.
+ * @param {string} source - Entry provenance (`model-summary`, `model-write`, `panel`, ...).
+ * @returns {boolean} True for machine-written text.
+ */
+export function isModelWritten(source) {
+  return MODEL_SOURCES.includes(String(source))
+}
 
 /**
  * The system tag one provenance marker implies.
@@ -235,7 +279,7 @@ const MODEL_SOURCES = ['auto-summary', 'model-summary']
  * @returns {string} The matching system tag.
  */
 export function autoTagFor(source) {
-  return MODEL_SOURCES.includes(source) ? AUTO_TAG_GENERATED : AUTO_TAG_MANUAL
+  return isModelWritten(source) ? AUTO_TAG_GENERATED : AUTO_TAG_MANUAL
 }
 
 /**
@@ -247,7 +291,7 @@ export function autoTagFor(source) {
  * @returns {string[]} Canonical tags with exactly one system tag.
  */
 export function withAutoTag(tags, source) {
-  return [...normalizeTags(tags).filter(tag => !AUTO_TAGS.includes(tag)), autoTagFor(source)]
+  return [...normalizeTags(tags).filter(tag => !RESERVED_TAGS.includes(tag)), autoTagFor(source)]
 }
 
 /**
@@ -291,6 +335,9 @@ function entryView(row) {
     autoTag: autoTagFor(String(row.source)),
     hidden: row.hidden === 1,
     priority: Number(row.priority ?? 0),
+    // Who wrote the body. The tag says the same thing in one word; this is the
+    // precise provenance, and the detail view shows it.
+    modelWritten: isModelWritten(String(row.source)),
     // The base layer rides in every conversation's prompt and is counted
     // separately from the knowledge a session chooses to apply.
     base: row.base === 1,
@@ -391,7 +438,10 @@ export class MemoryStore {
     for (const row of rows) {
       const tags = parseTags(/** @type {string} */ (row.tags))
       const expected = autoTagFor(String(row.source))
-      if (tags.includes(expected)) continue
+      // A row that carries the retired name alongside the current one is stale
+      // even though the expected tag is present, so it is rewritten too.
+      const retired = tags.some(tag => RESERVED_TAGS.includes(tag) && tag !== expected)
+      if (tags.includes(expected) && !retired) continue
       pending.push({
         id: String(row.id),
         tags: JSON.stringify(withAutoTag(tags, String(row.source))),
@@ -961,6 +1011,12 @@ export class MemoryStore {
     if (filter.base !== undefined) {
       clauses.push('e.base = ?')
       values.push(filter.base === true ? 1 : 0)
+    }
+    // Origin is a real axis, not a label: curation and the panel both scope by
+    // it, and hand-written memories are deliberately left alone by default.
+    if (filter.origin === 'generated' || filter.origin === 'manual') {
+      clauses.push(`e.source ${filter.origin === 'generated' ? 'IN' : 'NOT IN'} (${MODEL_SOURCES.map(() => '?').join(', ')})`)
+      values.push(...MODEL_SOURCES)
     }
     if (filter.groupId !== undefined) {
       clauses.push('e.group_id = ?')

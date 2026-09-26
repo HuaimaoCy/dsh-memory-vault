@@ -261,22 +261,26 @@ check('search respects the assignment filter', () => {
   assert.equal(missed.entries.length, 0)
 })
 
-console.log('system tags')
-check('a hand-written memory carries the manual system tag', () => {
-  assert.equal(written.entries[0].autoTag, '人工输入')
-  assert.ok(written.entries[0].tags.includes('人工输入'))
+console.log('origin: 人工输入 vs AI 生成')
+check('a memory the model writes is tagged AI 生成, never 人工输入', () => {
+  assert.equal(written.entries[0].autoTag, 'AI 生成')
+  assert.ok(written.entries[0].tags.includes('AI 生成'))
+  assert.equal(written.entries[0].source, 'model-write')
+  assert.equal(written.entries[0].modelWritten, true)
 })
 const forged = await tool('memory_write').execute({
   group: '知识库',
   entries: [{ content: '试图伪装成 AI 总结。', tags: ['AI自动总结', '真实标签'] }],
 }, exec)
 check('the system tag follows provenance, not the caller', () => {
-  assert.deepEqual(forged.entries[0].tags, ['真实标签', '人工输入'])
+  // A model write cannot pass itself off as human input, and the legacy tag a
+  // caller supplies is stripped rather than stored.
+  assert.deepEqual(forged.entries[0].tags, ['真实标签', 'AI 生成'])
 })
-const tagged = await tool('memory_recall').execute({ tag: '人工输入' }, exec)
+const tagged = await tool('memory_recall').execute({ tag: 'AI 生成' }, exec)
 check('the system tag filters the vault', () => {
   assert.ok(tagged.entries.length >= 2)
-  assert.ok(tagged.entries.every(entry => entry.tags.includes('人工输入')))
+  assert.ok(tagged.entries.every(entry => entry.tags.includes('AI 生成')))
 })
 const taggedUser = await tool('memory_recall').execute({ tag: '构建' }, exec)
 check('a user tag filters the vault exactly', () => {
@@ -407,11 +411,11 @@ check('hiding reports the new state', () => {
   assert.equal(hidden.hidden, true)
   assert.equal(hidden.entries[0].hidden, true)
 })
-const afterHide = await tool('memory_recall').execute({ tag: '人工输入' }, exec)
+const afterHide = await tool('memory_recall').execute({ tag: 'AI 生成' }, exec)
 check('a hidden memory leaves every default read', () => {
   assert.ok(!afterHide.entries.some(entry => entry.id === forged.entries[0].id))
 })
-const withHidden = await tool('memory_recall').execute({ tag: '人工输入', includeHidden: true }, exec)
+const withHidden = await tool('memory_recall').execute({ tag: 'AI 生成', includeHidden: true }, exec)
 check('includeHidden returns it, marked hidden', () => {
   assert.ok(withHidden.entries.some(entry => entry.id === forged.entries[0].id && entry.hidden === true))
 })
@@ -489,21 +493,21 @@ check('state publishes the tag vocabulary the panel filters with', () => {
   const tags = state.payload.result.tags
   assert.ok(Array.isArray(tags) && tags.length >= 3)
   assert.ok(tags.some(item => item.tag === '人工输入' && item.system === true))
-  assert.ok(tags.some(item => item.tag === 'AI自动总结' && item.system === true))
+  assert.ok(tags.some(item => item.tag === 'AI 生成' && item.system === true))
   assert.ok(tags.some(item => item.tag === '构建' && item.system === false))
 })
 check('state publishes the deployment default the panel shows', () => {
   assert.equal(state.payload.result.apply.byDefault, true)
   assert.deepEqual(state.payload.result.apply.defaults, ['知识库'])
 })
-const byTag = await request(panelRoute, 'GET', '/memory-vault?op=entries&tag=%E4%BA%BA%E5%B7%A5%E8%BE%93%E5%85%A5')
+const byTag = await request(panelRoute, 'GET', '/memory-vault?op=entries&tag=AI%20%E7%94%9F%E6%88%90')
 check('the panel can filter by tag', () => {
   assert.ok(byTag.payload.result.entries.length >= 2)
-  assert.ok(byTag.payload.result.entries.every(entry => entry.tags.includes('人工输入')))
+  assert.ok(byTag.payload.result.entries.every(entry => entry.tags.includes('AI 生成')))
 })
 const stripped = await request(panelRoute, 'POST', '/memory-vault', { op: 'entry.update', id: forged.entries[0].id, tags: [] })
 check('clearing tags through the panel keeps the provenance tag', () => {
-  assert.deepEqual(stripped.payload.result.entry.tags, ['人工输入'])
+  assert.deepEqual(stripped.payload.result.entry.tags, ['AI 生成'])
 })
 const panelHidden = await request(panelRoute, 'POST', '/memory-vault', { op: 'entry.hide', ids: [forged.entries[0].id], hidden: true })
 check('the panel can hide a memory', () => {
@@ -579,6 +583,62 @@ const panelDeleted = await request(panelRoute, 'POST', '/memory-vault', { op: 'e
 check('the panel can delete a memory', () => {
   assert.equal(panelDeleted.payload.result.entry.id, panelWrote.payload.result.entry.id)
 })
+
+console.log('origin migration: 人工输入 vs AI 生成')
+{
+  // A v4 vault as the old code left it: the model's own writes were filed as
+  // `manual` with a session id, and machine-written rows carried the tag that
+  // only named the summarizer.
+  const v4Path = join(dir, 'origin-v4.sqlite')
+  const v4 = new MemoryStore({ path: v4Path })
+  const v4Group = v4.createGroup({ name: 'v4 组', scope: 'knowledge' })
+  const byModel = v4.createEntry({
+    groupId: v4Group.id, content: '模型在会话里写下的结论。', source: 'manual', sessionId: 'session-old',
+  })
+  const byPerson = v4.createEntry({ groupId: v4Group.id, content: '人在面板里手写的。', source: 'panel' })
+  const bySummary = v4.createEntry({ groupId: v4Group.id, content: '自动总结出来的。', source: 'auto-summary' })
+  v4.close()
+  const rawV4 = new DatabaseSync(v4Path)
+  rawV4.prepare('UPDATE entries SET tags = ? WHERE id = ?').run(JSON.stringify(['人工输入', '架构']), byModel.id)
+  rawV4.prepare('UPDATE entries SET tags = ? WHERE id = ?').run(JSON.stringify(['AI自动总结']), bySummary.id)
+  rawV4.exec('PRAGMA user_version = 4')
+  rawV4.close()
+
+  const migrated = new MemoryStore({ path: v4Path })
+  check('a model-written row from the old schema is reclassified as AI-written', () => {
+    const entry = migrated.findEntry(byModel.id)
+    assert.equal(entry.source, 'model-write')
+    assert.equal(entry.modelWritten, true)
+    // The migration rewrites the tag in place, so it keeps the position it had;
+    // display order is decided by the readers, not by the stored array.
+    assert.deepEqual(entry.tags, ['AI 生成', '架构'])
+  })
+  check('a hand-written row keeps 人工输入', () => {
+    const entry = migrated.findEntry(byPerson.id)
+    assert.equal(entry.source, 'panel')
+    assert.equal(entry.modelWritten, false)
+    assert.ok(entry.tags.includes('人工输入'))
+  })
+  check('the retired tag is rewritten wherever it survived', () => {
+    const entry = migrated.findEntry(bySummary.id)
+    assert.ok(entry.tags.includes('AI 生成'), JSON.stringify(entry.tags))
+    assert.ok(!entry.tags.includes('AI自动总结'), JSON.stringify(entry.tags))
+  })
+  check('a caller cannot reintroduce the retired tag', () => {
+    const smuggled = migrated.createEntry({
+      groupId: v4Group.id, content: '试图塞回旧标签。', tags: ['AI自动总结', '人工输入', '保留'],
+    })
+    assert.deepEqual(smuggled.tags, ['保留', '人工输入'])
+  })
+  check('origin scoping reads the migrated rows correctly', () => {
+    const generated = migrated.listEntries({ origin: 'generated' }).map(entry => entry.id)
+    const manual = migrated.listEntries({ origin: 'manual' }).map(entry => entry.id)
+    assert.ok(generated.includes(byModel.id) && generated.includes(bySummary.id))
+    assert.ok(!generated.includes(byPerson.id))
+    assert.ok(manual.includes(byPerson.id) && !manual.includes(byModel.id))
+  })
+  migrated.close()
+}
 
 console.log('legacy migration')
 {
@@ -725,22 +785,26 @@ console.log('browser half')
     assert.deepEqual(termsOf(''), [])
   })
   check('provenance resolves with and without the Host-provided field', () => {
-    assert.equal(autoTagOf({ source: 'auto-summary' }), 'AI自动总结')
+    assert.equal(autoTagOf({ source: 'auto-summary' }), 'AI 生成')
+    assert.equal(autoTagOf({ source: 'model-write' }), 'AI 生成')
     assert.equal(autoTagOf({ source: 'manual' }), '人工输入')
     assert.equal(autoTagOf({ source: 'panel' }), '人工输入')
     assert.equal(autoTagOf({ autoTag: '人工输入', source: 'auto-summary' }), '人工输入')
   })
   check('the system tag leads the tag list and never repeats', () => {
-    assert.deepEqual(tagsOf({ source: 'auto-summary', tags: ['人工输入', '架构'] }), ['AI自动总结', '架构'])
+    assert.deepEqual(tagsOf({ source: 'auto-summary', tags: ['人工输入', '架构'] }), ['AI 生成', '架构'])
+    assert.deepEqual(tagsOf({ source: 'model-write', tags: ['AI自动总结', '架构'] }), ['AI 生成', '架构'])
     assert.deepEqual(tagsOf({ source: 'manual', tags: [] }), ['人工输入'])
   })
   check('the fallback tag inventory counts entries and orders system tags first', () => {
     const inventory = deriveTagInventory([
       { source: 'manual', tags: ['人工输入', '架构'] },
-      { source: 'manual', tags: ['人工输入', '架构', 'dsh'] },
-      { source: 'auto-summary', tags: ['AI自动总结'] },
+      { source: 'model-write', tags: ['人工输入', '架构', 'dsh'] },
+      { source: 'auto-summary', tags: ['AI 生成'] },
     ])
-    assert.deepEqual(inventory.map(item => item.tag), ['人工输入', '架构', 'AI自动总结', 'dsh'])
+    // Sorted by count, then system tags first, then by name: 架构 and AI 生成
+    // both have two, and the system tag wins the tie.
+    assert.deepEqual(inventory.map(item => item.tag), ['AI 生成', '架构', '人工输入', 'dsh'])
     assert.equal(inventory[0].count, 2)
     assert.equal(inventory[0].system, true)
     assert.equal(inventory[3].system, false)
@@ -949,8 +1013,12 @@ console.log('browser half')
     assert.ok(tree.includes('baseBadge'), 'and mark a base-prompt memory')
   })
   check('the board offers a curation button of its own', () => {
-    assert.ok(JSON.stringify(allElements(boardTree)).includes('curateReview'))
-    assert.ok(JSON.stringify(allElements(boardTree)).includes('select'))
+    const tree = JSON.stringify(allElements(boardTree))
+    // One press files the verdicts; the scope pills say which origin is judged.
+    assert.ok(tree.includes('curateNow'), 'curation must be reachable in one press')
+    assert.ok(tree.includes('curateScopeGenerated'))
+    assert.ok(tree.includes('curateScopeAll'))
+    assert.ok(tree.includes('select'))
   })
   check('board tiles are operable without a pointer', () => {
     const tile = withClass(boardTree, 'dsmv-tile')[0]
@@ -1222,7 +1290,7 @@ const modelTagExec = { agent: { session: sessionStub('session-model-tag') }, sig
 const modelWritten = await tool('memory_summarize').execute({ group: '知识库' }, modelTagExec)
 check('a model-written record is tagged as generated even when asked for by hand', () => {
   assert.equal(modelWritten.entry.source, 'model-summary')
-  assert.ok(modelWritten.entry.tags.includes('AI自动总结'), JSON.stringify(modelWritten.entry.tags))
+  assert.ok(modelWritten.entry.tags.includes('AI 生成'), JSON.stringify(modelWritten.entry.tags))
 })
 const handWritten = await tool('memory_summarize').execute({ group: '知识库', content: '手写结论。' }, exec)
 check('a caller-written record stays hand-written', () => {
@@ -1442,12 +1510,53 @@ check('the curation result separates the two verdicts', () => {
   assert.ok(curationRendered.includes('单次性'))
 })
 const panelCuration = await request(panelRoute, 'POST', '/memory-vault', {
-  op: 'curate', group: '优先级测试', limit: 2, apply: false,
+  op: 'curate', group: '优先级测试', limit: 2, apply: false, origin: 'all',
 })
 check('the panel curates on the route of the last turn, with no provider configured', () => {
   assert.equal(panelCuration.status, 200, JSON.stringify(panelCuration.payload))
   assert.equal(panelCuration.payload.result.mode, 'review')
   assert.equal(panelCuration.payload.result.verdicts.length, 2)
+})
+// Origin is the axis the panel must not blur: by default a curation pass judges
+// what the model wrote and leaves what a person typed alone.
+const manualOnly = await request(panelRoute, 'POST', '/memory-vault', {
+  op: 'curate', origin: 'manual', limit: 3, apply: false,
+})
+check('a curation pass can be scoped to human input', () => {
+  assert.equal(manualOnly.status, 200, JSON.stringify(manualOnly.payload))
+  assert.equal(manualOnly.payload.result.origin, 'manual')
+  assert.ok(manualOnly.payload.result.candidates.every(entry => entry.modelWritten === false))
+})
+const generatedDefault = await tool('memory_curate').execute({ action: 'review', limit: 5 }, exec)
+check('the default scope judges only AI-written memories', () => {
+  assert.equal(generatedDefault.origin, 'generated')
+  assert.equal(generatedDefault.candidates.length, 5)
+  assert.ok(generatedDefault.candidates.every(entry => entry.modelWritten === true))
+  assert.ok(generatedDefault.verdicts.every(item => item.modelWritten === true))
+})
+const handWrittenRow = await request(panelRoute, 'POST', '/memory-vault', {
+  op: 'entry.write', group: '知识库', content: '人工写下的一条，用来验证整理范围。', title: '人工样本',
+})
+const handId = handWrittenRow.payload.result.entry.id
+check('a memory typed into the panel is human input, not AI output', () => {
+  assert.equal(handWrittenRow.payload.result.entry.source, 'panel')
+  assert.equal(handWrittenRow.payload.result.entry.modelWritten, false)
+  assert.ok(handWrittenRow.payload.result.entry.tags.includes('人工输入'))
+})
+const widened = await tool('memory_curate').execute({
+  action: 'review', origin: 'all', ids: [handId, generatedDefault.candidates[0].id],
+}, exec)
+check('widening the scope reaches human input too', () => {
+  assert.equal(widened.origin, 'all')
+  assert.equal(widened.candidates.length, 2)
+  assert.ok(widened.candidates.some(entry => entry.modelWritten === false))
+  assert.ok(widened.candidates.some(entry => entry.modelWritten === true))
+})
+const outOfScope = await tool('memory_curate').execute({ action: 'review', origin: 'generated', ids: [handId] }, exec)
+  .then(() => 'resolved', (error) => error.message)
+check('a scoped pass refuses an id that sits outside its scope', () => {
+  assert.ok(String(outOfScope).includes('没有可整理的记忆'), String(outOfScope))
+  assert.ok(String(outOfScope).includes('范围'), String(outOfScope))
 })
 const emptyCuration = await tool('memory_curate').execute({ action: 'review', ids: ['mem_missing'] }, exec)
   .then(() => 'resolved', (error) => error.message)

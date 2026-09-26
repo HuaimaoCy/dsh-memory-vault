@@ -323,19 +323,33 @@ export function apply(ctx, config) {
    * @param {number} [request.limit] - Batch cap.
    * @param {boolean} [request.apply] - Whether to write the verdicts.
    * @param {boolean} [request.applyPriority] - Whether reusable memories also get a priority bump.
+   * @param {'generated'|'manual'|'all'} [request.origin] - Which origin to judge; `generated` by default.
    * @param {AbortSignal} [request.signal] - Caller cancellation.
    * @returns {Promise<Record<string, unknown>>} The verdicts and, when applied, what changed.
    */
-  const curate = async ({ session, ids, group, limit = 20, apply = false, applyPriority = false, signal }) => {
+  const curate = async ({ session, ids, group, limit = 20, apply = false, applyPriority = false, origin = 'generated', signal }) => {
     const cap = Math.max(1, Math.min(50, Math.trunc(Number(limit) || 20)))
+    // Origin decides the batch. A memory a person deliberately typed in has
+    // already been curated by them, so by default only machine-written memories
+    // are judged; `all` is there for the deliberate wider pass.
+    const scope = origin === 'all' ? undefined : origin === 'manual' ? 'manual' : 'generated'
     const candidates = Array.isArray(ids) && ids.length > 0
-      ? ids.map(id => store.findEntry(String(id))).filter(entry => entry !== undefined).slice(0, cap)
+      ? ids.map(id => store.findEntry(String(id)))
+          .filter(entry => entry !== undefined)
+          .filter(entry => scope === undefined || entry.modelWritten === (scope === 'generated'))
+          .slice(0, cap)
       : store.listEntries({
           groupId: group === undefined || group === '' ? undefined : store.requireGroup(group).id,
+          origin: scope,
           limit: cap,
         })
     if (candidates.length === 0) {
-      throw new Error('没有可整理的记忆：换一个记忆组，或先用 memory_write 写入内容')
+      const scopeLabel = scope === 'manual' ? '人工输入' : 'AI 生成'
+      throw new Error(Array.isArray(ids) && ids.length > 0
+        ? `给出的 ${ids.length} 个 id 里没有可整理的记忆：可能不存在，或不在「${scopeLabel}」范围内`
+        : scope === 'generated'
+          ? '没有可整理的 AI 生成记忆：把范围改成「全部」可以连人工输入的一起整理'
+          : '没有可整理的记忆：换一个记忆组，或先用 memory_write 写入内容')
     }
     const route = config.summarizerProvider !== null && config.summarizerModel !== null
       ? { provider: config.summarizerProvider, model: config.summarizerModel }
@@ -357,27 +371,32 @@ export function apply(ctx, config) {
       signal,
     })
     const known = new Map(candidates.map(entry => [entry.id, entry]))
-    const verdicts = parseCuration(record.text).filter(verdict => known.has(verdict.id))
+    const verdicts = parseCuration(record.text)
+      .filter(verdict => known.has(verdict.id))
+      // Each verdict carries its origin, so both the panel and the tool result
+      // can show which side of the line a memory sits on.
+      .map(verdict => ({ ...verdict, modelWritten: known.get(verdict.id).modelWritten === true }))
     const model = { provider: record.provider, model: record.model }
-    if (!apply) return { mode: 'review', candidates, verdicts, applied: [], model }
+    if (!apply) return { mode: 'review', origin: scope ?? 'all', candidates, verdicts, applied: [], model }
 
     // Every verdict lands in one transaction: a half-curated batch would leave
     // the vault in a state neither the old nor the new reading explains.
     const applied = store.transaction(() => verdicts.map(verdict => {
       const entry = /** @type {Record<string, any>} */ (known.get(verdict.id))
+      const originLabel = entry.modelWritten === true ? 'AI 生成' : '人工输入'
       if (verdict.verdict === 'oneoff') {
         store.assignEntries({ ids: [entry.id], scope: 'conversation', groupId: null, assignedBy: 'manual' })
-        return { id: entry.id, verdict: 'oneoff', scope: 'conversation', group: entry.groupName ?? '', reason: verdict.reason }
+        return { id: entry.id, verdict: 'oneoff', scope: 'conversation', group: entry.groupName ?? '', reason: verdict.reason, origin: originLabel }
       }
       const name = targetGroupFor(verdict, config.knowledgeGroupName)
       const target = store.findGroup(name)
         ?? store.createGroup({ name, scope: 'knowledge', description: '由 AI 整理归类建立' })
       store.assignEntries({ ids: [entry.id], scope: 'knowledge', groupId: target.id, assignedBy: 'manual' })
       if (applyPriority) store.updateEntry(entry.id, { priority: Math.max(60, Number(entry.priority ?? 0)) })
-      return { id: entry.id, verdict: 'reusable', scope: 'knowledge', group: target.name, reason: verdict.reason }
+      return { id: entry.id, verdict: 'reusable', scope: 'knowledge', group: target.name, reason: verdict.reason, origin: originLabel }
     }))
     notify()
-    return { mode: 'applied', candidates, verdicts, applied, model }
+    return { mode: 'applied', origin: scope ?? 'all', candidates, verdicts, applied, model }
   }
 
   // Tools are the vault's primary surface: everything a person can do from the

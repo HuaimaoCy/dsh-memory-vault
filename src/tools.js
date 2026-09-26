@@ -326,7 +326,9 @@ export function buildTools({ store, config, summarize, curate, notify }) {
       const written = store.createEntries(batch.map(fields => ({
         groupId: group.id,
         ...fields,
-        source: 'manual',
+        // The model wrote this, not a person: filing it as `manual` made every
+        // model-written memory show up as 「人工输入」 in the panel.
+        source: 'model-write',
         sessionId,
         scope: args.scope ?? null,
       })))
@@ -663,15 +665,21 @@ export function buildTools({ store, config, summarize, curate, notify }) {
     name: 'memory_curate',
     description: [
       '用一次模型调用整理知识库：逐条判断记忆属于「可复用」（跨会话仍然成立的结论、事实、约定、偏好、可复用步骤）还是「单次性」（只对某次任务或临时环境成立的细节、进度与过程）。',
-      'action=review 只给出分类建议、理由与建议的记忆组，不写入任何东西；action=apply 才按建议落库：可复用的提升到知识库并归入建议的记忆组，单次性的改回对话记忆。',
+      '用 origin 选择整理范围，这是来源而不是操作：generated（默认）只整理「AI 生成」的记忆——模型自动总结出来的和在会话里写进去的；manual 只整理「人工输入」的（人特意写下的）；all 两者一起。人工输入的记忆已经被人整理过一次，所以默认不动它们。',
+      'action=review 只给出分类建议、理由与建议的记忆组，不写入任何东西；action=apply 直接落库：可复用的提升到知识库并归入建议的记忆组，单次性的改回对话记忆。',
       '一次最多处理 50 条，默认 20；用 group 指定某个记忆组，或用 ids 指定具体几条。',
-      '整理会改变归属与分组，建议先 review 看一眼再 apply；对同一批反复 apply 是幂等的。',
+      '想先看一眼再用 action=review，确认后 action=apply；直接 apply 也是允许的，两次调用之间对同一批反复整理是幂等的。',
     ].join('\n'),
     parameters: {
       type: 'object',
       additionalProperties: false,
       properties: {
-        action: { type: 'string', enum: ['review', 'apply'], description: 'review 只给建议；apply 按建议落库。' },
+        action: { type: 'string', enum: ['review', 'apply'], description: 'review 只给建议；apply 直接落库。' },
+        origin: {
+          type: 'string',
+          enum: ['generated', 'manual', 'all'],
+          description: '整理范围（按来源）：generated 默认，只整理 AI 生成的记忆；manual 只整理人工输入的；all 两者都整。',
+        },
         group: { type: 'string', description: '要整理的记忆组名称或 id；省略时按 limit 取全库最新的若干条。' },
         ids: { type: 'array', items: { type: 'string' }, description: '只整理这些记忆 id。' },
         limit: { type: 'number', description: '一次最多整理多少条，默认 20，上限 50。' },
@@ -691,24 +699,26 @@ export function buildTools({ store, config, summarize, curate, notify }) {
         limit: args.limit,
         apply: args.action === 'apply',
         applyPriority: args.applyPriority === true,
+        origin: args.origin,
         signal: exec.signal,
       })
       return { action: args.action, ...result }
     },
     render: (_args, value) => {
       const verdicts = /** @type {Record<string, any>[]} */ (value.verdicts)
+      const scopeLabel = value.origin === 'manual' ? '人工输入' : value.origin === 'all' ? '全部来源' : 'AI 生成'
       const head = value.mode === 'review'
-        ? `整理建议（模型 ${String(value.model?.provider)}/${String(value.model?.model)}，共 ${String(value.candidates.length)} 条，未写入）：`
-        : `已整理 ${String(value.applied.length)} 条记忆（模型 ${String(value.model?.provider)}/${String(value.model?.model)}）：`
+        ? `整理建议（范围 ${scopeLabel} · 模型 ${String(value.model?.provider)}/${String(value.model?.model)}，共 ${String(value.candidates.length)} 条，未写入）：`
+        : `已整理 ${String(value.applied.length)} 条记忆（范围 ${scopeLabel} · 模型 ${String(value.model?.provider)}/${String(value.model?.model)}）：`
       if (verdicts.length === 0) return `${head}\n模型没有给出可用的判断，请重试或缩小整理范围。`
       const reusable = verdicts.filter(item => item.verdict === 'reusable')
       const oneoff = verdicts.filter(item => item.verdict === 'oneoff')
       const lines = [
         head,
         `可复用 ${String(reusable.length)} 条：`,
-        ...reusable.map(item => `- ${item.id} → 记忆组「${item.group}」：${item.reason}`),
+        ...reusable.map(item => `- 【${item.modelWritten === true ? 'AI 生成' : '人工输入'}】${item.id} → 记忆组「${item.group}」：${item.reason}`),
         `单次性 ${String(oneoff.length)} 条：`,
-        ...oneoff.map(item => `- ${item.id}：${item.reason}`),
+        ...oneoff.map(item => `- 【${item.modelWritten === true ? 'AI 生成' : '人工输入'}】${item.id}：${item.reason}`),
       ]
       if (value.mode === 'review') lines.push('确认无误后用 action=apply 落库。')
       return lines.join('\n')

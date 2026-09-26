@@ -25,6 +25,8 @@ export const CURATE_SYSTEM_PROMPT = [
   '',
   '其它要求：',
   '- 每条都必须给出 verdict，不确定时倾向 oneoff（宁可少收录，不要把一次性内容固化）。',
+  '- 输入标着「人工输入」的记忆是人特意写下的，已经被人整理过一次：除非它明显只对某一次任务成立，否则倾向 reusable。',
+  '- 输入标着「AI 生成」的记忆是模型写的（自动总结或在会话中写入），它们才是主要需要判断的对象：进度、过程与临时状态多半在这里。',
   '- group 用简短的中文名词短语（4-12 字），同一批里语义相同的必须用完全相同的名称，便于归并成组；不要用「其他」「杂项」这类无信息量的名称。',
   '- reason 不超过 30 字，说清判断依据。',
   '- 不要编造 id，只能使用输入里出现过的 id。',
@@ -42,6 +44,7 @@ export function buildCurationMessage(entries) {
     return [
       `id: ${String(entry.id)}`,
       `标题: ${title}`,
+      `来源: ${entry.modelWritten === true ? 'AI 生成' : '人工输入'}`,
       `当前归属: ${entry.scope === 'knowledge' ? '知识库' : '对话记忆'}`,
       `当前记忆组: ${String(entry.groupName ?? '')}`,
       `类型: ${String(entry.kind)}`,

@@ -130,20 +130,50 @@ The quota decides how many *applied* memories a conversation injects (12 by defa
 - `applyMaxEntries` / `applyMaxChars` in the config remain the deployment defaults; the panel writes an override, and setting it back to the default restores it.
 - The base layer is not part of that number — the two budgets are separate.
 
+### Origin and operation are two axes
+
+These are not the same thing, and they used to be blurred: **origin** says who
+wrote a memory, **operation** says what is being run on it now.
+
+| | Meaning | Produced by |
+|---|---|---|
+| **人工输入** (human input) | text a person wrote | the panel's editor; a `content` you supply to a manual summary |
+| **AI 生成** (AI-written) | text a model wrote | the threshold summarizer, a model summarization, and **a `memory_write` the model calls mid-conversation** |
+| **AI 整理** (AI curation) | an **operation**: it writes no new memory, it only moves entries between scopes and groups | the panel button, or the model calling `memory_curate` |
+
+`memory_write` recorded its provenance as `manual`, so **a memory the model
+wrote during a conversation showed up in the panel as 「人工输入」**. That is
+what this release corrects:
+
+- A model write records `model-write` and carries the **AI 生成** tag; a panel
+  write records `panel` and carries **人工输入**.
+- The old tag 「AI自动总结」 named only the summarizer and is now **「AI 生成」**,
+  which covers summaries and in-conversation writes alike. The schema v5
+  migration rewrites existing rows: anything recorded as `manual` with a session
+  id — a pair no hand-written row has — is reclassified as a model write, and
+  the retired tag name is stripped from rows and refused from callers.
+- Curation **scopes by origin**: `generated` (the default — only AI-written
+  memories), `manual`, or `all`. A memory a person typed in has already been
+  curated by them, so it is left alone unless you widen the scope deliberately.
+
 ### AI curation
 
 A vault collects two kinds of thing that look identical as text: conclusions worth keeping for months, and details that mattered once. The vault cannot tell them apart by itself, so one model call does:
 
 ```
-memory_curate action=review     # verdicts only, nothing written
-memory_curate action=apply      # file them
+memory_curate action=review                    # verdicts only, nothing written
+memory_curate action=apply                     # file them directly
+memory_curate action=apply origin=all          # include human input
 ```
 
-- **Reusable** means a conclusion, fact, convention, preference or step that still holds in another session; **one-off** means progress, a temporary decision, a one-time investigation, a superseded state. Doubt resolves to one-off.
-- Each item gets a verdict, a one-line reason, and a suggested group name (identical meanings get identical names so they merge cleanly).
+- **It applies directly.** `action=apply` files everything in one call; the
+  board's 「AI 整理」 button is exactly that, and 预览 beside it is the careful
+  two-step path rather than the only path.
+- **Reusable** means a conclusion, fact, convention, preference or step that still holds in another session; **one-off** means progress, a temporary decision, a one-time investigation, a superseded state. Doubt resolves to one-off. Each item's origin is in the prompt, and human input leans reusable.
+- Each item gets a verdict, a one-line reason, a suggested group name (identical meanings get identical names so they merge cleanly), and its origin.
 - On `apply`, reusable memories move to the knowledge base under that group (created if needed) and one-off memories go back to conversation memory; `applyPriority: true` also lifts the reusable ones to priority 60.
 - The whole batch commits in **one transaction**, so the vault is never left half-sorted.
-- The panel's 知识 tab has the same two actions as buttons, and the **知识记忆库 board carries an 「AI 整理」 button of its own**: it curates the whole vault and expands the verdicts into a card (how many reusable, how many one-off, each with its reason and suggested group), writing nothing until 「按建议归类」 is pressed.
+- The panel's 知识 tab has the same two actions as buttons, and the **知识记忆库 board carries a scope choice plus 「AI 整理」 and 预览**: it curates the whole vault and expands the verdicts into a card (how many reusable, how many one-off, each with origin, reason and suggested group).
 - **A panel call needs no provider configured**: the panel is not inside a session, so the Host answers on the provider/model of the last turn it observed. Only a vault that has never seen a session reports that no route is available.
 
 > It is a real model call and spends quota; 50 memories at most, 20 by default.
@@ -255,7 +285,7 @@ Remove-Item -Recurse "$env:USERPROFILE\.dsh\memory-vault"   # the memories, opti
 ## Development
 
 ```powershell
-# Standalone smoke test: drives tools, priority, the knowledge index, the base-prompt layer, a tunable quota, AI curation, per-memory application, hiding, watermark summarization, the panel route and the request boundary on a mock ctx, then renders the knowledge view, the board and the new-conversation strip for real (151 checks)
+# Standalone smoke test: drives tools, the two axes (human input / AI-written / curation scope), priority, the knowledge index, the base-prompt layer, a tunable quota, the v5 origin migration, per-memory application, hiding, watermark summarization, the panel route and the request boundary on a mock ctx, then renders the knowledge view, the board and the new-conversation strip for real (161 checks)
 cd <this plugin directory>
 node tests/smoke.mjs
 ```
