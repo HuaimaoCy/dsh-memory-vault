@@ -189,9 +189,8 @@ const validated = Config['~standard'].validate({
   // Small enough that an oversized body is cheap to produce in a test, and
   // large enough for every other record this file writes.
   maxEntryChars: 200,
-  // Pinned so the panel's curation op has a route without a session.
-  summarizerProvider: 'test-provider',
-  summarizerModel: 'test-model',
+  // Deliberately no summarizerProvider/summarizerModel: a panel-initiated call
+  // must reach a model on the route of the last observed turn instead.
   conversationGroupName: '对话记忆',
   knowledgeGroupName: '知识库',
 })
@@ -949,6 +948,10 @@ console.log('browser half')
     assert.ok(tree.includes('P90'), 'the tile must mark a raised priority')
     assert.ok(tree.includes('baseBadge'), 'and mark a base-prompt memory')
   })
+  check('the board offers a curation button of its own', () => {
+    assert.ok(JSON.stringify(allElements(boardTree)).includes('curateReview'))
+    assert.ok(JSON.stringify(allElements(boardTree)).includes('select'))
+  })
   check('board tiles are operable without a pointer', () => {
     const tile = withClass(boardTree, 'dsmv-tile')[0]
     assert.equal(tile.props.role, 'button')
@@ -1441,8 +1444,8 @@ check('the curation result separates the two verdicts', () => {
 const panelCuration = await request(panelRoute, 'POST', '/memory-vault', {
   op: 'curate', group: '优先级测试', limit: 2, apply: false,
 })
-check('the panel can run a curation review', () => {
-  assert.equal(panelCuration.status, 200)
+check('the panel curates on the route of the last turn, with no provider configured', () => {
+  assert.equal(panelCuration.status, 200, JSON.stringify(panelCuration.payload))
   assert.equal(panelCuration.payload.result.mode, 'review')
   assert.equal(panelCuration.payload.result.verdicts.length, 2)
 })

@@ -162,6 +162,8 @@ window.__ModuleLoader__.load({
         limitsHint: '本会话最多注入多少条已应用的知识；底层 prompt 不计入这个数量。',
         curateReview: 'AI 整理（预览）',
         curateApply: '按建议归类',
+        curateApplied: '已归类',
+        curateDismiss: '收起',
         curateBusy: '整理中…',
         curateHint: '用一次模型调用判断每条记忆是可复用还是单次性，并给出归类建议。',
         curateEmpty: '模型没有给出可用的判断。',
@@ -295,6 +297,8 @@ window.__ModuleLoader__.load({
         limitsHint: 'How many applied memories this conversation injects; base-prompt memories are not counted.',
         curateReview: 'AI review',
         curateApply: 'Apply verdicts',
+        curateApplied: 'Filed',
+        curateDismiss: 'Dismiss',
         curateBusy: 'Reviewing…',
         curateHint: 'One model call decides whether each memory is reusable or one-off, and suggests where it belongs.',
         curateEmpty: 'The model returned no usable verdicts.',
@@ -871,8 +875,42 @@ window.__ModuleLoader__.load({
       const [canHide, setCanHide] = React.useState(null)
       const [hasMore, setHasMore] = React.useState(false)
       const [loaded, setLoaded] = React.useState(0)
+      // The vault-wide curation pass: its verdicts, and whether one is running.
+      const [cure, setCure] = React.useState(null)
+      const [curating, setCurating] = React.useState(false)
+
+      /**
+       * Ask the model to sort the vault into reusable knowledge and one-off
+       * notes.
+       *
+       * The panel is not inside a session, so the Host answers this on the route
+       * of the last turn it observed — the button needs no provider configured.
+       * @param {boolean} apply - Whether to write the verdicts.
+       * @returns {Promise<void>} Resolution after the call.
+       */
+      const runCurate = async (apply) => {
+        setCurating(true)
+        setError(null)
+        try {
+          const result = await call('curate', undefined, { apply, limit: 20 })
+          setCure(result)
+          if (apply) await load()
+        } catch (failure) {
+          setError(failure instanceof Error ? failure.message : String(failure))
+        } finally {
+          setCurating(false)
+        }
+      }
 
       const terms = termsOf(query)
+
+      // A review reports verdicts; an applied pass reports what each memory
+      // became. Both carry a verdict and a reason, so one card renders either.
+      const cureItems = cure === null
+        ? []
+        : cure.mode === 'applied' ? cure.applied ?? [] : cure.verdicts ?? []
+      const cureReusable = cureItems.filter(item => item.verdict === 'reusable').length
+      const cureOneoff = cureItems.length - cureReusable
 
       /**
        * Read one page of the board.
@@ -1199,6 +1237,11 @@ window.__ModuleLoader__.load({
               onClick: () => { void load() },
             }, t('refresh')),
             h(Button, {
+              disabled: busy || curating,
+              title: t('curateHint'),
+              onClick: () => { void runCurate(false) },
+            }, curating ? t('curateBusy') : t('curateReview')),
+            h(Button, {
               icon: h(IconChecklistOutlineMedium, null),
               variant: selecting ? 'outline' : 'ghost',
               onClick: () => {
@@ -1206,6 +1249,35 @@ window.__ModuleLoader__.load({
                 else setSelecting(true)
               },
             }, selecting ? t('exitSelect') : t('select')),
+          ),
+
+          // Curation verdicts, and the one button that acts on them: nothing is
+          // written until it is pressed.
+          cure === null ? null : h('div', { className: 'dsmv-card' },
+            h('div', { className: 'dsmv-row' },
+              h(Tag, { tone: 'info' },
+                cure.mode === 'applied' ? t('curateApplied') : t('curateReview')),
+              h('span', { className: 'dsmv-cap' },
+                `${String(cureReusable)} ${t('curateReusable')} · ${String(cureOneoff)} ${t('curateOneoff')}`
+                + (cure.model ? ` · ${String(cure.model.provider)}/${String(cure.model.model)}` : '')),
+              h('span', { className: 'dsmv-spacer' }),
+              cure.mode === 'applied'
+                ? null
+                : h(Button, { size: 'sm', disabled: curating, onClick: () => { void runCurate(true) } }, t('curateApply')),
+              h(Button, { size: 'sm', variant: 'ghost', onClick: () => { setCure(null) } }, t('curateDismiss')),
+            ),
+            cureItems.length === 0
+              ? h('div', { className: 'dsmv-empty' }, t('curateEmpty'))
+              : h('div', { className: 'dsmv-col' },
+                  ...cureItems.map(item => h('div', { key: item.id, className: 'dsmv-row' },
+                    h(Tag, { tone: item.verdict === 'reusable' ? 'success' : 'quiet' },
+                      item.verdict === 'reusable' ? t('curateReusable') : t('curateOneoff')),
+                    h('span', { className: 'dsmv-cap' }, item.reason),
+                    item.verdict !== 'reusable' || item.group === '' || item.group === undefined
+                      ? null
+                      : h(Tag, null, String(item.group)),
+                  )),
+                ),
           ),
 
           // The facet bar is the board's filter and its drop surface: a scope

@@ -143,7 +143,8 @@ memory_curate action=apply      # file them
 - Each item gets a verdict, a one-line reason, and a suggested group name (identical meanings get identical names so they merge cleanly).
 - On `apply`, reusable memories move to the knowledge base under that group (created if needed) and one-off memories go back to conversation memory; `applyPriority: true` also lifts the reusable ones to priority 60.
 - The whole batch commits in **one transaction**, so the vault is never left half-sorted.
-- The panel's 知识 tab has the same two actions as buttons.
+- The panel's 知识 tab has the same two actions as buttons, and the **知识记忆库 board carries an 「AI 整理」 button of its own**: it curates the whole vault and expands the verdicts into a card (how many reusable, how many one-off, each with its reason and suggested group), writing nothing until 「按建议归类」 is pressed.
+- **A panel call needs no provider configured**: the panel is not inside a session, so the Host answers on the provider/model of the last turn it observed. Only a vault that has never seen a session reports that no route is available.
 
 > It is a real model call and spends quota; 50 memories at most, 20 by default.
 
@@ -254,7 +255,7 @@ Remove-Item -Recurse "$env:USERPROFILE\.dsh\memory-vault"   # the memories, opti
 ## Development
 
 ```powershell
-# Standalone smoke test: drives tools, priority, the knowledge index, the base-prompt layer, a tunable quota, AI curation, per-memory application, hiding, watermark summarization, the panel route and the request boundary on a mock ctx, then renders the knowledge view, the board and the new-conversation strip for real (150 checks)
+# Standalone smoke test: drives tools, priority, the knowledge index, the base-prompt layer, a tunable quota, AI curation, per-memory application, hiding, watermark summarization, the panel route and the request boundary on a mock ctx, then renders the knowledge view, the board and the new-conversation strip for real (151 checks)
 cd <this plugin directory>
 node tests/smoke.mjs
 ```

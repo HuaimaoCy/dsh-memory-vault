@@ -111,6 +111,16 @@ export function apply(ctx, config) {
   const locks = new Map()
   let changeVersion = 0
 
+  /**
+   * The last provider/model route a turn actually ran on.
+   *
+   * The Web panel is not inside a session, so a call it starts has no route of
+   * its own. Remembering the route of the most recent turn is what lets the
+   * panel's curation button work without the operator configuring a provider by
+   * hand — and it is always a route that demonstrably works.
+   */
+  let lastRoute
+
   /** Record that the vault changed, for listeners that derive state from it. */
   const notify = () => {
     changeVersion += 1
@@ -330,10 +340,13 @@ export function apply(ctx, config) {
     const route = config.summarizerProvider !== null && config.summarizerModel !== null
       ? { provider: config.summarizerProvider, model: config.summarizerModel }
       : session === undefined
-        ? undefined
-        : routeFromSession(session)
+        ? lastRoute
+        : routeFromSession(session) ?? lastRoute
     if (route === undefined) {
-      throw new Error('没有可用的 provider/model 来做整理：请在会话内调用，或配置 summarizerProvider 与 summarizerModel')
+      throw new Error(
+        '没有可用的 provider/model 来做整理：在任意会话里发一条消息即可（插件会记住该会话的路由），'
+        + '或配置 summarizerProvider 与 summarizerModel',
+      )
     }
     const record = await curateWithModel(ctx, {
       route,
@@ -443,6 +456,10 @@ export function apply(ctx, config) {
   ctx.on('session/event', (session, event) => {
     try {
       const sessionId = session.id
+      // Every observed turn advertises the route it ran on; keeping the latest
+      // one is what gives a panel-initiated call something to call with.
+      const seen = routeFromSession(session)
+      if (seen !== undefined) lastRoute = seen
       if (event.type === 'user/message') {
         if (isHumanMessage(event.data)) {
           store.appendMessage({
