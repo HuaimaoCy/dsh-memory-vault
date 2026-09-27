@@ -129,6 +129,8 @@ export function renderIndex({ store, config, sessionId }) {
     + '缩进表示子记忆组：**应用父组会连它的所有子组一起应用**，所以平铺的组多了应当收进父组（用 `memory_group` 的 `parent` 参数）。'
     + '需要正文时用 `memory_recall`（可按记忆组、标签、归属或关键词检索；按组检索默认连带子组）；把某个组接进本会话用 `memory_apply` action=set groups=["组名"]；'
     + '只接某一条记忆用 `memory_apply` action=set entries=["mem_..."]；调整优先级用 `memory_assign` priority=0-100（单条）或 `memory_group` action=update priority=0-100（整组）。'
+    + '**要改一条已有记忆的标签/优先级/归属/可见性，用 `memory_assign`改动它本身，不要把同一条内容重写一遍再隐藏旧的**——'
+    + '那会留下两条正文相同的记忆（真实发生过：一次全库整理因此把 21 组记忆翻倍）。写入新记忆前若不确定是否已有，先 `memory_recall` 查一下。'
   return [
     '## 知识与记忆库',
     header,

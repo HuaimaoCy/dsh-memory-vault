@@ -926,6 +926,18 @@ console.log('browser half')
     title: '构建约定', content: '**统一用 pnpm**。', kind: 'decision', source: 'manual', sessionId: null,
     tags: ['人工输入', '构建'], hidden: false, priority: 90, base: true, autoTag: '人工输入', createdAt: 1, updatedAt: 2,
   }
+  // A second live memory under a different label, so one group has two buckets,
+  // and a hidden one, so the board has something to quarantine.
+  const secondEntry = {
+    id: 'mem-2', groupId: 'grp-1', groupName: '知识库', scope: 'knowledge', assigned: 'group',
+    title: '发布流程', content: '先打 tag 再发 Release。', kind: 'note', source: 'model-write', sessionId: null,
+    tags: ['AI 生成', '发布'], hidden: false, priority: 0, base: false, autoTag: 'AI 生成', createdAt: 3, updatedAt: 4,
+  }
+  const hiddenEntry = {
+    id: 'mem-3', groupId: 'grp-1', groupName: '知识库', scope: 'knowledge', assigned: 'group',
+    title: '过时结论', content: '已被后续结论取代。', kind: 'note', source: 'model-write', sessionId: null,
+    tags: ['AI 生成', '构建'], hidden: true, priority: 0, base: false, autoTag: 'AI 生成', createdAt: 5, updatedAt: 6,
+  }
   globalThis.fetch = async (url) => {
     const op = new URL(String(url)).searchParams.get('op')
     const results = {
@@ -937,7 +949,10 @@ console.log('browser half')
         autoSummary: true, summarizer: 'llm',
         apply: { byDefault: true, defaults: ['知识库'], maxEntries: 12, maxChars: 2400 },
       },
-      entries: { entries: [sampleEntry], group: null, limit: 120, offset: 0, hasMore: false, nextOffset: null },
+      entries: {
+        entries: [sampleEntry, secondEntry, hiddenEntry],
+        group: null, limit: 120, offset: 0, hasMore: false, nextOffset: null,
+      },
       'apply.get': {
         sessionId: 's1', explicit: false, groups: [], effective: 'default', enabled: true,
         injected: 1, truncated: false, skipped: [], usedChars: 12, entries: [sampleEntry],
@@ -1015,7 +1030,19 @@ console.log('browser half')
 
   check('the board renders the memories it loaded', () => {
     const classes = [...new Set(allElements(boardTree).map(node => node.props?.className).filter(Boolean))]
-    assert.equal(withClass(boardTree, 'dsmv-tile').length, 1, classes.join(','))
+    // Three loaded, three drawn: the hidden one is quarantined, not dropped.
+    assert.equal(withClass(boardTree, 'dsmv-tile').length, 3, classes.join(','))
+  })
+  check('one group splits its tiles by their own label', () => {
+    // Two live memories, two different first tags: two sub-headings.
+    assert.equal(withClass(boardTree, 'dsmv-subhead').length, 2)
+  })
+  check('hidden memories are quarantined to the end of the board', () => {
+    // The tile's own props live on the div it renders, so its label is the
+    // accessible name rather than the entry object.
+    const titles = withClass(boardTree, 'dsmv-tile').map(node => node.props['aria-label'])
+    assert.deepEqual(titles.slice(-1), ['过时结论'], titles.join('|'))
+    assert.ok(!titles.slice(0, -1).includes('过时结论'), 'a hidden tile must not sit among the live ones')
   })
   check('a prioritised memory shows its priority on the tile', () => {
     // Expanded, because the badge lives inside the Tile component rather than
@@ -1041,11 +1068,16 @@ console.log('browser half')
     assert.ok(JSON.stringify(allElements(boardTree)).includes('editTags'))
   })
   check('board tiles are operable without a pointer', () => {
-    const tile = withClass(boardTree, 'dsmv-tile')[0]
-    assert.equal(tile.props.role, 'button')
-    assert.equal(tile.props.tabIndex, 0)
-    assert.equal(typeof tile.props.onKeyDown, 'function')
-    assert.equal(tile.props['aria-label'], '构建约定')
+    const tiles = withClass(boardTree, 'dsmv-tile')
+    assert.ok(tiles.length > 0)
+    for (const tile of tiles) {
+      assert.equal(tile.props.role, 'button')
+      assert.equal(tile.props.tabIndex, 0)
+      assert.equal(typeof tile.props.onKeyDown, 'function')
+      assert.equal(typeof tile.props['aria-label'], 'string')
+    }
+    // Title order is not asserted: sub-headings sort by size and then by name,
+    // so which tile comes first is a presentation choice, not a contract.
   })
   check('tag controls are operable without a pointer', () => {
     const tags = withClass(boardTree, 'dsmv-tagbtn')

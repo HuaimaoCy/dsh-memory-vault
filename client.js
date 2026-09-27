@@ -194,6 +194,8 @@ window.__ModuleLoader__.load({
         editTagsDone: '收起标签',
         addTagHint: '输入标签后回车',
         removeTag: '移除这个标签',
+        untagged: '未打标签',
+        tagSplitHint: '组内按各自的标签细分',
         curateBusy: '整理中…',
         curateHint: '用一次模型调用判断每条记忆是可复用还是单次性，并给出归类建议。',
         curateEmpty: '模型没有给出可用的判断。',
@@ -344,6 +346,8 @@ window.__ModuleLoader__.load({
         editTagsDone: 'Hide tags',
         addTagHint: 'type a tag, press Enter',
         removeTag: 'Remove this tag',
+        untagged: 'untagged',
+        tagSplitHint: 'split inside a group by its own tags',
         curateBusy: 'Reviewing…',
         curateHint: 'One model call decides whether each memory is reusable or one-off, and suggests where it belongs.',
         curateEmpty: 'The model returned no usable verdicts.',
@@ -470,6 +474,23 @@ window.__ModuleLoader__.load({
   outline: none;
 }
 .dsmv-tag-input:focus-visible { border-bottom-color: var(--dsw-alias-brand-primary); }
+/* The second level of the board: a sub-heading per label inside a group. */
+.dsmv-subsec { display: flex; flex-direction: column; gap: 6px; }
+.dsmv-subhead {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--dsmv-fs-small);
+  font-weight: 600;
+  color: var(--dsw-alias-label-secondary);
+  padding: 2px 0 0;
+  border-bottom: 1px solid var(--dsw-alias-border-l2);
+}
+.dsmv-subhead-count {
+  font-weight: 400;
+  font-size: var(--dsmv-fs-cap);
+  color: var(--dsw-alias-label-tertiary);
+}
 .dsmv-tag-toggle {
   font: inherit;
   font-size: var(--dsmv-fs-cap);
@@ -1361,30 +1382,67 @@ window.__ModuleLoader__.load({
       /**
        * Group the visible tiles for display.
        *
-       * With sub-groups, a section per group is unreadable long before a vault
-       * is big: what the reader wants is one heading per heading. So a section
-       * is a **root** group and swallows its whole subtree, and each tile says
-       * which sub-group it came from. Grouping by tag is unaffected.
+       * The board has one top-level dimension and it is the group: a section is
+       * a **root** group and swallows its whole subtree, so a dozen groups read
+       * as a few headings instead of a wall of peers. Tags are not a competing
+       * top-level view — they subdivide a group from the inside (see
+       * `subSectionsFor`), which is the hierarchy this board is meant to show.
        * @param {Record<string, any>[]} rows - Tiles of the board.
        * @returns {{ key: string, label: string, rows: Record<string, any>[] }[]} Sections in display order.
        */
       const sectionsFor = (rows) => {
-        if (groupBy === 'none') return [{ key: 'all', label: t('entries'), rows }]
-        /** @type {Map<string, Record<string, any>[]>} */
-        const buckets = new Map()
-        for (const row of rows) {
-          const keys = groupBy === 'tag' ? tagsOf(row) : [rootNameOf(row)]
-          for (const key of keys) {
+        // Hidden memories are quarantined into a section of their own rather
+        // than interleaved with live ones: with 显示隐藏 on, the point of the
+        // toggle is to find them, not to lose them among everything else.
+        const hidden = rows.filter(row => row.hidden === true)
+        const live = rows.filter(row => row.hidden !== true)
+        /** @type {{ key: string, label: string, rows: Record<string, any>[] }[]} */
+        const sections = []
+        if (groupBy === 'none') {
+          if (live.length > 0) sections.push({ key: 'all', label: t('entries'), rows: live })
+        } else {
+          /** @type {Map<string, Record<string, any>[]>} */
+          const buckets = new Map()
+          for (const row of live) {
+            const key = rootNameOf(row)
             if (!buckets.has(key)) buckets.set(key, [])
             buckets.get(key).push(row)
           }
+          for (const key of [...buckets.keys()].sort((left, right) => (left < right ? -1 : 1))) {
+            sections.push({ key, label: key, rows: buckets.get(key) })
+          }
         }
-        const rank = new Map(allTags.map((item, index) => [item.tag, index]))
-        const order = groupBy === 'tag'
-          ? [...buckets.keys()].sort((left, right) =>
-              (rank.get(left) ?? Number.MAX_SAFE_INTEGER) - (rank.get(right) ?? Number.MAX_SAFE_INTEGER))
-          : [...buckets.keys()].sort((left, right) => (left < right ? -1 : 1))
-        return order.map(key => ({ key, label: key, rows: buckets.get(key) }))
+        if (hidden.length > 0) sections.push({ key: '__hidden__', label: t('hidden'), rows: hidden })
+        return sections
+      }
+
+      /**
+       * Split one group's tiles by the label they carry themselves.
+       *
+       * A tile lands in the bucket of its **first** user tag, so it appears
+       * exactly once; its other tags stay visible on the tile. Anything with no
+       * user tag collects under 未分类.
+       * @param {Record<string, any>[]} rows - Tiles of one section.
+       * @returns {{ key: string, label: string, rows: Record<string, any>[] }[]} Sub-sections, biggest first.
+       */
+      const subSectionsFor = (rows) => {
+        /** @type {Map<string, Record<string, any>[]>} */
+        const buckets = new Map()
+        for (const row of rows) {
+          const own = tagsOf(row).filter(tag => !AUTO_TAGS.includes(tag) && !RETIRED_AUTO_TAGS.includes(tag))
+          const key = own.length === 0 ? t('untagged') : String(own[0])
+          if (!buckets.has(key)) buckets.set(key, [])
+          buckets.get(key).push(row)
+        }
+        const untagged = t('untagged')
+        return [...buckets.entries()]
+          .sort(([leftKey, leftRows], [rightKey, rightRows]) => {
+            // 未分类 last, then by size, then by name: the biggest label in a
+            // group is the one worth reading first.
+            if ((leftKey === untagged) !== (rightKey === untagged)) return leftKey === untagged ? 1 : -1
+            return rightRows.length - leftRows.length || (leftKey < rightKey ? -1 : 1)
+          })
+          .map(([key, bucket]) => ({ key, label: key, rows: bucket }))
       }
 
       /**
@@ -1558,8 +1616,8 @@ window.__ModuleLoader__.load({
             }),
             h('span', { className: 'dsmv-cap' }, t('groupBy')),
             h(Pill, { active: groupBy === 'group', onClick: () => { setGroupBy('group') } }, t('groupByGroup')),
-            h(Pill, { active: groupBy === 'tag', onClick: () => { setGroupBy('tag') } }, t('groupByTag')),
             h(Pill, { active: groupBy === 'none', onClick: () => { setGroupBy('none') } }, t('groupByNone')),
+            h('span', { className: 'dsmv-cap' }, t('tagSplitHint')),
           ),
 
           h('details', { className: 'dsmv-sec' },
@@ -1653,42 +1711,58 @@ window.__ModuleLoader__.load({
 
           sections.length === 0 || visible.length === 0
             ? h('div', { className: 'dsmv-empty' }, entries.length === 0 ? t('boardEmpty') : t('emptyFiltered'))
-            : sections.map(section => h(Section, {
-                key: section.key,
-                label: section.label,
-                count: section.rows.length,
-                unit: t('entries'),
-                // Sections are roots now, so there are few of them and hiding
-                // the content by default would only add a second click.
-                open: groupBy !== 'group' || sections.length <= 6,
-              }, h('div', { className: 'dsmv-board' }, section.rows.map(entry => h(Tile, {
-                key: entry.id,
-                entry,
-                terms,
-                activeTags,
-                t,
-                selecting,
-                selected: selected.includes(entry.id),
-                canHide,
-                // Only worth showing when the section is a parent heading.
-                groupLabel: groupBy === 'group' && entry.groupName !== section.key ? entry.groupName : undefined,
-                tagEditing: tagEditFor === entry.id,
-                onToggleTagEdit: (id) => { setTagEditFor(current => (current === id ? null : id)); setTagDraft('') },
-                onAddTag: commitTagDraft,
-                onRemoveTag: dropTag,
-                tagDraft: tagEditFor === entry.id ? tagDraft : '',
-                onTagDraft: (id, value) => { setTagEditFor(id); setTagDraft(value) },
-                onSelect: toggleSelected,
-                onTag: toggleTag,
-                onScope: (target, scope) => { void assign([target.id], scope) },
-                onHide: (id) => { void setHidden([id], true) },
-                onRestore: (id) => { void setHidden([id], false) },
-                onDelete: (target) => {
-                  if (!window.confirm(t('removeEntryConfirm'))) return
-                  void mutate(() => call('entry.delete', undefined, { id: target.id }))
-                },
-                onOpen: (id) => { setNotice(null); setView({ kind: 'detail', id }) },
-              }))))),
+            : sections.map((section) => {
+                // Within a group, the tiles are split by the label they carry:
+                // the group is the heading, its tags are the sub-headings.
+                const parts = groupBy === 'group'
+                  ? subSectionsFor(section.rows)
+                  : [{ key: section.key, label: section.label, rows: section.rows }]
+                const showSubHeads = groupBy === 'group' && parts.length > 1
+                return h(Section, {
+                  key: section.key,
+                  label: section.label,
+                  count: section.rows.length,
+                  unit: t('entries'),
+                  // Sections are roots now, so there are few of them and hiding
+                  // the content by default would only add a second click.
+                  open: groupBy !== 'group' || sections.length <= 6,
+                }, ...parts.map(part => h('div', { key: part.key, className: 'dsmv-subsec' },
+                  showSubHeads
+                    ? h('div', { className: 'dsmv-subhead' },
+                        h('span', null, part.label),
+                        h('span', { className: 'dsmv-subhead-count' }, String(part.rows.length)),
+                      )
+                    : null,
+                  h('div', { className: 'dsmv-board' }, part.rows.map(entry => h(Tile, {
+                    key: entry.id,
+                    entry,
+                    terms,
+                    activeTags,
+                    t,
+                    selecting,
+                    selected: selected.includes(entry.id),
+                    canHide,
+                    // Only worth showing when the section is a parent heading.
+                    groupLabel: groupBy === 'group' && entry.groupName !== section.key ? entry.groupName : undefined,
+                    tagEditing: tagEditFor === entry.id,
+                    onToggleTagEdit: (id) => { setTagEditFor(current => (current === id ? null : id)); setTagDraft('') },
+                    onAddTag: commitTagDraft,
+                    onRemoveTag: dropTag,
+                    tagDraft: tagEditFor === entry.id ? tagDraft : '',
+                    onTagDraft: (id, value) => { setTagEditFor(id); setTagDraft(value) },
+                    onSelect: toggleSelected,
+                    onTag: toggleTag,
+                    onScope: (target, scope) => { void assign([target.id], scope) },
+                    onHide: (id) => { void setHidden([id], true) },
+                    onRestore: (id) => { void setHidden([id], false) },
+                    onDelete: (target) => {
+                      if (!window.confirm(t('removeEntryConfirm'))) return
+                      void mutate(() => call('entry.delete', undefined, { id: target.id }))
+                    },
+                    onOpen: (id) => { setNotice(null); setView({ kind: 'detail', id }) },
+                  }))),
+                )))
+              }),
 
           hasMore
             ? h('div', { className: 'dsmv-row' },
