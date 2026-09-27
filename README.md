@@ -46,7 +46,7 @@ pnpm dsh plugin --profile web remove dsh-memory-vault
 | `memory_group` | List, create, update, or delete memory groups, switch a whole group's assignment, or `bind` / `unbind` where this conversation's summaries are filed. |
 | `memory_write` | Write one or more memories, optionally assigning them in the same call. Bodies accept Markdown and LaTeX. |
 | `memory_recall` | Keyword search, read one entry by id, or list by group, assignment, or tag; `includeHidden` reaches hidden memories too. |
-| `memory_assign` | Reassign, move between groups, set a **priority** (0–100), mark a **base prompt** memory, or hide and restore memories. |
+| `memory_assign` | Reassign, move between groups, set a **priority** (0–100), mark a **base prompt** memory, **edit tags in place** (`tagsMode` = add / remove / set), or hide and restore memories. |
 | `memory_apply` | Apply knowledge to the current conversation (cross-conversation sync): list / set / reset; `groups` applies whole groups, `entries` applies single memories. |
 | `memory_curate` | **AI curation**: one model call decides whether each memory is reusable knowledge or a one-off note and suggests a group; `review` only reports, `apply` files. |
 | `memory_summarize` | Settle this conversation into one memory. With `content`, your text is stored as written; without it, the plugin calls a model over the **unsummarized increment**. |
@@ -197,6 +197,15 @@ Two hard limits, both there to keep the tree readable:
 
 Deleting is stricter as well: **deleting a parent that still has children is refused**, with a message telling you to move or delete them first — silently promoting children to the top level is exactly what sub-groups exist to fix.
 
+## Tags
+
+Tags are the second axis, **across** groups: a group answers "which subject does this belong to", a tag answers "what else is this about". Filtering by tag therefore reaches across groups, and one tag means the same thing wherever it sits.
+
+- **Edit one memory in place**: every tile carries a 标签 button that expands an editor inside the tile — existing tags each with an ×, an input that commits on Enter. No trip to the detail screen. The tile is itself a button, so events inside the editor are stopped, and a tile being edited stops being draggable so the caret can land.
+- **From the model**: `memory_assign` takes `ids` + `tags` with `tagsMode` = `add` (default) / `remove` / `set`, so one word can be changed without rewriting the memory.
+- **By dragging**: drop a tile onto a tag facet to label it.
+- **The system tags** (「人工输入」/「AI 生成」) are decided by origin: the validator strips them from whatever you supply and the store re-derives the right one from the entry's source, so they can neither be dropped nor forged.
+
 ## Web panel
 
 A **Memory Vault** entry appears in the sidebar. The knowledge base and conversation memory are **one tile board**; assignment survives only as a filter.
@@ -304,7 +313,7 @@ Remove-Item -Recurse "$env:USERPROFILE\.dsh\memory-vault"   # the memories, opti
 ## Development
 
 ```powershell
-# Standalone smoke test: drives tools, the two axes (human input / AI-written / curation scope), sub-groups (three-level ceiling, cycle refusal, delete protection, subtree application), priority, the knowledge index, the base-prompt layer, a tunable quota, the v5 origin migration, per-memory application, hiding, watermark summarization, the panel route and the request boundary on a mock ctx, then renders the knowledge view, the board and the new-conversation strip for real (174 checks)
+# Standalone smoke test: drives tools, the two axes (human input / AI-written / curation scope), editing one memory's tags in place, sub-groups (three-level ceiling, cycle refusal, delete protection, subtree application), priority, the knowledge index, the base-prompt layer, a tunable quota, the v5 origin migration, per-memory application, hiding, watermark summarization, the panel route and the request boundary on a mock ctx, then renders the knowledge view, the board and the new-conversation strip for real (183 checks)
 cd <this plugin directory>
 node tests/smoke.mjs
 ```
