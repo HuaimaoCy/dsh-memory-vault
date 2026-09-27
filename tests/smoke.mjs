@@ -1037,6 +1037,9 @@ console.log('browser half')
     assert.ok(tree.includes('parentTop'), 'creating a group must offer a parent')
     assert.ok(tree.includes('parentHint'), 'moving an existing group must be possible')
   })
+  check('a tile offers to edit its tags in place', () => {
+    assert.ok(JSON.stringify(allElements(boardTree)).includes('editTags'))
+  })
   check('board tiles are operable without a pointer', () => {
     const tile = withClass(boardTree, 'dsmv-tile')[0]
     assert.equal(tile.props.role, 'button')
@@ -1657,6 +1660,53 @@ console.log('sub-groups')
   check('the knowledge plan still resolves after the tree moved', () => {
     assert.equal(prompt.status, 200)
     assert.ok(Array.isArray(prompt.payload.result.groups))
+  })
+}
+
+console.log("editing one memory's tags in place")
+{
+  const seededTags = await tool('memory_write').execute({
+    group: '知识库', entries: [{ content: '用来验证就地改标签。', tags: ['旧标签'] }],
+  }, exec)
+  const tagId = seededTags.entries[0].id
+  const added = await tool('memory_assign').execute({ ids: [tagId], tags: ['新增', '另一个'] }, exec)
+  check('a tool can add tags to a memory that already exists', () => {
+    assert.equal(added.mode, 'tags')
+    assert.equal(added.tagsMode, 'add')
+    assert.ok(added.entries[0].tags.includes('新增'))
+    assert.ok(added.entries[0].tags.includes('旧标签'))
+  })
+  check('editing tags leaves provenance alone', () => {
+    assert.ok(added.entries[0].tags.includes('AI 生成'), JSON.stringify(added.entries[0].tags))
+    assert.ok(!added.entries[0].tags.includes('人工输入'))
+  })
+  const removed = await tool('memory_assign').execute({ ids: [tagId], tags: ['旧标签'], tagsMode: 'remove' }, exec)
+  check('one tag can be removed without touching the rest', () => {
+    assert.ok(!removed.entries[0].tags.includes('旧标签'))
+    assert.ok(removed.entries[0].tags.includes('新增'))
+  })
+  const replaced = await tool('memory_assign').execute({ ids: [tagId], tags: ['只剩这个'], tagsMode: 'set' }, exec)
+  check('tagsMode=set replaces the whole set', () => {
+    assert.deepEqual(replaced.entries[0].tags, ['只剩这个', 'AI 生成'])
+  })
+  const cleared = await tool('memory_assign').execute({ ids: [tagId], tags: [], tagsMode: 'set' }, exec)
+  check('an empty set clears user tags and keeps the system one', () => {
+    assert.deepEqual(cleared.entries[0].tags, ['AI 生成'])
+  })
+  const noIds = await tool('memory_assign').execute({ tags: ['x'] }, exec)
+    .then(() => 'resolved', (error) => error.message)
+  check('editing tags without ids is refused', () => {
+    assert.ok(String(noIds).includes('必须给出 ids'), String(noIds))
+  })
+  const emptyAdd = await tool('memory_assign').execute({ ids: [tagId], tags: [] }, exec)
+    .then(() => 'resolved', (error) => error.message)
+  check('an empty add says what to do instead', () => {
+    assert.ok(String(emptyAdd).includes('tagsMode=set'), String(emptyAdd))
+  })
+  const renderedTags = renderOf('memory_assign', { tags: ['新增'] }, added)
+  check('the tag edit is reported in words', () => {
+    assert.ok(renderedTags.includes('已添加标签'), renderedTags)
+    assert.ok(renderedTags.includes('新增'), renderedTags)
   })
 }
 

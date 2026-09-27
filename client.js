@@ -190,6 +190,10 @@ window.__ModuleLoader__.load({
         curateScopeHint: '来源不是操作：AI 整理默认只处理模型写的记忆（自动总结与会话中写入），人特意写下的默认不动。',
         originManual: '人工输入',
         originGenerated: 'AI 生成',
+        editTags: '标签',
+        editTagsDone: '收起标签',
+        addTagHint: '输入标签后回车',
+        removeTag: '移除这个标签',
         curateBusy: '整理中…',
         curateHint: '用一次模型调用判断每条记忆是可复用还是单次性，并给出归类建议。',
         curateEmpty: '模型没有给出可用的判断。',
@@ -336,6 +340,10 @@ window.__ModuleLoader__.load({
         curateScopeHint: 'Origin is not the operation: AI curation judges model-written memories (summaries and in-conversation writes) and leaves what a person typed alone.',
         originManual: 'human input',
         originGenerated: 'AI-written',
+        editTags: 'Tags',
+        editTagsDone: 'Hide tags',
+        addTagHint: 'type a tag, press Enter',
+        removeTag: 'Remove this tag',
         curateBusy: 'Reviewing…',
         curateHint: 'One model call decides whether each memory is reusable or one-off, and suggests where it belongs.',
         curateEmpty: 'The model returned no usable verdicts.',
@@ -416,6 +424,64 @@ window.__ModuleLoader__.load({
 }
 .dsmv-select--sm { padding: 2px 4px; max-width: 160px; }
 .dsmv-select:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: 1px; }
+/* In-place tag editing on a tile. Kept small: it lives inside a control. */
+.dsmv-tag-edit {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  align-items: center;
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px dashed var(--dsw-alias-border-l2);
+}
+.dsmv-tag-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  font-size: var(--dsmv-fs-cap);
+  line-height: 1.6;
+  padding: 0 4px;
+  border-radius: 6px;
+  background: var(--dsw-alias-bg-layer-2);
+  border: 1px solid var(--dsw-alias-border-l2);
+  color: var(--dsw-alias-label-secondary);
+}
+.dsmv-tag-x {
+  border: 0;
+  background: transparent;
+  color: var(--dsw-alias-label-tertiary);
+  font: inherit;
+  line-height: 1;
+  padding: 0 2px;
+  cursor: pointer;
+  border-radius: 4px;
+}
+.dsmv-tag-x:hover { color: var(--dsw-alias-label-primary); background: var(--dsw-alias-bg-layer-3); }
+.dsmv-tag-input {
+  font: inherit;
+  font-size: var(--dsmv-fs-cap);
+  min-width: 96px;
+  flex: 1 1 96px;
+  background: transparent;
+  border: 0;
+  border-bottom: 1px dashed var(--dsw-alias-border-l2);
+  color: var(--dsw-alias-label-primary);
+  padding: 1px 2px;
+  outline: none;
+}
+.dsmv-tag-input:focus-visible { border-bottom-color: var(--dsw-alias-brand-primary); }
+.dsmv-tag-toggle {
+  font: inherit;
+  font-size: var(--dsmv-fs-cap);
+  color: var(--dsw-alias-label-tertiary);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  padding: 0 4px;
+  cursor: pointer;
+}
+.dsmv-tag-toggle:hover { color: var(--dsw-alias-label-primary); border-color: var(--dsw-alias-border-l2); }
+.dsmv-tag-toggle--on { color: var(--dsw-alias-brand-primary); border-color: var(--dsw-alias-border-l2); }
 .dsmv-col { display: flex; flex-direction: column; gap: 10px; }
 .dsmv-bar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .dsmv-facets { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
@@ -801,6 +867,7 @@ window.__ModuleLoader__.load({
     function Tile({
       entry, terms, activeTags, onTag, onOpen, onScope, onHide, onRestore, onDelete,
       selecting, selected, onSelect, canHide, t, groupLabel,
+      tagEditing, onToggleTagEdit, onAddTag, onRemoveTag, tagDraft, onTagDraft,
     }) {
       const title = entry.title === '' ? plainPreview(entry.content, 60) : entry.title
       const classes = ['dsmv-tile']
@@ -810,7 +877,8 @@ window.__ModuleLoader__.load({
       const activate = () => { if (selecting === true) onSelect(entry.id); else onOpen(entry.id) }
       return h('div', {
         className: classes.join(' '),
-        draggable: selecting !== true,
+        // A tile being edited must not start a drag, or the caret never lands.
+        draggable: selecting !== true && tagEditing !== true,
         // A tile is a control, so it has to be reachable and operable without a
         // pointer: a role, a tab stop, and the keys a button answers to.
         role: 'button',
@@ -835,7 +903,51 @@ window.__ModuleLoader__.load({
         h('div', { className: 'dsmv-tile-title' }, highlighted(title, terms)),
         h('div', { className: 'dsmv-tile-body' }, highlighted(plainPreview(entry.content, 220), terms)),
         h(TagRow, { entry, activeTags, onTag, max: 4 }),
+        // In-place tag editing: no trip to the detail screen for a one-word
+        // change. Every event stays inside this block — the tile itself is a
+        // button, and a stray click would open the memory instead.
+        tagEditing === true
+          ? h('div', {
+              className: 'dsmv-tag-edit',
+              onClick: (event) => { event.stopPropagation() },
+              onKeyDown: (event) => { event.stopPropagation() },
+            },
+              ...entry.tags
+                .filter(tag => !AUTO_TAGS.includes(tag) && !RETIRED_AUTO_TAGS.includes(tag))
+                .map(tag => h('span', { key: tag, className: 'dsmv-tag-chip' },
+                  tag,
+                  h('button', {
+                    type: 'button',
+                    className: 'dsmv-tag-x',
+                    title: t('removeTag'),
+                    onClick: () => { onRemoveTag(entry, tag) },
+                  }, '×'),
+                )),
+              h('input', {
+                className: 'dsmv-tag-input',
+                value: tagDraft ?? '',
+                placeholder: t('addTagHint'),
+                'aria-label': t('addTagHint'),
+                onChange: (event) => { onTagDraft(entry.id, event.target.value) },
+                onKeyDown: (event) => {
+                  if (event.key === 'Enter') {
+                    event.preventDefault()
+                    onAddTag(entry, tagDraft)
+                  }
+                  if (event.key === 'Escape') onTagDraft(entry.id, '')
+                },
+              }),
+            )
+          : null,
         h('div', { className: 'dsmv-tile-foot' },
+          selecting === true
+            ? null
+            : h('button', {
+                type: 'button',
+                className: tagEditing === true ? 'dsmv-tag-toggle dsmv-tag-toggle--on' : 'dsmv-tag-toggle',
+                title: t('editTags'),
+                onClick: (event) => { event.stopPropagation(); onToggleTagEdit(entry.id) },
+              }, tagEditing === true ? t('editTagsDone') : t('editTags')),
           // The section names the root group; a tile that came from a sub-group
           // says which one, so merging the tree into few sections loses nothing.
           groupLabel === undefined || groupLabel === '' ? null : h(Tag, null, groupLabel),
@@ -936,6 +1048,9 @@ window.__ModuleLoader__.load({
       // The vault-wide curation pass: its verdicts, and whether one is running.
       const [cure, setCure] = React.useState(null)
       const [curating, setCurating] = React.useState(false)
+      // Which tile is editing its tags in place, and the draft being typed.
+      const [tagEditFor, setTagEditFor] = React.useState(null)
+      const [tagDraft, setTagDraft] = React.useState('')
       // Which origin the pass judges. Generated by default: a memory a person
       // deliberately typed in has already been curated by them.
       const [scope, setScope] = React.useState('generated')
@@ -1156,6 +1271,35 @@ window.__ModuleLoader__.load({
           id: entry.id,
           tags: [...new Set([...tagsOf(entry), tag])],
         }), t('saved'))
+      }
+
+      /**
+       * Commit one tag typed into a tile's in-place editor.
+       *
+       * The system tag is left to the Host: it re-derives it from the entry's
+       * source, so only the user's own tags are sent.
+       * @param {Record<string, any>} entry - Entry being edited.
+       * @param {string} draft - What was typed.
+       * @returns {void}
+       */
+      const commitTagDraft = (entry, draft) => {
+        const tag = String(draft ?? '').trim()
+        if (tag === '' || AUTO_TAGS.includes(tag) || RETIRED_AUTO_TAGS.includes(tag)) return
+        setTagDraft('')
+        const current = entry.tags.filter(item => !AUTO_TAGS.includes(item) && !RETIRED_AUTO_TAGS.includes(item))
+        if (current.some(item => item.toLowerCase() === tag.toLowerCase())) return
+        void mutate(() => call('entry.update', undefined, { id: entry.id, tags: [...current, tag] }), t('saved'))
+      }
+
+      /**
+       * Drop one user tag from a memory, in place.
+       * @param {Record<string, any>} entry - Entry being edited.
+       * @param {string} tag - Tag to remove.
+       * @returns {void}
+       */
+      const dropTag = (entry, tag) => {
+        const next = entry.tags.filter(item => item.toLowerCase() !== String(tag).toLowerCase())
+        void mutate(() => call('entry.update', undefined, { id: entry.id, tags: next }), t('saved'))
       }
 
       /**
@@ -1528,6 +1672,12 @@ window.__ModuleLoader__.load({
                 canHide,
                 // Only worth showing when the section is a parent heading.
                 groupLabel: groupBy === 'group' && entry.groupName !== section.key ? entry.groupName : undefined,
+                tagEditing: tagEditFor === entry.id,
+                onToggleTagEdit: (id) => { setTagEditFor(current => (current === id ? null : id)); setTagDraft('') },
+                onAddTag: commitTagDraft,
+                onRemoveTag: dropTag,
+                tagDraft: tagEditFor === entry.id ? tagDraft : '',
+                onTagDraft: (id, value) => { setTagEditFor(id); setTagDraft(value) },
                 onSelect: toggleSelected,
                 onTag: toggleTag,
                 onScope: (target, scope) => { void assign([target.id], scope) },

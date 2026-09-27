@@ -12,7 +12,7 @@
  */
 
 import { ENTRY_KINDS, SCOPES, normalizePriority } from './store.js'
-import { limitDefaults, validateEntryBatch } from './policy.js'
+import { limitDefaults, normalizeTags, validateEntryBatch } from './policy.js'
 
 /** Output declaration shared by every tool: an open object the renderer turns into text. */
 const OPEN_OBJECT_OUTPUT = { type: 'object', additionalProperties: true }
@@ -437,6 +437,7 @@ export function buildTools({ store, config, summarize, curate, notify }) {
       '归属的移动是显式决定：被移动的条目会标记为手动归属，之后不再随记忆组的归属变化而整体移动。',
       '优先级是 0-100，越大越优先：决定记忆在提示索引里的排序，以及注入预算不够时谁先进入系统提示——把真正重要的结论调高，它就不会被后来的新记忆挤掉。',
       '隐藏是可逆的下架：条目、标签与记忆组都保留，但默认不再出现在检索与提示索引里，随时可以恢复。',
+      '标签可以就地改：给出 ids 与 tags，用 tagsMode=add（默认）/remove/set 增删或整体替换，不必重新写入这条记忆。',
       '典型用法：把当前会话里已沉淀为通用结论的记忆提升到知识库；把反复要用到的结论调到高优先级；把过时或走错方向的记忆隐藏掉。',
     ].join('\n'),
     parameters: {
@@ -463,9 +464,51 @@ export function buildTools({ store, config, summarize, curate, notify }) {
           type: 'boolean',
           description: '配合 ids 使用：true 把这些记忆标为「底层 prompt」（每次对话都注入、不占知识配额），false 取消。',
         },
+        tags: {
+          type: 'array',
+          items: { type: 'string' },
+          description: '配合 ids 使用：要增删的标签。系统标签（「人工输入」「AI 生成」）由记忆来源自动决定，改不了也不必改。',
+        },
+        tagsMode: {
+          type: 'string',
+          enum: ['add', 'remove', 'set'],
+          description: 'tags 的处理方式：add 追加（默认）、remove 移除、set 整体替换成给出的这批。只改标签，不动归属。',
+        },
       },
     },
     execute: async (args) => {
+      if (args.tags !== undefined) {
+        if (!Array.isArray(args.ids) || args.ids.length === 0) {
+          throw new Error('memory_assign 用 tags 调整标签时，必须给出 ids')
+        }
+        const mode = args.tagsMode === 'remove' ? 'remove' : args.tagsMode === 'set' ? 'set' : 'add'
+        const wanted = normalizeTags(args.tags)
+        if (mode !== 'set' && wanted.length === 0) {
+          throw new Error('memory_assign 用 tags 调整标签时，tags 不能为空；要清空全部用户标签请用 tagsMode=set 且给空数组')
+        }
+        /** @type {Record<string, unknown>[]} */
+        const entries = []
+        /** @type {string[]} */
+        const missing = []
+        const drop = new Set(wanted.map(tag => tag.toLowerCase()))
+        for (const id of args.ids) {
+          const current = store.findEntry(id)
+          if (current === undefined) {
+            missing.push(id)
+            continue
+          }
+          // The system tag stays out of it: `updateEntry` re-derives it from the
+          // entry's source, so adding or removing it here simply has no effect.
+          const next = mode === 'set'
+            ? wanted
+            : mode === 'remove'
+              ? current.tags.filter(tag => !drop.has(String(tag).toLowerCase()))
+              : [...current.tags, ...wanted]
+          entries.push(store.updateEntry(id, { tags: next }))
+        }
+        notify()
+        return { mode: 'tags', tagsMode: mode, tags: wanted, entries, missing }
+      }
       if (args.base !== undefined) {
         if (!Array.isArray(args.ids) || args.ids.length === 0) {
           throw new Error('memory_assign 用 base 调整底层 prompt 时，必须给出 ids')
@@ -531,6 +574,15 @@ export function buildTools({ store, config, summarize, curate, notify }) {
       return { mode: 'entries', ...result }
     },
     render: (_args, value) => {
+      if (value.mode === 'tags') {
+        const entries = /** @type {Record<string, any>[]} */ (value.entries)
+        const missing = /** @type {string[]} */ (value.missing)
+        const absent = missing.length === 0 ? '' : `\n未找到 ${missing.length} 个 id：${missing.join(', ')}`
+        const verb = value.tagsMode === 'set' ? '已把标签整体替换为' : value.tagsMode === 'remove' ? '已移除标签' : '已添加标签'
+        const list = /** @type {string[]} */ (value.tags).length === 0 ? '（清空全部用户标签）' : `「${/** @type {string[]} */ (value.tags).join('、')}」`
+        return `${verb}${list}，涉及 ${entries.length} 条记忆：\n`
+          + entries.map(entry => entryLine(entry, false)).join('\n') + absent
+      }
       if (value.mode === 'base') {
         const entries = /** @type {Record<string, any>[]} */ (value.entries)
         const missing = /** @type {string[]} */ (value.missing)
