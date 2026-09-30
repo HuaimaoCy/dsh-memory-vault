@@ -1,17 +1,23 @@
 {
   "name": "dsh-memory-vault",
-  "version": "0.4.0",
-  "description": "Knowledge and memory vault for DSH: nested memory groups with automatic summarization, free assignment between conversation memory and the knowledge base, priorities, a base-prompt layer, and AI curation.",
+  "version": "0.5.0",
+  "description": "Knowledge and memory vault for DSH: nested memory groups with automatic summarization, free assignment between conversation memory and the knowledge base, priorities, a base-prompt layer, and AI curation. The core is host-free and shared by the DSH plugin, a CLI, and a loopback RPC server, so DSH, Codex, and any Node host call the same vault.",
   "type": "module",
   "main": "index.js",
   "exports": {
     ".": "./index.js",
     "./client": "./client.js",
+    "./core": "./src/core/vault.js",
+    "./core/ops": "./src/core/ops.js",
     "./package.json": "./package.json"
+  },
+  "bin": {
+    "memory-vault": "bin/memory-vault.mjs"
   },
   "files": [
     "index.js",
     "client.js",
+    "bin",
     "src",
     "cordis.patch.yml",
     "README.md",
@@ -36,6 +42,6 @@
     "node": ">=22.5.0"
   },
   "scripts": {
-    "test": "node --no-warnings tests/smoke.mjs"
+    "test": "node --no-warnings tests/smoke.mjs && node --no-warnings tests/core-smoke.mjs && node --no-warnings tests/serve-real.mjs"
   }
 }

@@ -260,6 +260,41 @@ memory_curate action=apply origin=all          # 连人工输入的一起整理
 - 恢复：打开筛选行的 `显示隐藏`，变淡的磁贴上点「恢复」，或详情页点「恢复」。
 - 隐藏与删除的区别：隐藏保留全部内容与标签，随时可逆；删除不可逆。
 
+## 独立核心与通用调用接口（DSH / Codex / 任意宿主）
+
+记忆库的核心已从 DSH 插件中拆分独立，不含任何 DSH 依赖：`src/core/vault.js` 的 `createMemoryVault` 拥有存储、种子分组、带会话锁的阈值总结、AI 整理、以及被观察的对话转录。`index.js` 里的 DSH 插件是它的一个适配层；`bin/memory-vault.mjs` 的 CLI 是另一个。三者打开**同一个数据库文件**——Codex 写下的记忆，DSH 会话下一轮就能读到，反之亦然。
+
+核心通过两个可选钩子接触外界：`callModel`（一次带外模型调用；DSH 适配层用 `ctx.llm.stream` 实现）与 `resolveRoute`（该用哪个 provider/model）。没接模型服务的宿主仍然可以：调用方亲笔总结（`content` 模式）、管理记忆组、检索、控制知识应用。
+
+```js
+import { createMemoryVault } from 'dsh-memory-vault/core'
+
+const vault = createMemoryVault({ /* databasePath, config, callModel?, resolveRoute?, logger? */ })
+await vault.summarize({ session: { id: 'cli-1' }, content: '## 摘要\n- …', mode: 'manual' })
+vault.observe({ sessionId: 'cli-1', role: 'user', text: '…', seq: 1 })
+vault.dispose()
+```
+
+**Codex 与命令行**（`bin/memory-vault.mjs`，每条命令一个进程，stdout 输出 JSON）：
+
+```powershell
+node bin/memory-vault.mjs write --content '结论：构建统一用 pnpm。' --title '构建约定' --tags 构建 --source codex
+node bin/memory-vault.mjs recall --query 'pnpm 构建'
+node bin/memory-vault.mjs summarize --session codex-1 --content '## 摘要\n- …'   # 调用方亲笔，无需模型
+node bin/memory-vault.mjs serve                                                   # 改用回环 JSON RPC
+```
+
+数据库位置：`--db <路径>`，否则 `$MEMORY_VAULT_DB`，否则与插件相同的默认路径（`$DSH_HOME/memory-vault/vault.sqlite`）。写入带来源标记（`cli` / `codex` / `api`），其余校验与面板、模型工具完全一致。
+
+**回环 RPC 服务**（`memory-vault serve`，默认 `127.0.0.1:47321`）把面板自己的操作词汇表——同一套 op、同一套规则——用 `POST /rpc` 提供给偏好 HTTP 的调用方：
+
+```
+POST /rpc  {"op":"entry.write","group":"知识库","content":"…","source":"codex"}   → {"ok":true,"result":…}
+GET  /health                                                                 → {"ok":true}
+```
+
+每个 RPC 请求必须带 `x-dsh-memory-vault: 1` 标记头（跨站表单设不了），Origin 不一致直接拒绝；除非 `--host` 明确指定，服务只监听回环地址。`memory-vault rpc --op state` 在 shell 里驱动同一接口；`memory-vault help` 列出全部用法。
+
 ## 配置
 
 写进 `~/.dsh/profiles/web/cordis.patch.yml`（覆盖插件自带的那一层）：
@@ -325,21 +360,36 @@ Remove-Item -Recurse "$env:USERPROFILE\.dsh\memory-vault"   # 记忆数据（可
 # 独立冒烟测试：用模拟 ctx 驱动工具、来源与操作两条轴（人工输入 / AI 生成 / AI 整理范围）、标签就地增删、子记忆组（三层上限、防环、删父组保护、子树应用）、优先级、知识索引、底层 prompt、可调配额、v5 来源迁移、按条目应用、隐藏、水位总结、面板路由与请求边界，并真实渲染知识页、看板与新建对话记忆条（185 项检查）
 cd <这个插件目录>
 node tests/smoke.mjs
+
+# 核心套件：无宿主 vault、共享 op 接口、进程内 CLI、两个 vault 共用一个库文件
+node tests/core-smoke.mjs
+
+# serve 套件：真实服务进程 + 真实 HTTP，含标记头与 Origin 边界
+node tests/serve-real.mjs
 ```
 
 ```
 dsh-memory-vault/
-├── index.js          Host 侧插件：装配存储、工具、提示词段落、面板路由、会话观察
-├── client.js         浏览器半：侧边栏入口、磁贴看板与详情页、知识应用控件
-├── cordis.patch.yml  bundle 层：插入插件行与默认配置
+├── index.js              DSH 适配层：工具、提示词段落、面板路由、会话观察、ctx.llm 模型调用
+├── client.js             浏览器半：侧边栏入口、磁贴看板与详情页、知识应用控件
+├── bin/memory-vault.mjs  通用接口：面向 Codex/Shell 的 CLI + 回环 JSON RPC 服务（serve）
+├── cordis.patch.yml      bundle 层：插入插件行与默认配置
 ├── src/
-│   ├── config.js     配置默认值与 Standard Schema 校验
-│   ├── store.js      SQLite 架构、迁移、全部读写操作
-│   ├── tools.js      6 个模型工具的定义与结果渲染
-│   ├── prompt.js     记忆索引与已应用知识段落
-│   ├── summarize.js  一次性模型调用与总结提示词
-│   └── http.js       面板与知识应用控件使用的同源 HTTP 路由
-└── tests/smoke.mjs   冒烟测试
+│   ├── core/
+│   │   ├── vault.js      无宿主核心：createMemoryVault（存储、总结、整理、转录）
+│   │   └── ops.js        所有表面共用的 op 词汇表（面板、CLI、RPC）
+│   ├── config.js         配置默认值与 Standard Schema 校验
+│   ├── store.js          SQLite 架构、迁移、全部读写操作
+│   ├── policy.js         所有写入口共享的写入规则
+│   ├── tools.js          6 个模型工具的定义与结果渲染
+│   ├── prompt.js         记忆索引与已应用知识段落
+│   ├── summarize.js      带外模型调用驱动与总结提示词
+│   ├── curate.js         整理提示词与判定解析
+│   └── http.js           面板与知识应用控件使用的同源 HTTP 路由
+└── tests/
+    ├── smoke.mjs         DSH 插件套件（模拟 ctx）
+    ├── core-smoke.mjs    核心 / op / CLI 套件（无 DSH）
+    └── serve-real.mjs    真实 serve 进程走 HTTP
 ```
 
 插件对外只依赖 `ctx`（Cordis 上下文），不 import 任何 `@deepseek-ai/*` 运行时模块；浏览器半只从模块表基线里取 `react` 与 `@deepseek-ai/dsh-client-ui-primitives`。

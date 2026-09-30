@@ -16,44 +16,13 @@
  * @module dsh-memory-vault/src/http
  */
 
-import { ENTRY_KINDS, SCOPES } from './store.js'
-import {
-  intParam, limitDefaults, normalizePriority, normalizeTags, validateEntryWrite,
-  validateGroupDescription, validateGroupName,
-} from './policy.js'
+import { VAULT_OPS, operateVault } from './core/ops.js'
 
 /** Route prefix owned by this plugin. */
 export const ROUTE_PREFIX = '/memory-vault'
 
 /** Header the panel sets on every request; its presence also proves a same-origin fetch. */
 export const CLIENT_HEADER = 'x-dsh-memory-vault'
-
-/**
- * Every operation this route serves, and whether it changes the vault.
- *
- * The method alone cannot decide whether a request is a mutation: `?op=` is
- * chosen by the caller, so a safe method carrying a write operation would walk
- * straight past the marker check. RFC 9110 §9.2.1 requires exactly the
- * opposite — a safe method must not select an unsafe operation. Reads stay
- * reachable by GET; writes are POST-only.
- */
-const OPERATIONS = {
-  state: { write: false },
-  entries: { write: false },
-  'apply.get': { write: false },
-  'entry.write': { write: true },
-  'entry.update': { write: true },
-  'entry.delete': { write: true },
-  'entry.hide': { write: true },
-  'group.create': { write: true },
-  'group.update': { write: true },
-  'group.delete': { write: true },
-  assign: { write: true },
-  'apply.set': { write: true },
-  'settings.set': { write: true },
-  curate: { write: true },
-  'session.bind': { write: true },
-}
 
 /** Largest request body accepted, in bytes. */
 const MAX_BODY_BYTES = 1024 * 1024
@@ -120,281 +89,6 @@ function checkOrigin(req) {
 }
 
 /**
- * Project the vault for the panel: counts, groups, and the sessions currently
- * bound to a conversation group.
- * @param {import('./store.js').MemoryStore} store - Open vault.
- * @param {import('./config.js').VaultConfig} config - Resolved plugin config.
- * @returns {Record<string, unknown>} Panel state.
- */
-function stateOf(store, config) {
-  return {
-    stats: store.stats(),
-    groups: store.listGroups(),
-    tags: store.tagInventory(),
-    scopes: SCOPES,
-    kinds: ENTRY_KINDS,
-    limits: {
-      autoSummaryTurns: config.autoSummaryTurns,
-      autoSummaryChars: config.autoSummaryChars,
-      searchLimit: config.searchLimit,
-      maxEntryChars: config.maxEntryChars,
-    },
-    autoSummary: config.autoSummary,
-    summarizer: config.summarizer,
-    apply: {
-      byDefault: config.applyByDefault,
-      defaults: config.applyDefaultGroups,
-      // The resolved numbers, not the deployment defaults: the panel edits
-      // these and must show what the next request will actually use.
-      ...store.readLimits(limitDefaults(config)),
-      defaultsApplied: limitDefaults(config),
-    },
-  }
-}
-
-/**
- * Run one panel operation.
- * @param {object} deps - Plugin services.
- * @param {import('./store.js').MemoryStore} deps.store - Open vault.
- * @param {import('./config.js').VaultConfig} deps.config - Resolved plugin config.
- * @param {() => void} deps.notify - Change broadcaster.
- * @param {Record<string, unknown>} body - Parsed request body.
- * @returns {Record<string, unknown>} Operation result.
- */
-async function operate({ store, config, notify, curate }, body) {
-  const op = body.op
-  switch (op) {
-    case 'state':
-      return stateOf(store, config)
-    case 'entries': {
-      const groupReference = typeof body.group === 'string' && body.group !== '' ? body.group : undefined
-      const group = groupReference === undefined ? undefined : store.requireGroup(groupReference)
-      const scope = typeof body.scope === 'string' && SCOPES.includes(body.scope) ? body.scope : undefined
-      const tags = normalizeTags(Array.isArray(body.tag) ? body.tag : body.tag === undefined || body.tag === '' ? [] : [body.tag])
-      const query = typeof body.query === 'string' ? body.query.trim() : ''
-      const includeHidden = body.includeHidden === true || body.includeHidden === 'true'
-      const limit = intParam(body.limit, { min: 1, max: 500, fallback: 100 }, 'limit')
-      const offset = intParam(body.offset, { min: 0, max: 1000000, fallback: 0 }, 'offset')
-      // One row past the page proves another page exists without a second
-      // counting query over the whole table.
-      const rows = query === ''
-        ? store.listEntries({ groupId: group?.id, scope, tags, includeHidden, limit: limit + 1, offset })
-        : store.searchEntries({ query, scope, groupId: group?.id, tags, includeHidden, limit: limit + 1, offset })
-      const hasMore = rows.length > limit
-      return {
-        entries: hasMore ? rows.slice(0, limit) : rows,
-        group: group ?? null,
-        limit,
-        offset,
-        hasMore,
-        nextOffset: hasMore ? offset + limit : null,
-      }
-    }
-    case 'entry.hide': {
-      const ids = Array.isArray(body.ids) ? body.ids.map(String) : []
-      if (ids.length === 0) throw new Error('entry.hide requires `ids`')
-      const result = store.setHidden({ ids, hidden: body.hidden !== false })
-      notify()
-      return result
-    }
-    case 'apply.get': {
-      const sessionId = String(body.sessionId ?? '')
-      if (sessionId === '') throw new Error('apply.get requires `sessionId`')
-      // The panel reads the very plan the prompt renderer reads, so the preview
-      // cannot claim memories the model never receives.
-      const plan = store.planInjection({
-        sessionId,
-        defaults: config.applyByDefault ? config.applyDefaultGroups : [],
-        ...store.readLimits(limitDefaults(config)),
-        enabled: config.injectIndex,
-      })
-      return {
-        sessionId,
-        // What this session chose for itself, which stays visible even while
-        // the effective set comes from the deployment default.
-        ...store.appliedGroups(sessionId),
-        effective: plan.source,
-        enabled: plan.enabled,
-        injected: plan.entries.length + plan.base.length,
-        truncated: plan.truncated,
-        skipped: plan.skipped,
-        usedChars: plan.usedChars,
-        // The knowledge panel shows what the session actually receives, not
-        // just how many memories that is.
-        entries: plan.entries,
-        base: plan.base,
-        // Groups the effective set resolved to, so the tiles match the正文.
-        effectiveGroups: plan.groups.map(group => group.id),
-        // Where this session's summaries go; a separate axis from what it reads.
-        boundGroupId: store.sessionState(sessionId).groupId,
-        defaultGroupId: store.readMeta('default_conversation_group') ?? null,
-        defaults: config.applyDefaultGroups,
-        applyByDefault: config.applyByDefault,
-        ...store.readLimits(limitDefaults(config)),
-      }
-    }
-    case 'apply.set': {
-      const sessionId = String(body.sessionId ?? '')
-      if (sessionId === '') throw new Error('apply.set requires `sessionId`')
-      // `groups: null` clears the session's choice so the deployment default
-      // applies again; `groups: []` applies nothing on purpose. `entries` adds
-      // memories picked one by one alongside whatever groups were chosen.
-      const groups = body.groups === null ? null : Array.isArray(body.groups) ? body.groups.map(String) : undefined
-      if (groups === undefined) throw new Error('apply.set requires `groups` (an array, or null to reset)')
-      const entries = Array.isArray(body.entries) ? body.entries.map(String) : []
-      const stored = store.setApplications(sessionId, groups, entries)
-      notify()
-      return { sessionId, ...stored }
-    }
-    case 'group.create': {
-      const group = store.createGroup({
-        name: validateGroupName(body.name),
-        scope: typeof body.scope === 'string' && SCOPES.includes(body.scope) ? body.scope : 'conversation',
-        description: validateGroupDescription(body.description),
-        tags: normalizeTags(body.tags),
-        sessionId: typeof body.sessionId === 'string' && body.sessionId !== '' ? body.sessionId : null,
-        autoSummary: body.autoSummary === true,
-        priority: normalizePriority(body.priority),
-        // A panel-created group can be born inside another one; an empty value
-        // means the top level.
-        parent: typeof body.parent === 'string' && body.parent !== '' ? body.parent : null,
-      })
-      notify()
-      return { group }
-    }
-    case 'group.update': {
-      const { group, movedEntries } = store.updateGroup(String(body.id ?? body.group ?? ''), {
-        ...(body.name === undefined ? {} : { name: validateGroupName(body.name) }),
-        ...(typeof body.scope === 'string' && SCOPES.includes(body.scope) ? { scope: body.scope } : {}),
-        ...(body.description === undefined ? {} : { description: validateGroupDescription(body.description) }),
-        ...(body.tags === undefined ? {} : { tags: normalizeTags(body.tags) }),
-        ...(typeof body.autoSummary === 'boolean' ? { autoSummary: body.autoSummary } : {}),
-        ...(body.priority === undefined ? {} : { priority: normalizePriority(body.priority) }),
-        // Moves are explicit: only a supplied `parent` changes the tree, and
-        // null/'' is how the panel says "make this a top-level group".
-        ...(body.parent === undefined ? {} : { parent: typeof body.parent === 'string' && body.parent !== '' ? body.parent : null }),
-      })
-      notify()
-      return { group, movedEntries }
-    }
-    case 'group.delete': {
-      const removed = store.deleteGroup(String(body.id ?? body.group ?? ''))
-      notify()
-      return { removed }
-    }
-    case 'entry.write': {
-      const groupId = String(body.groupId ?? body.group ?? '')
-      const fields = validateEntryWrite(body, ENTRY_KINDS, config)
-      const entry = store.createEntry({
-        groupId,
-        ...fields,
-        source: 'panel',
-        sessionId: typeof body.sessionId === 'string' && body.sessionId !== '' ? body.sessionId : null,
-        scope: typeof body.scope === 'string' && SCOPES.includes(body.scope) ? body.scope : null,
-      })
-      notify()
-      return { entry }
-    }
-    case 'entry.update': {
-      // Validating the resulting entry rather than the patch keeps the rules
-      // identical to a write: an edit cannot smuggle in what a write refuses.
-      const current = store.requireEntry(String(body.id ?? ''))
-      const fields = validateEntryWrite({
-        content: body.content === undefined ? current.content : body.content,
-        title: body.title === undefined ? current.title : body.title,
-        kind: body.kind === undefined || body.kind === '' ? current.kind : body.kind,
-        tags: body.tags === undefined ? current.tags : body.tags,
-        priority: body.priority === undefined ? current.priority : body.priority,
-        // Base-layer membership has to round-trip through the validator too:
-        // leaving it out defaulted every save to `false`, which silently
-        // cleared the flag on any edit and made the panel's toggle a no-op.
-        base: body.base === undefined ? current.base : body.base,
-      }, ENTRY_KINDS, config)
-      const entry = store.updateEntry(current.id, fields)
-      notify()
-      return { entry }
-    }
-    case 'session.bind': {
-      const sessionId = String(body.sessionId ?? '')
-      if (sessionId === '') throw new Error('session.bind requires `sessionId`')
-      const reference = body.group === null || body.group === undefined || body.group === ''
-        ? null
-        : String(body.group)
-      const stored = store.bindSession(sessionId, reference)
-      notify()
-      return {
-        sessionId,
-        ...stored,
-        group: stored.groupId === null ? null : store.findGroup(stored.groupId) ?? null,
-      }
-    }
-    case 'entry.delete': {
-      const entry = store.deleteEntry(String(body.id ?? ''))
-      notify()
-      return { entry }
-    }
-    case 'assign': {
-      // A base-layer flag rides the same operation as assignment: both answer
-      // "what does this memory mean to me".
-      if (body.base !== undefined && Array.isArray(body.ids)) {
-        const entries = body.ids.map(String).map(id => store.updateEntry(id, { base: body.base === true }))
-        notify()
-        return { entries, base: body.base === true }
-      }
-      if (body.priority !== undefined && Array.isArray(body.ids)) {
-        const entries = body.ids.map(String).map(id => store.updateEntry(id, { priority: body.priority }))
-        notify()
-        return { entries, priority: normalizePriority(body.priority) }
-      }
-      if (typeof body.group === 'string' && body.group !== '' && !Array.isArray(body.ids)) {
-        const { group, movedEntries } = store.updateGroup(body.group, {
-          scope: /** @type {string} */ (body.scope),
-        })
-        notify()
-        return { group, movedEntries }
-      }
-      const result = store.assignEntries({
-        ids: Array.isArray(body.ids) ? body.ids.map(String) : [],
-        scope: typeof body.scope === 'string' && SCOPES.includes(body.scope) ? body.scope : null,
-        groupId: typeof body.targetGroup === 'string' && body.targetGroup !== '' ? body.targetGroup : null,
-        assignedBy: body.followGroup === true ? 'group' : 'manual',
-      })
-      notify()
-      return result
-    }
-    case 'settings.set': {
-      // Injection limits are stored in the vault rather than only in the profile
-      // file, so the count can be tuned from the panel without a host restart.
-      const defaults = limitDefaults(config)
-      const limits = store.writeLimits({
-        ...(body.maxEntries === undefined ? {} : { maxEntries: body.maxEntries }),
-        ...(body.maxChars === undefined ? {} : { maxChars: body.maxChars }),
-        ...(body.baseMaxEntries === undefined ? {} : { baseMaxEntries: body.baseMaxEntries }),
-        ...(body.baseMaxChars === undefined ? {} : { baseMaxChars: body.baseMaxChars }),
-      }, defaults)
-      notify()
-      return { limits, defaults }
-    }
-    case 'curate': {
-      const result = await curate({
-        ids: Array.isArray(body.ids) ? body.ids.map(String) : undefined,
-        group: typeof body.group === 'string' && body.group !== '' ? body.group : undefined,
-        limit: intParam(body.limit, { min: 1, max: 50, fallback: 20 }, 'limit'),
-        apply: body.apply === true,
-        applyPriority: body.applyPriority === true,
-        // Default generated: a memory a person typed in is left alone unless
-        // the panel explicitly widens the pass.
-        origin: body.origin === 'all' || body.origin === 'manual' ? body.origin : 'generated',
-      })
-      notify()
-      return result
-    }
-    default:
-      throw new Error(`unknown vault operation "${String(op)}"`)
-  }
-}
-
-/**
  * Register the panel route on the composing application's web server.
  * @param {object} ctx - Plugin context.
  * @param {object} deps - Plugin services.
@@ -439,7 +133,7 @@ export function registerVaultRoutes(ctx, deps) {
       // The operation decides the rules, not the method: a write reached by a
       // safe method is refused with 405 rather than executed.
       const op = String(body.op ?? '')
-      const spec = OPERATIONS[op]
+      const spec = VAULT_OPS[op]
       if (spec === undefined) {
         sendJson(res, 400, { ok: false, error: `unknown vault operation "${op}"` })
         return
@@ -456,7 +150,7 @@ export function registerVaultRoutes(ctx, deps) {
       }
 
       try {
-        sendJson(res, 200, { ok: true, result: await operate(deps, body) })
+        sendJson(res, 200, { ok: true, result: await operateVault(deps, body) })
       } catch (error) {
         sendJson(res, 400, { ok: false, error: error instanceof Error ? error.message : String(error) })
       }

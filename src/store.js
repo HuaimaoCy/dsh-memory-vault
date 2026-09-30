@@ -401,6 +401,12 @@ export class MemoryStore {
     this.#db = new DatabaseSync(path)
     this.#db.exec('PRAGMA journal_mode = WAL')
     this.#db.exec('PRAGMA foreign_keys = ON')
+    // The vault is one database with several processes over it: the DSH host
+    // holds it open while the CLI (`bin/memory-vault.mjs`) or the loopback RPC
+    // server opens it again. WAL already lets one writer proceed beside many
+    // readers; a busy timeout is what keeps the second writer from failing
+    // outright while the first one commits.
+    this.#db.exec('PRAGMA busy_timeout = 5000')
     const fresh = this.#isEmpty()
     this.#db.exec(SCHEMA)
     const from = fresh ? SCHEMA_VERSION : Number(this.readMeta('schema_version') ?? 1)

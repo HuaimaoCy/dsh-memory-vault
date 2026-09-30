@@ -251,6 +251,41 @@ A memory body is rendered by **the shell's own `MarkdownText`** (`@deepseek-ai/d
 - Restore: turn on `Show hidden` in the facet row and press `Restore` on the dimmed tile, or press `Restore` on the detail screen.
 - Hiding versus deleting: hiding keeps every byte and is reversible; deletion is not.
 
+## The standalone core, and calling the vault from DSH, Codex, or any host
+
+The vault's core is split out from the DSH plugin and has no DSH dependency anywhere: `src/core/vault.js` (`createMemoryVault`) owns the store, the seeded tree, threshold summarization with its per-session locks, AI curation, and the observed transcript. The DSH plugin in `index.js` is one adapter over it; the CLI in `bin/memory-vault.mjs` is another. All of them open the **same database file**, so a memory written by Codex is a memory the DSH session reads next turn.
+
+The outside world reaches the core through two optional hooks — `callModel` (one out-of-band model call; DSH implements it over `ctx.llm.stream`) and `resolveRoute` (which provider/model to use) — so a host with no model service still gets caller-written summaries, groups, search, and application control.
+
+```js
+import { createMemoryVault } from 'dsh-memory-vault/core'
+
+const vault = createMemoryVault({ /* databasePath, config, callModel?, resolveRoute?, logger? */ })
+await vault.summarize({ session: { id: 'cli-1' }, content: '## 摘要\n- …', mode: 'manual' })
+vault.observe({ sessionId: 'cli-1', role: 'user', text: '…', seq: 1 })
+vault.dispose()
+```
+
+**Codex and the command line** (`bin/memory-vault.mjs`, every command one process, JSON on stdout):
+
+```powershell
+node bin/memory-vault.mjs write --content '结论：构建统一用 pnpm。' --title '构建约定' --tags 构建 --source codex
+node bin/memory-vault.mjs recall --query 'pnpm 构建'
+node bin/memory-vault.mjs summarize --session codex-1 --content '## 摘要\n- …'   # caller-written; no model needed
+node bin/memory-vault.mjs serve                                                   # loopback JSON RPC instead of HTTP-less spawning
+```
+
+Database location: `--db <path>`, else `$MEMORY_VAULT_DB`, else the same default the plugin opens (`$DSH_HOME/memory-vault/vault.sqlite`). Writes are provenance-labelled (`cli` / `codex` / `api`) but otherwise pass exactly the validation the panel and the tools apply.
+
+**The loopback RPC server** (`memory-vault serve`, default `127.0.0.1:47321`) serves the panel's own operation vocabulary — the very same ops, the very same rules — over `POST /rpc` for callers that prefer HTTP:
+
+```
+POST /rpc  {"op":"entry.write","group":"知识库","content":"…","source":"codex"}   → {"ok":true,"result":…}
+GET  /health                                                                 → {"ok":true}
+```
+
+Every RPC call must carry the `x-dsh-memory-vault: 1` marker header (a cross-site form cannot), a mismatched `Origin` is refused, and the server binds loopback unless `--host` says otherwise. `memory-vault rpc --op state` drives the same surface from the shell; `memory-vault help` lists everything.
+
 ## Configuration
 
 Override the shipped layer from `~/.dsh/profiles/web/cordis.patch.yml`:
@@ -316,21 +351,36 @@ Remove-Item -Recurse "$env:USERPROFILE\.dsh\memory-vault"   # the memories, opti
 # Standalone smoke test: drives tools, the two axes (human input / AI-written / curation scope), editing one memory's tags in place, sub-groups (three-level ceiling, cycle refusal, delete protection, subtree application), priority, the knowledge index, the base-prompt layer, a tunable quota, the v5 origin migration, per-memory application, hiding, watermark summarization, the panel route and the request boundary on a mock ctx, then renders the knowledge view, the board and the new-conversation strip for real (183 checks)
 cd <this plugin directory>
 node tests/smoke.mjs
+
+# The core suite: host-free vault, shared op surface, CLI in-process, two vaults over one file
+node tests/core-smoke.mjs
+
+# The serve suite: a real server process over real HTTP, marker and origin boundaries
+node tests/serve-real.mjs
 ```
 
 ```
 dsh-memory-vault/
-├── index.js          Host half: wires storage, tools, prompt section, panel routes, session observation
-├── client.js         Browser half: sidebar entry, tile board and detail screen, knowledge-application control
-├── cordis.patch.yml  Bundle layer: inserts the plugin row and its default configuration
+├── index.js              DSH adapter: tools, prompt section, panel routes, session observation, ctx.llm model calls
+├── client.js             Browser half: sidebar entry, tile board and detail screen, knowledge-application control
+├── bin/memory-vault.mjs  Generic interface: CLI for Codex/shell + loopback JSON RPC server (serve)
+├── cordis.patch.yml      Bundle layer: inserts the plugin row and its default configuration
 ├── src/
-│   ├── config.js     Config defaults and Standard Schema validation
-│   ├── store.js      SQLite schema, migrations, and every read/write operation
-│   ├── tools.js      The six model tools and their result rendering
-│   ├── prompt.js     The memory index and the applied-knowledge block
-│   ├── summarize.js  One-shot model call and summarization prompt
-│   └── http.js       Same-origin HTTP routes the panel and the control use
-└── tests/smoke.mjs   Smoke test
+│   ├── core/
+│   │   ├── vault.js      Host-free core: createMemoryVault (store, summarization, curation, transcript)
+│   │   └── ops.js        The shared op vocabulary every surface serves (panel, CLI, RPC)
+│   ├── config.js         Config defaults and Standard Schema validation
+│   ├── store.js          SQLite schema, migrations, and every read/write operation
+│   ├── policy.js         Write rules shared by every surface
+│   ├── tools.js          The six model tools and their result rendering
+│   ├── prompt.js         The memory index and the applied-knowledge block
+│   ├── summarize.js      Out-of-band model-call driver and summarization prompt
+│   ├── curate.js         Curation prompt and verdict parsing
+│   └── http.js           Same-origin HTTP routes the panel and the control use
+└── tests/
+    ├── smoke.mjs         DSH plugin suite (mock ctx)
+    ├── core-smoke.mjs    Core / ops / CLI suite (no DSH)
+    └── serve-real.mjs    Real serve process over HTTP
 ```
 
 The plugin depends on nothing but `ctx` (the Cordis context) and imports no `@deepseek-ai/*` runtime module; the browser half takes only `react` and `@deepseek-ai/dsh-client-ui-primitives` from the module table's baseline.

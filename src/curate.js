@@ -10,7 +10,7 @@
  * @module dsh-memory-vault/src/curate
  */
 
-import { finishError, withDeadline } from './summarize.js'
+import { callLlmStream } from './summarize.js'
 import { normalizeTags } from './policy.js'
 
 /** The JSON contract the model is asked to answer in. */
@@ -166,9 +166,12 @@ export function parseTagMap(text) {
 /**
  * Make the one curation call.
  *
- * Like summarization this is an out-of-band `ctx.llm.stream`: it never enters a
- * session log and never wakes an idle agent, and the terminal `finish` chunk is
- * checked explicitly because a truncation arrives as data rather than an error.
+ * Compatibility wrapper over `callLlmStream` for callers that hold a plugin
+ * context rather than an `llm` service; the vault core goes through its own
+ * `callModel` adapter instead. Like summarization this is an out-of-band
+ * `ctx.llm.stream`: it never enters a session log and never wakes an idle
+ * agent, and the terminal `finish` chunk is checked explicitly because a
+ * truncation arrives as data rather than an error.
  * @param {object} ctx - Plugin context.
  * @param {object} request - Call request.
  * @param {{ provider: string, model: string }} request.route - Resolved route.
@@ -184,34 +187,18 @@ export async function curateWithModel(ctx, request) {
   const llm = ctx.get('llm')
   if (llm === undefined || llm === null || typeof llm.stream !== 'function') {
     throw new Error('当前宿主没有提供可用的模型服务（ctx.llm），无法做 AI 整理')
-  }  const deadline = withDeadline(request.signal, request.timeoutMs)
-  try {
-    let text = ''
-    let usage
-    /** @type {{ kind: string, failure?: { code?: string, message?: string } }|undefined} */
-    let finish
-    for await (const chunk of llm.stream({
-      provider: request.route.provider,
-      model: request.route.model,
-      system: CURATE_SYSTEM_PROMPT,
-      messages: [{
-        role: 'user',
-        content: [{ type: 'text', text: buildCurationMessage(request.entries, request.groups ?? [], request.tags ?? []) }],
-      }],
-      maxTokens: request.maxTokens,
-      signal: deadline.signal,
-      ...(request.sessionId === undefined || request.sessionId === null ? {} : { sessionId: request.sessionId }),
-    })) {
-      if (chunk.type === 'text-delta') text += chunk.text
-      else if (chunk.type === 'usage') usage = chunk.usage
-      else if (chunk.type === 'finish') finish = chunk.reason
-    }
-    if (deadline.signal.aborted) throw new Error('整理被取消或超时')
-    const failure = finishError(finish)
-    if (failure !== undefined) throw failure
-    if (text.trim() === '') throw new Error('模型没有返回整理结果')
-    return { text: text.trim(), usage, provider: request.route.provider, model: request.route.model }
-  } finally {
-    deadline.dispose()
   }
+  return callLlmStream(llm, {
+    purpose: 'curate',
+    route: request.route,
+    system: CURATE_SYSTEM_PROMPT,
+    messages: [{
+      role: 'user',
+      content: [{ type: 'text', text: buildCurationMessage(request.entries, request.groups ?? [], request.tags ?? []) }],
+    }],
+    maxTokens: request.maxTokens,
+    timeoutMs: request.timeoutMs,
+    signal: request.signal,
+    sessionId: request.sessionId,
+  })
 }
