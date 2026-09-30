@@ -196,6 +196,9 @@ window.__ModuleLoader__.load({
         removeTag: '移除这个标签',
         untagged: '未打标签',
         tagSplitHint: '组内按各自的标签细分',
+        curateTags: '标签合并',
+        tagDropped: '删除该标签',
+        curateDefaultModel: '用部署默认模型整理',
         curateBusy: '整理中…',
         curateHint: '用一次模型调用判断每条记忆是可复用还是单次性，并给出归类建议。',
         curateEmpty: '模型没有给出可用的判断。',
@@ -348,6 +351,9 @@ window.__ModuleLoader__.load({
         removeTag: 'Remove this tag',
         untagged: 'untagged',
         tagSplitHint: 'split inside a group by its own tags',
+        curateTags: 'Label merges',
+        tagDropped: 'delete this label',
+        curateDefaultModel: 'curate on the deployment default model',
         curateBusy: 'Reviewing…',
         curateHint: 'One model call decides whether each memory is reusable or one-off, and suggests where it belongs.',
         curateEmpty: 'The model returned no usable verdicts.',
@@ -1577,6 +1583,27 @@ window.__ModuleLoader__.load({
                       ? null
                       : h(Tag, null, String(item.group)),
                   )),
+                ),
+            // Labels are curated alongside the memories, so the merges the
+            // answer asked for are shown here with what each one actually
+            // touched — a merge that matched nothing is worth seeing too.
+            (cure.tagMap ?? []).length === 0
+              ? null
+              : h('div', { className: 'dsmv-col' },
+                  h('div', { className: 'dsmv-cap' }, t('curateTags')),
+                  ...(cure.tagMap ?? []).map((change) => {
+                    const done = (cure.tagChanges ?? []).find(entry => entry.from === change.from)
+                    return h('div', { key: change.from, className: 'dsmv-row' },
+                      h(Tag, { tone: 'quiet' }, String(change.from)),
+                      h('span', { className: 'dsmv-cap' }, '→'),
+                      h(Tag, change.to === '' ? { tone: 'warning' } : { tone: 'info' },
+                        change.to === '' ? t('tagDropped') : String(change.to)),
+                      h('span', { className: 'dsmv-cap' },
+                        done === undefined
+                          ? String(change.reason)
+                          : `${String(done.updated)} ${t('entries')}`),
+                    )
+                  }),
                 ),
           ),
 

@@ -24,7 +24,7 @@ import { buildTools } from './src/tools.js'
 import { registerIndexSection } from './src/prompt.js'
 import { registerVaultRoutes } from './src/http.js'
 import { validateEntryWrite } from './src/policy.js'
-import { curateWithModel, parseCuration, targetGroupFor } from './src/curate.js'
+import { curateWithModel, parseCuration, parseTagMap, targetGroupFor } from './src/curate.js'
 import { routeFromSession, summarizeWithModel, titleFromRecord } from './src/summarize.js'
 
 export { Config, CONFIG_DEFAULTS } from './src/config.js'
@@ -120,6 +120,29 @@ export function apply(ctx, config) {
    * hand — and it is always a route that demonstrably works.
    */
   let lastRoute
+
+  /**
+   * The deployment's own default model selection.
+   *
+   * This is the harness's configured default, credentials and all, and it is
+   * what a call that belongs to no session should use: the vault asks for a
+   * route by name and never sees or handles a key.
+   * @returns {{ provider: string, model: string }|undefined} The default route, when the service is present.
+   */
+  const defaultRoute = () => {
+    try {
+      const service = ctx.get('agentDefaultModel')
+      if (service === undefined || service === null || typeof service.currentSelection !== 'function') return undefined
+      const selection = service.currentSelection()
+      const provider = selection?.provider
+      const model = selection?.model
+      if (typeof provider !== 'string' || provider === '' || typeof model !== 'string' || model === '') return undefined
+      return { provider, model }
+    } catch (_error) {
+      // A host without the service simply has no default to offer.
+      return undefined
+    }
+  }
 
   /** Record that the vault changed, for listeners that derive state from it. */
   const notify = () => {
@@ -351,23 +374,30 @@ export function apply(ctx, config) {
           ? '没有可整理的 AI 生成记忆：把范围改成「全部」可以连人工输入的一起整理'
           : '没有可整理的记忆：换一个记忆组，或先用 memory_write 写入内容')
     }
-    const route = config.summarizerProvider !== null && config.summarizerModel !== null
+    // Where the call runs, in order of how deliberate each answer is:
+    // the plugin's own config, then the session's route when there is one, then
+    // the deployment's default model, then whatever the last observed turn ran
+    // on. The default model is what makes a panel call work with nothing
+    // configured: the harness resolves that provider's credentials itself, so
+    // the vault never handles a key and needs no session to reach a model.
+    const configuredRoute = config.summarizerProvider !== null && config.summarizerModel !== null
       ? { provider: config.summarizerProvider, model: config.summarizerModel }
-      : session === undefined
-        ? lastRoute
-        : routeFromSession(session) ?? lastRoute
+      : undefined
+    const sessionRoute = session === undefined ? undefined : routeFromSession(session)
+    const route = configuredRoute ?? sessionRoute ?? defaultRoute() ?? lastRoute
     if (route === undefined) {
       throw new Error(
-        '没有可用的 provider/model 来做整理：在任意会话里发一条消息即可（插件会记住该会话的路由），'
-        + '或配置 summarizerProvider 与 summarizerModel',
+        '没有可用的 provider/model 来做整理：配置 summarizerProvider 与 summarizerModel，'
+        + '或在任意会话里发一条消息（插件会记住该会话的路由）',
       )
     }
     const record = await curateWithModel(ctx, {
       route,
       entries: candidates,
-      // The existing tree, so a new group can be hung under a heading instead
-      // of adding another peer to a flat list that is already too long.
+      // The existing tree and the existing tag vocabulary, so the answer reuses
+      // the headings and the labels instead of inventing more of each.
       groups: store.listGroups(),
+      tags: store.tagInventory().filter(item => item.system !== true),
       sessionId: session?.id,
       maxTokens: config.summarizerMaxTokens,
       timeoutMs: config.summarizerTimeoutMs,
@@ -380,16 +410,25 @@ export function apply(ctx, config) {
       // can show which side of the line a memory sits on.
       .map(verdict => ({ ...verdict, modelWritten: known.get(verdict.id).modelWritten === true }))
     const model = { provider: record.provider, model: record.model }
-    if (!apply) return { mode: 'review', origin: scope ?? 'all', candidates, verdicts, applied: [], model }
+    // Label merges are read from the same answer and applied vault-wide: half a
+    // vault using each spelling is the problem a merge exists to fix.
+    const tagMap = parseTagMap(record.text)
+    if (!apply) {
+      return { mode: 'review', origin: scope ?? 'all', candidates, verdicts, applied: [], tagMap, tagChanges: [], model }
+    }
 
     // Every verdict lands in one transaction: a half-curated batch would leave
     // the vault in a state neither the old nor the new reading explains.
-    const applied = store.transaction(() => verdicts.map(verdict => {
+    const result = store.transaction(() => {
+      const applied = verdicts.map(verdict => {
       const entry = /** @type {Record<string, any>} */ (known.get(verdict.id))
       const originLabel = entry.modelWritten === true ? 'AI 生成' : '人工输入'
+      // Labels first: they are the part that can be applied without moving
+      // anything, and the move below is what makes the entry a different thing.
+      if (verdict.tags.length > 0) store.updateEntry(entry.id, { tags: verdict.tags })
       if (verdict.verdict === 'oneoff') {
         store.assignEntries({ ids: [entry.id], scope: 'conversation', groupId: null, assignedBy: 'manual' })
-        return { id: entry.id, verdict: 'oneoff', scope: 'conversation', group: entry.groupName ?? '', reason: verdict.reason, origin: originLabel }
+        return { id: entry.id, verdict: 'oneoff', scope: 'conversation', group: entry.groupName ?? '', reason: verdict.reason, origin: originLabel, tags: verdict.tags }
       }
       const name = targetGroupFor(verdict, config.knowledgeGroupName)
       let target = store.findGroup(name)
@@ -406,10 +445,22 @@ export function apply(ctx, config) {
       }
       store.assignEntries({ ids: [entry.id], scope: 'knowledge', groupId: target.id, assignedBy: 'manual' })
       if (applyPriority) store.updateEntry(entry.id, { priority: Math.max(60, Number(entry.priority ?? 0)) })
-      return { id: entry.id, verdict: 'reusable', scope: 'knowledge', group: target.name, reason: verdict.reason, origin: originLabel }
-    }))
+      return { id: entry.id, verdict: 'reusable', scope: 'knowledge', group: target.name, reason: verdict.reason, origin: originLabel, tags: verdict.tags }
+      })
+      const tagChanges = tagMap.map(change => store.renameTag(change.from, change.to))
+      return { applied, tagChanges }
+    })
     notify()
-    return { mode: 'applied', origin: scope ?? 'all', candidates, verdicts, applied, model }
+    return {
+      mode: 'applied',
+      origin: scope ?? 'all',
+      candidates,
+      verdicts,
+      applied: result.applied,
+      tagMap,
+      tagChanges: result.tagChanges,
+      model,
+    }
   }
 
   // Tools are the vault's primary surface: everything a person can do from the

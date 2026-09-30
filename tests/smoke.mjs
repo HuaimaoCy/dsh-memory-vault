@@ -103,10 +103,21 @@ function sessionStub(id) {
 function curationAnswer(options) {
   const body = JSON.stringify(options.messages ?? [])
   const ids = [...body.matchAll(/id:\s*(mem_[0-9a-f-]+)/g)].map(match => match[1])
+  // Every answer carries labels as well as a verdict, and one merge for the
+  // whole vault: labelling is part of curating, not a second pass.
   const items = ids.map((id, index) => index === 0
-    ? { id, verdict: 'reusable', reason: '换个会话仍然成立', group: '整理产出的知识' }
-    : { id, verdict: 'oneoff', reason: '只对本次任务成立', group: '' })
-  return JSON.stringify({ items })
+    ? { id, verdict: 'reusable', reason: '换个会话仍然成立', group: '整理产出的知识', tags: ['规范标签', '整理'] }
+    : { id, verdict: 'oneoff', reason: '只对本次任务成立', group: '', tags: ['规范标签'] })
+  return JSON.stringify({
+    items,
+    tagMap: [
+      { from: '旧标签', to: '统一标签', reason: '同一个概念的两种写法' },
+      // Hostile entries: the vault owns its system tags, so neither of these
+      // may do anything, however the answer is worded.
+      { from: 'AI 生成', to: '机器写的', reason: '敌意样本' },
+      { from: '保留', to: '人工输入', reason: '想把用户标签搬到系统标签上' },
+    ],
+  })
 }
 
 /**
@@ -168,6 +179,9 @@ const llm = llmStub('## 摘要\n- 构建脚本改用 pnpm。\n\n## 关键事实\
 const routes = []
 const harness = mockContext({
   llm,
+  // The deployment's own default route, which is what a call belonging to no
+  // session should use — the vault never sees the credential behind it.
+  agentDefaultModel: { currentSelection: () => ({ provider: 'ds-default', model: 'ds-model' }) },
   systemPrompt: {
     section: (section) => {
       routes.push({ kind: 'prompt-section', section })
@@ -1564,10 +1578,21 @@ check('the curation result separates the two verdicts', () => {
 const panelCuration = await request(panelRoute, 'POST', '/memory-vault', {
   op: 'curate', group: '优先级测试', limit: 2, apply: false, origin: 'all',
 })
-check('the panel curates on the route of the last turn, with no provider configured', () => {
+check('the panel curates on the deployment default model, with no provider configured', () => {
   assert.equal(panelCuration.status, 200, JSON.stringify(panelCuration.payload))
   assert.equal(panelCuration.payload.result.mode, 'review')
   assert.equal(panelCuration.payload.result.verdicts.length, 2)
+  // The call itself has to have gone there, not merely resolved.
+  const last = sink.calls[sink.calls.length - 1]
+  assert.equal(last.provider, 'ds-default', JSON.stringify(last.provider))
+  assert.equal(last.model, 'ds-model', JSON.stringify(last.model))
+})
+check('a review reports the label merges without applying them', () => {
+  // Three merges in the stub: one legitimate and two that the vault must
+  // refuse. A review writes none of them.
+  assert.equal(panelCuration.payload.result.tagMap.length, 3)
+  assert.equal(panelCuration.payload.result.tagMap[0].to, '统一标签')
+  assert.deepEqual(panelCuration.payload.result.tagChanges, [])
 })
 // Origin is the axis the panel must not blur: by default a curation pass judges
 // what the model wrote and leaves what a person typed alone.
@@ -1739,6 +1764,41 @@ console.log("editing one memory's tags in place")
   check('the tag edit is reported in words', () => {
     assert.ok(renderedTags.includes('已添加标签'), renderedTags)
     assert.ok(renderedTags.includes('新增'), renderedTags)
+  })
+  // The label that the curation answer below merges away, plus a second row
+  // carrying it that is *not* in the batch — the merge has to reach the vault,
+  // not just the memories the model happened to look at.
+  const labelled = await tool('memory_write').execute({
+    group: '知识库', entries: [{ content: '标签合并的样本。', tags: ['旧标签', '保留'] }],
+  }, exec)
+  const outside = await tool('memory_write').execute({
+    group: '知识库', entries: [{ content: '没被整理到、但仍带着旧标签的一条。', tags: ['旧标签'] }],
+  }, exec)
+  const curatedTags = await tool('memory_curate').execute({ action: 'apply', ids: [labelled.entries[0].id] }, exec)
+  check('applying curation writes the labels it decided on', () => {
+    assert.equal(curatedTags.mode, 'applied')
+    assert.deepEqual(curatedTags.verdicts[0].tags, ['规范标签', '整理'])
+    assert.ok(curatedTags.applied[0].tags.includes('规范标签'))
+  })
+  check('applying curation merges labels across the whole vault', () => {
+    const merged = /** @type {Record<string, any>[]} */ (curatedTags.tagChanges).find(change => change.from === '旧标签')
+    assert.ok(merged !== undefined, JSON.stringify(curatedTags.tagChanges))
+    assert.ok(Number(merged.updated) >= 1, JSON.stringify(merged))
+  })
+  const outsideAfter = await tool('memory_recall').execute({ id: outside.entries[0].id }, exec)
+  check('the merge reached a memory that was not in the batch', () => {
+    assert.ok(outsideAfter.entries[0].tags.includes('统一标签'), JSON.stringify(outsideAfter.entries[0].tags))
+    assert.ok(!outsideAfter.entries[0].tags.includes('旧标签'), JSON.stringify(outsideAfter.entries[0].tags))
+  })
+  check('a system tag cannot be renamed by a merge', () => {
+    const hostile = /** @type {Record<string, any>[]} */ (curatedTags.tagChanges).find(change => change.from === 'AI 生成')
+    assert.equal(Number(hostile?.updated ?? -1), 0, JSON.stringify(curatedTags.tagChanges))
+    assert.ok(outsideAfter.entries[0].tags.includes('AI 生成'), JSON.stringify(outsideAfter.entries[0].tags))
+    assert.ok(!outsideAfter.entries[0].tags.includes('机器写的'), JSON.stringify(outsideAfter.entries[0].tags))
+  })
+  check('a user label cannot be renamed onto a system tag', () => {
+    const hostile = /** @type {Record<string, any>[]} */ (curatedTags.tagChanges).find(change => change.from === '保留')
+    assert.equal(Number(hostile?.updated ?? -1), 0, JSON.stringify(curatedTags.tagChanges))
   })
 }
 

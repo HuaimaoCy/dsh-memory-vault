@@ -387,6 +387,8 @@ function entryView(row) {
 export class MemoryStore {
   #db
   #closed = false
+  /** How many `transaction()` calls the current call stack is inside. */
+  #depth = 0
 
   /**
    * @param {object} options - Open options.
@@ -561,14 +563,27 @@ export class MemoryStore {
    *
    * SQLite opens an implicit transaction per statement, which is not the same
    * as several business statements being atomic together: a failure halfway
-   * through a batch would otherwise leave the first rows committed. Callers
-   * must not nest — the vault commits one unit at a time.
+   * through a batch would otherwise leave the first rows committed.
+   *
+   * Nesting is allowed and joins the outer unit: a composite operation (a
+   * curation that moves memories and merges labels, say) calls methods that are
+   * each atomic on their own, and the whole thing still has to commit or roll
+   * back as one. Only the outermost call opens and closes the transaction.
    * @param {() => T} run - Work to commit or roll back.
    * @returns {T} Whatever `run` returned.
    * @template T
    */
   transaction(run) {
+    if (this.#depth > 0) {
+      this.#depth += 1
+      try {
+        return run()
+      } finally {
+        this.#depth -= 1
+      }
+    }
     this.#db.exec('BEGIN IMMEDIATE')
+    this.#depth = 1
     try {
       const result = run()
       this.#db.exec('COMMIT')
@@ -581,6 +596,8 @@ export class MemoryStore {
         // the one worth reporting.
       }
       throw error
+    } finally {
+      this.#depth = 0
     }
   }
 
@@ -1269,6 +1286,43 @@ export class MemoryStore {
       .sort((left, right) => (right.count - left.count)
         || (Number(right.system) - Number(left.system))
         || (left.tag < right.tag ? -1 : 1))
+  }
+
+  /**
+   * Rewrite one user tag everywhere, or drop it when `to` is empty.
+   *
+   * A merge has to be vault-wide to mean anything: the reason two labels are
+   * worth merging is that one concept ended up spelled two ways, and half a
+   * vault using each spelling is the problem, not the fix. Hidden rows are
+   * included — they come back eventually, and a dead label left on them would
+   * return with them. System tags are never touched, in either direction.
+   * @param {string} from - Existing tag text.
+   * @param {string} to - Replacement text, or '' to delete the tag.
+   * @returns {{ from: string, to: string, updated: number }} What changed.
+   */
+  renameTag(from, to) {
+    const source = String(from ?? '').trim()
+    const target = String(to ?? '').trim()
+    if (source === '' || RESERVED_TAGS.includes(source) || RESERVED_TAGS.includes(target)) {
+      return { from: source, to: target, updated: 0 }
+    }
+    const wanted = source.toLowerCase()
+    /** @type {{ id: string, tags: string }[]} */
+    const pending = []
+    for (const row of this.#db.prepare('SELECT id, source, tags FROM entries').all()) {
+      const tags = parseTags(/** @type {string} */ (row.tags))
+      if (!tags.some(tag => tag.toLowerCase() === wanted)) continue
+      const kept = tags.filter(tag => tag.toLowerCase() !== wanted)
+      if (target !== '' && !kept.some(tag => tag.toLowerCase() === target.toLowerCase())) kept.push(target)
+      pending.push({ id: String(row.id), tags: JSON.stringify(withAutoTag(kept, String(row.source))) })
+    }
+    if (pending.length === 0) return { from: source, to: target, updated: 0 }
+    this.transaction(() => {
+      const update = this.#db.prepare('UPDATE entries SET tags = ?, updated_at = ? WHERE id = ?')
+      const now = Date.now()
+      for (const row of pending) update.run(row.tags, now, row.id)
+    })
+    return { from: source, to: target, updated: pending.length }
   }
 
   /**
