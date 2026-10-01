@@ -1,4 +1,21 @@
 /** Optional model service used by the independent desktop app. */
+import { normalizeImage, IMAGE_MAX_COUNT, IMAGE_TOTAL_BYTES } from './images.js'
+
+function modelContent(content) {
+  if (typeof content === 'string') return content
+  if (!Array.isArray(content)) throw new Error('模型输入格式无效')
+  let bytes = 0, images = 0
+  const blocks = content.map(block => {
+    if (block.type === 'text' && typeof block.text === 'string') return { type: 'text', text: block.text }
+    if (block.type === 'image') {
+      const image = normalizeImage(block); bytes += image.size; images++
+      if (images > IMAGE_MAX_COUNT || bytes > IMAGE_TOTAL_BYTES) throw new Error('发送给 AI 的图片超过限额')
+      return { type: 'image_url', image_url: { url: `data:${image.mimeType};base64,${block.data}` } }
+    }
+    throw new Error('模型输入包含不支持的内容')
+  })
+  return images ? blocks : blocks.map(block=>block.text).join('\n')
+}
 export function validateModelSettings(raw = {}) {
   const baseUrl = String(raw.baseUrl ?? '').trim().replace(/\/+$/, '')
   const model = String(raw.model ?? '').trim()
@@ -26,7 +43,7 @@ export function createModelAdapter(getSettings, getKey) {
         headers: { 'content-type': 'application/json', ...(key ? { authorization: `Bearer ${key}` } : {}) },
         body: JSON.stringify({ model: settings.model, stream: false, max_tokens: call.maxTokens, messages: [
           { role: 'system', content: call.system },
-          ...call.messages.map(message => ({ role: message.role, content: typeof message.content === 'string' ? message.content : message.content.map(block => block.text ?? '').join('\n') })),
+          ...call.messages.map(message => ({ role: message.role, content: modelContent(message.content) })),
         ] }),
       })
       if (!response.ok) throw new Error(`模型服务返回 HTTP ${response.status}`)

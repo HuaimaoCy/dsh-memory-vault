@@ -1,6 +1,6 @@
 {
   "name": "dsh-memory-vault",
-  "version": "0.6.3",
+  "version": "0.6.4",
   "description": "Independent knowledge and memory vault with a desktop app, Codex MCP, a DSH plugin, CLI and local RPC sharing one SQLite database.",
   "type": "module",
   "main": "index.js",
@@ -41,7 +41,9 @@
     "@deepseek-ai/cordis": "*"
   },
   "peerDependenciesMeta": {
-    "@deepseek-ai/cordis": { "optional": true }
+    "@deepseek-ai/cordis": {
+      "optional": true
+    }
   },
   "engines": {
     "node": ">=22.5.0"
@@ -51,6 +53,7 @@
     "desktop": "npm --prefix desktop start",
     "build:desktop": "npm --prefix desktop run build",
     "mcp": "node --no-warnings bin/memory-vault.mjs mcp",
-    "test:mistakebook": "node --no-warnings tests/mistakebook-smoke.mjs"
+    "test:mistakebook": "node --no-warnings tests/mistakebook-smoke.mjs",
+    "test:notebook": "node --no-warnings tests/notebook-smoke.mjs"
   }
 }

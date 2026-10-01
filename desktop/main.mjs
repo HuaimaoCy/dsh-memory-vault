@@ -9,7 +9,8 @@ import { createModelAdapter, validateModelSettings } from '../src/model.js'
 import { validateVaultFile } from './lib/databases.mjs'
 import { createDesktopUpdater } from './lib/updates.mjs'
 import { MistakebookStore, segmentQuestions } from '../addons/mistakebook/store.mjs'
-import { recognize, analyze, validateOCRSettings } from '../addons/mistakebook/services.mjs'
+import { recognize, analyze, solve, createCloze, validateOCRSettings } from '../addons/mistakebook/services.mjs'
+import { SIMULATIONS, simulationURL } from '../addons/mistakebook/simulations.mjs'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const argv = process.argv.slice(1)
@@ -17,7 +18,8 @@ const option = name => { const i = argv.indexOf(name); return i < 0 ? undefined 
 const selftest = argv.includes('--selftest')
 app.setPath('userData', join(app.getPath('appData'), 'Memory Vault Mistakebook'))
 if (option('--user-data')) app.setPath('userData', resolve(option('--user-data')))
-let bridge, window, updater, updateTimer, mistakebook, ocrRequest, preferences = {}, prefsPath
+let bridge, window, updater, updateTimer, mistakebook, ocrRequest, aiRequest, preferences = {}, prefsPath
+const simulations = new Set()
 let notifiedVersion
 const diagnostic = message => process.stderr.write(`memory-vault: ${message}\n`)
 
@@ -61,10 +63,44 @@ function registerDesktop() {
       case 'read': return mistakebook.read(body.id)
       case 'save': return mistakebook.save(body)
       case 'action': return mistakebook.action(body.id, body.action)
+      case 'ai.accept': return mistakebook.acceptAI(body.id)
+      case 'cancelAI': aiRequest?.abort(); return { cancelled: true }
+      case 'solve': {
+        if (aiRequest) throw new Error('已有 AI 任务正在进行')
+        const request = new AbortController(); aiRequest = request
+        try { const record = mistakebook.read(body.id), aiResult = await solve(record, adapter(), request.signal); return mistakebook.save({ ...record, aiResult }) }
+        finally { if (aiRequest === request) aiRequest = undefined }
+      }
+      case 'quiz.start': {
+        const records = mistakebook.planQuiz(body.count ?? 10)
+        if (body.mode !== 'cloze') return mistakebook.startQuiz(records)
+        if (aiRequest) throw new Error('已有 AI 任务正在进行')
+        const request = new AbortController(); aiRequest = request
+        try { return mistakebook.startQuiz(records, await createCloze(records, adapter(), request.signal)) }
+        finally { if (aiRequest === request) aiRequest = undefined }
+      }
+      case 'quiz.submit': return mistakebook.submitQuiz(body.id, body.answers)
+      case 'simulation.info': return SIMULATIONS
+      case 'simulation.open': {
+        const url = simulationURL(body.id)
+        if (simulations.size >= 4) throw new Error('请先关闭一个仿真窗口再打开新的仿真')
+        const simulation = new BrowserWindow({ parent: window, width: 1100, height: 780, title: '笔记本 · PhET 物理仿真', show: !selftest, autoHideMenuBar: true,
+          webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true, partition: `notebook-simulation-${randomUUID()}`, offscreen: selftest } })
+        simulations.add(simulation); simulation.on('closed',()=>simulations.delete(simulation))
+        simulation.webContents.session.setPermissionRequestHandler((_contents,_permission,callback)=>callback(false))
+        simulation.webContents.session.on('will-download',event=>event.preventDefault())
+        simulation.webContents.on('will-navigate',(event,target)=>{ if (new URL(target).origin !== 'https://phet.colorado.edu') event.preventDefault() })
+        simulation.webContents.setWindowOpenHandler(()=>({action:'deny'}))
+        let timer
+        try { await Promise.race([simulation.loadURL(url),new Promise((_,reject)=>{timer=setTimeout(()=>reject(new Error('timeout')),45000)})]) }
+        catch { if (!simulation.isDestroyed()) simulation.destroy(); throw new Error('仿真打开失败，请检查网络连接') }
+        finally { clearTimeout(timer) }
+        return { opened: true, id: body.id, url }
+      }
       case 'segment': return { questions: segmentQuestions(body.text) }
       case 'import': return mistakebook.import(body)
       case 'export': {
-        const result = await dialog.showSaveDialog(window, { title: '导出错题本（含图片）', defaultPath: `mistakebook-${new Date().toISOString().slice(0,10)}.json`, filters: [{ name: '错题本 JSON', extensions: ['json'] }] })
+        const result = await dialog.showSaveDialog(window, { title: '导出笔记本（含图片）', defaultPath: `notebook-${new Date().toISOString().slice(0,10)}.json`, filters: [{ name: '笔记本 JSON', extensions: ['json'] }] })
         if (result.canceled || !result.filePath) return null
         checkDataTarget(result.filePath)
         const temporary = `${result.filePath}.${randomUUID()}.tmp`
@@ -73,7 +109,7 @@ function registerDesktop() {
         return { path: result.filePath }
       }
       case 'backup': {
-        const result = await dialog.showSaveDialog(window, { title: '备份错题本', defaultPath: `mistakebook-${Date.now()}.sqlite`, filters: [{ name: 'SQLite 备份', extensions: ['sqlite'] }] })
+        const result = await dialog.showSaveDialog(window, { title: '备份笔记本', defaultPath: `notebook-${Date.now()}.sqlite`, filters: [{ name: 'SQLite 备份', extensions: ['sqlite'] }] })
         if (result.canceled || !result.filePath) return null
         checkDataTarget(result.filePath)
         const temporary = `${result.filePath}.${randomUUID()}.tmp`
@@ -102,7 +138,7 @@ function registerDesktop() {
         const record = mistakebook.read(body.id), result = await analyze(record, adapter())
         return mistakebook.save({ ...record, cause: result.cause })
       }
-      default: throw new Error('未知错题本操作')
+      default: throw new Error('未知笔记本操作')
     }
   })
   register('vault:updates', async (action, body) => {
@@ -114,7 +150,7 @@ function registerDesktop() {
       case 'cancel': return updater.cancel()
       case 'dismiss': return updater.dismiss()
       case 'install': {
-        throw new Error('错题本外挂使用独立安装包更新，请保留当前分支版本')
+        throw new Error('笔记本外挂使用独立安装包更新，请保留当前分支版本')
       }
       default: throw new Error('未知更新操作')
     }
@@ -161,7 +197,7 @@ function registerDesktop() {
 }
 async function openWindow() {
   window = new BrowserWindow({
-    width: 1360, height: 900, minWidth: 1040, minHeight: 650, backgroundColor: '#f7f8fa', title: 'Memory Vault · 错题本外挂',
+    width: 1440, height: 940, minWidth: 1040, minHeight: 650, backgroundColor: '#f7f8fa', title: 'Memory Vault · 笔记本',
     autoHideMenuBar: true, show: !selftest,
     icon: join(here, 'assets', 'memory-vault.png'),
     webPreferences: { preload: join(here, 'preload.cjs'), contextIsolation: true, nodeIntegration: false, sandbox: true, spellcheck: false, offscreen: selftest, backgroundThrottling: !selftest },
@@ -228,4 +264,4 @@ app.whenReady().then(async () => {
     } catch (error) { diagnostic(error.stack ?? error); if (!selftest) dialog.showErrorBox('记忆库无法启动', error.message); app.exit(1) }
 })
 app.on('window-all-closed', () => app.quit())
-app.on('before-quit', () => { ocrRequest?.abort(); clearTimeout(updateTimer); clearInterval(updateTimer); updater?.dispose(); mistakebook?.close(); bridge?.close() })
+app.on('before-quit', () => { aiRequest?.abort(); ocrRequest?.abort(); clearTimeout(updateTimer); clearInterval(updateTimer); updater?.dispose(); mistakebook?.close(); bridge?.close() })

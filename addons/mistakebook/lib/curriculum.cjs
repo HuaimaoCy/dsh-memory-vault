@@ -34,8 +34,9 @@ function staticFeatures(nodeID, target = 'gaokao') {
   const attr = subj.attributes[nodeID];
   if (!attr) return { subjectID, features: null, subjectFound: true };
   const P = params();
-  const themeHours = subj.standard.themeHours[`${attr.courseType === '必修' ? '必修' : '选必'}·${attr.theme}`] ||
-                     Object.entries(subj.standard.themeHours)
+  const hoursByTheme = subj.standard?.themeHours || {};
+  const themeHours = hoursByTheme[`${attr.courseType === '必修' ? '必修' : '选必'}·${attr.theme}`] ||
+                     Object.entries(hoursByTheme)
                        .filter(([k]) => k.includes(attr.theme))
                        .reduce((a, [, v]) => a + v, 0);
   const hourShare = themeHours > 0 ? Math.min(1, (attr.hours || 0) / themeHours * 10) : 0.5;

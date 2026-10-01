@@ -34,9 +34,9 @@ export async function run(window, bridge) {
   await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve))
   try {
     await until("document.querySelectorAll('#views button').length===4")
-    assert.equal(await js("document.querySelector('#mode-switch').getAttribute('aria-label')"),'切换到错题本')
+    assert.equal(await js("document.querySelector('#mode-switch').getAttribute('aria-label')"),'切换到笔记本')
     await click('#mode-switch');await until("document.body.dataset.mode==='mistakebook'");await idle()
-    await click('#mb-new');await idle()
+    await click('#mb-new');await idle();await click('[data-create-type=mistake]');await idle()
     await fill('[data-mb-field=stem]','已知函数 f(x)=x²−2x，求它的最小值。')
     await fill('[data-mb-field=studentWork]','令 x=0，得到最小值 0。')
     await fill('[data-mb-field=referenceAnswer]','f(x)=(x−1)²−1，当 x=1 时最小值为 −1。')
@@ -48,7 +48,7 @@ export async function run(window, bridge) {
     const transfer=(name,data=image,mime='image/png')=>`(()=>{const t=new DataTransfer();t.items.add(new File([Uint8Array.from(atob(${JSON.stringify(data)}),c=>c.charCodeAt(0))],${JSON.stringify(name)},{type:${JSON.stringify(mime)}}));return t})()`
     await js(`(()=>{const p=document.querySelector('#mb-image-picker');p.files=${transfer('函数原题.png')}.files;p.dispatchEvent(new Event('change',{bubbles:true}))})()`)
     await until("document.querySelectorAll('.mb-image-thumb').length===1");await idle()
-    await click('#mb-save');await until("document.querySelector('#mb-status').textContent==='题目已保存'");await idle()
+    await click('#mb-save');await until("document.querySelector('#mb-status').textContent==='笔记已保存'");await idle()
     const first=(await api('list',{})).result.records[0]
     assert.equal(first.imageCount,1)
     assert.equal(await js("[...document.querySelector('.mb-editor-form').childNodes].filter(node=>node.nodeType===Node.TEXT_NODE&&node.textContent.trim()).length"),0)
@@ -83,7 +83,7 @@ export async function run(window, bridge) {
     await click('[data-mb-view=all]');await idle()
     await js(`document.querySelector('#mb-json-picker').files=${transfer('legacy.json',Buffer.from(JSON.stringify({records:{old:{stem:{rawText:'牛顿第二定律：质量 2 kg，合力 6 N，求加速度。'},studentWork:{rawText:'12 m/s²'},referenceAnswer:{rawText:'3 m/s²'},classification:{subjectID:'physics',primaryNodeID:'custom/legacy-node'}}}})).toString('base64'),'application/json')}.files;document.querySelector('#mb-json-picker').dispatchEvent(new Event('change',{bubbles:true}))`);await idle()
     assert.equal((await api('list',{})).result.records.length,4)
-    await click('#mb-new');await idle();await fill('[data-mb-field=stem]','阅读材料，概括作者在末段表达的观点。');await fill('[data-mb-field=subjectID]','chinese','change');await click('#mb-save');await idle()
+    await click('#mb-new');await idle();await click('[data-create-type=mistake]');await idle();await fill('[data-mb-field=stem]','阅读材料，概括作者在末段表达的观点。');await fill('[data-mb-field=subjectID]','chinese','change');await click('#mb-save');await idle()
     await js("document.querySelector('[aria-label=\"关闭题目\"]').click()");await idle()
     await js("document.querySelector('#mb-status').classList.remove('visible');document.activeElement.blur()")
     await shot('错题本-总览')
