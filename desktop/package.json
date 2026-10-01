@@ -6,14 +6,12 @@
   "type": "module",
   "main": "main.mjs",
   "scripts": {
+    "postinstall": "node node_modules/electron/install.js",
     "start": "electron .",
     "selftest": "electron . --selftest"
   },
   "devDependencies": {
-    "electron": "^44.5.0"
-  },
-  "pnpm": {
-    "onlyBuiltDependencies": ["electron"]
+    "electron": "37.6.0"
   },
   "build": {
     "appId": "dev.huaimaocy.dsh-memory-vault",
