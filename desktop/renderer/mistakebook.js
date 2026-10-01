@@ -1,5 +1,5 @@
 import { icon } from './icons.js'
-import { createAlayaLoader, showLoadingPreview } from './loading.js'
+import { createLoadingStatus } from './loading.js'
 import { NOTE_TYPES, STRUCTURED_FIELDS, normalizeFields } from '../../addons/mistakebook/fields.mjs'
 import { SIMULATIONS } from '../../addons/mistakebook/simulations.mjs'
 import { extractWords, normalizeWord } from '../../addons/mistakebook/words.mjs'
@@ -53,6 +53,7 @@ export function mountMistakebook({ beforeEnter }) {
   const memory = document.querySelector('.app-shell')
   const shell = h('div', { class: 'mb-shell', hidden: true, 'aria-label': '笔记本' })
   const state = { data: null, view: 'all', type: '', subjectID: '', nodeID: '', query: '', order: 'priority', draft: null, dirty: false, busy: false, review: false, showAnswer: false, picking: false, selection: new Set() }
+  const handwritingDrafts = new WeakMap()
   let messageTimer
   const notify = (message, error = false) => {
     const output = document.getElementById('mb-status'); output.textContent = message; output.className = `mb-status visible${error ? ' error' : ''}`
@@ -66,9 +67,9 @@ export function mountMistakebook({ beforeEnter }) {
     try { await action() } catch (error) { notify(error.message || String(error), true) }
     finally { state.busy = false; shell.inert = false; shell.removeAttribute('aria-busy') }
   }
-  const button = (label, action, primary = false, props = {}) => h('button', { type: 'button', class: primary ? 'btn primary' : 'btn', onClick: () => void guard(action), ...props }, label)
+  const button = (label, action, primary = false, props = {}) => h('button', { type: 'button', class: primary ? 'btn primary' : 'btn', onClick: event => void guard(() => action(event)), ...props }, label)
   const discard = async () => !state.dirty || await confirm('当前笔记有未保存的修改，放弃这些修改？')
-  const dirty = () => { state.dirty = true; const hint = document.getElementById('mb-save-state'); if (hint) { hint.textContent = '有未保存的修改'; hint.classList.add('dirty') } }
+  const dirty = () => { state.dirty = true; const hint = document.getElementById('mb-save-state'); if (hint) { hint.textContent = '有未保存的修改'; hint.classList.add('dirty') }; const saveButton = document.getElementById('mb-save'); if (saveButton) saveButton.disabled = false }
   const names = () => new Map((state.data?.taxonomy.nodes ?? []).map(node => [node.id, node.name]))
   const changeView = async (view, subjectID = '', nodeID = '', type = '') => {
     if (!await discard()) return
@@ -90,7 +91,7 @@ export function mountMistakebook({ beforeEnter }) {
     clearTimeout(searchTimer)
     searchTimer = setTimeout(() => void guard(async () => {
       if (!await discard()) { search.value = state.query; return }
-      state.query = search.value.trim(); state.draft = null; state.dirty = false; await load()
+      state.query = search.value.trim(); state.draft = null; state.dirty = false; state.selection.clear(); await load()
     }), 220)
   })
   const sideViews = h('nav', { id: 'mb-views', 'aria-label': '笔记视图' }), categories = h('nav', { id: 'mb-types', 'aria-label': '笔记类型' }), subjects = h('nav', { id: 'mb-subjects', 'aria-label': '学科' })
@@ -106,24 +107,26 @@ export function mountMistakebook({ beforeEnter }) {
     if (!await confirm(`将从「${file.name}」导入 ${records.length} 道题，重复题干会跳过。继续？`)) return
     const result = await call('import', value); state.draft = null; state.dirty = false; await load(); notify(`导入 ${result.created} 道题，跳过 ${result.skipped} 道重复题${result.unmapped ? `；${result.unmapped} 道旧知识点需重新分类` : ''}${result.missingImages ? `；${result.missingImages} 道需补充旧版原图` : ''}`)
   }) })
-  const order = h('select', { id: 'mb-sort', class: 'select', 'aria-label': '错题排序', onChange: event => void guard(async () => { state.order = event.target.value; await load() }) }, h('option', { value: 'priority', text: '复习优先级' }), h('option', { value: 'updated', text: '最近更新' }))
+  const order = h('select', { id: 'mb-sort', class: 'select', 'aria-label': '笔记排序', onChange: event => void guard(async () => { state.order = event.target.value; await load() }) }, h('option', { value: 'priority', text: '复习优先级' }), h('option', { value: 'updated', text: '最近更新' }))
+  const clearSearch = async () => { if (!await discard()) return; clearTimeout(searchTimer); state.query = ''; search.value = ''; state.draft = null; state.dirty = false; state.selection.clear(); await load(); search.focus() }
+  const searchFilter = h('div', { class: 'mb-search-filter', id: 'mb-search-filter', hidden: true }, h('span', { id: 'mb-search-filter-label' }), button('清除搜索', clearSearch, false, { class: 'btn ghost', id: 'mb-clear-search' }))
   const moreMenu = h('details', { class: 'mb-more', id: 'mb-more' },
     h('summary', { class: 'btn soft', 'aria-label': '导入与导出' }, '导入 / 导出'),
     h('div', { class: 'mb-more-menu' },
       button('导出笔记本 JSON', async () => { moreMenu.removeAttribute('open'); if (await call('export')) notify('笔记本已导出，包含图片') }, false, { id: 'mb-export' }),
       button('导入旧版错题 JSON', () => { moreMenu.removeAttribute('open'); jsonPicker.click() }, false, { id: 'mb-legacy-import' })))
   document.addEventListener('click', event => { if (moreMenu.open && !moreMenu.contains(event.target)) moreMenu.removeAttribute('open') })
-  const pickButton = button('多选', () => { state.picking = !state.picking; state.selection.clear(); renderList() }, false, { class: 'btn ghost', id: 'mb-pick', 'aria-pressed': 'false' })
+  const pickButton = button('多选', async () => { if (!state.picking && !await discard()) return; state.picking = !state.picking; state.selection.clear(); if (state.picking) { state.draft = null; state.dirty = false; renderDetail() }; renderList() }, false, { class: 'btn ghost', id: 'mb-pick', 'aria-pressed': 'false' })
   const togglePick = id => { state.selection.has(id) ? state.selection.delete(id) : state.selection.add(id); renderList() }
   shell.append(h('aside', { class: 'mb-side' },
     h('div', { class: 'brand' }, h('div', { class: 'mb-book-mark' }, icon('book')), h('div', {}, h('div', { class: 'brand-name', text: '笔记本' }), h('div', { class: 'brand-caption', text: 'ALAYA NOTEBOOK' }))),
     h('div', { class: 'mb-side-scroll' }, h('div', { class: 'side-head', text: '我的学习' }), sideViews, h('details', { class: 'mb-side-group', id: 'mb-types-wrap', open: true }, h('summary', { text: '笔记类型' }), categories), h('details', { class: 'mb-side-group', id: 'mb-subjects-wrap' }, h('summary', { text: '按学科整理' }), subjects)),
     h('div', { class: 'mb-side-bottom' }, h('div', { class: 'mb-local' }, h('span', { class: 'library-dot' }), h('span', { text: '独立保存在本机' })),
       button([icon('settings'), '笔记本设置'], openSettings, false, { class: 'nav', id: 'mb-settings' }))),
-    h('div', { class: 'mb-workspace' }, h('header', { class: 'mb-bar' }, h('div', { class: 'breadcrumb' }, icon('book'), h('span', { text: '学习空间' })),
-      h('div', { class: 'toolbar-actions' }, h('label', { class: 'search-wrap' }, icon('search'), search), button('单词检测', openQuiz, false, { id: 'mb-quiz' }), button('录入', () => openImport(), false, { id: 'mb-import', title: '识别或粘贴，导入错题、笔记与词汇' }), button([icon('plus'), '新建笔记'], openCreate, true, { id: 'mb-new' }), switchButton)),
-      h('div', { class: 'mb-body' }, h('main', { class: 'mb-main' }, h('div', { class: 'mb-page-heading' }, h('div', {}, h('div', { class: 'eyebrow', text: 'BUILD YOUR OWN UNDERSTANDING' }), heading, subtitle), h('div', { class: 'mb-total', id: 'mb-total' })),
-        h('div', { class: 'mb-board' }, order, h('span', { class: 'spacer' }), pickButton, moreMenu), list), detail),
+    h('div', { class: 'mb-workspace' }, h('header', { class: 'mb-bar' }, h('div', { class: 'breadcrumb' }, icon('book'), h('span', { text: '笔记本' })),
+      h('div', { class: 'toolbar-actions' }, h('label', { class: 'search-wrap' }, icon('search'), search), button('录入', () => openImport(), false, { id: 'mb-import', title: '识别或粘贴，导入错题、笔记与词汇' }), button([icon('plus'), '新建笔记'], openCreate, true, { id: 'mb-new' }), switchButton)),
+      h('div', { class: 'mb-body' }, h('main', { class: 'mb-main' }, h('div', { class: 'mb-page-heading' }, h('div', {}, heading, subtitle), h('div', { class: 'mb-total', id: 'mb-total' })),
+        h('div', { class: 'mb-board' }, order, h('span', { class: 'spacer' }), button('单词检测', openQuiz, false, { class: 'btn soft', id: 'mb-quiz' }), pickButton, moreMenu), searchFilter, list), detail),
       h('footer', { class: 'mb-foot' }, h('span', { text: '笔记本 · 本地保存' }), h('span', { class: 'spacer' }))), jsonPicker, h('div', { id: 'mb-status', class: 'mb-status', role: 'status', 'aria-live': 'polite' }))
   document.body.append(shell)
   document.getElementById('mode-switch').addEventListener('click', () => void guard(async () => {
@@ -153,23 +156,34 @@ export function mountMistakebook({ beforeEnter }) {
   }
   function renderList() {
     const dictionary = names(), rows = state.data.records
+    const visibleIDs = new Set(rows.map(row => row.id))
+    for (const id of state.selection) if (!visibleIDs.has(id)) state.selection.delete(id)
     heading.textContent = NOTE_TYPES[state.type]?.label || dictionary.get(state.nodeID) || dictionary.get(state.subjectID) || ({ all: '全部笔记', due: '今天，复习一点', mastered: '已经掌握', archived: '归档笔记', trash: '回收站' })[state.view]
     subtitle.textContent = NOTE_TYPES[state.type]?.caption || (state.view === 'due' ? '先独立回忆，再展开答案与笔记核对。' : '记录问题，建立模型，积累自己的解题方法。')
+    searchFilter.hidden = !state.query
+    document.getElementById('mb-search-filter-label').textContent = state.query ? `搜索「${state.query}」 · ${rows.length} 个结果` : ''
     document.getElementById('mb-total').replaceChildren(h('strong', { text: rows.length }), h('span', { text: '篇笔记' }))
     list.replaceChildren()
     list.classList.toggle('words', state.type === 'vocabulary')
     pickButton.textContent = state.picking ? '完成' : '多选'
     pickButton.classList.toggle('on', state.picking)
     pickButton.setAttribute('aria-pressed', String(state.picking))
-    if (!rows.length) { list.append(h('div', { class: 'mb-empty' }, h('div', { class: 'mb-empty-symbol' }, icon(NOTE_TYPES[state.type]?.icon||'book')), h('h2', { text: state.query ? '没有找到相关笔记' : state.view === 'due' ? '今天的复习已完成' : '从一篇笔记开始' }), h('p', { text: '整理错题、建立模型，或记下一个值得积累的单词。' }), button('新建笔记', openCreate, true))); return }
+    pickButton.disabled = !rows.length && !state.picking
+    moreMenu.hidden = state.picking
+    if (!rows.length) {
+      const emptyTitle = state.query ? '没有找到相关笔记' : ({ due: '今天的复习已完成', mastered: '还没有已掌握的笔记', archived: '没有归档笔记', trash: '回收站是空的' })[state.view] || `从一篇${NOTE_TYPES[state.type]?.label || '笔记'}开始`
+      const emptyText = state.query ? '试试更短的关键词，或清除搜索查看当前分类。' : ({ due: '稍后再来，也可以查看全部笔记继续学习。', mastered: '复习时先独立回忆，核对后标记掌握情况。', archived: '归档后的笔记会保存在这里。', trash: '移入回收站的笔记可以在这里恢复。' })[state.view] || NOTE_TYPES[state.type]?.caption || '记录问题、整理方法，或积累一个新单词。'
+      list.append(h('div', { class: 'mb-empty' }, h('div', { class: 'mb-empty-symbol' }, icon(NOTE_TYPES[state.type]?.icon || (state.view === 'trash' ? 'hidden' : 'book'))), h('h2', { text: emptyTitle }), h('p', { text: emptyText }), state.query ? button('清除搜索', clearSearch, true) : state.view !== 'all' ? button('查看全部笔记', () => changeView('all'), true) : button('新建笔记', openCreate, true)))
+      return
+    }
     if (state.picking) {
       const allSelected = rows.length > 0 && rows.every(row => state.selection.has(row.id))
       list.append(h('div', { class: 'mb-pick-bar', id: 'mb-pick-bar' },
         h('strong', { text: `已选 ${state.selection.size} 篇` }),
         button(allSelected ? '全不选' : '全选', () => { if (allSelected) state.selection.clear(); else for (const row of rows) state.selection.add(row.id); renderList() }, false, { class: 'btn ghost', id: 'mb-pick-all' }),
         h('span', { class: 'spacer' }),
-        state.view === 'trash' ? button('恢复所选', () => performBatch('restore'), false, { id: 'mb-batch-restore' }) : null,
-        state.view === 'trash' ? button('彻底删除', () => performBatch('purge'), false, { class: 'btn ghost danger', id: 'mb-batch-purge' }) : button('移入回收站', () => performBatch('delete'), false, { class: 'btn ghost danger', id: 'mb-batch-delete' })))
+        state.view === 'trash' ? button('恢复所选', () => performBatch('restore'), false, { id: 'mb-batch-restore', disabled: !state.selection.size }) : null,
+        state.view === 'trash' ? button('彻底删除', () => performBatch('purge'), false, { class: 'btn ghost danger', id: 'mb-batch-purge', disabled: !state.selection.size }) : button('移入回收站', () => performBatch('delete'), false, { class: 'btn ghost danger', id: 'mb-batch-delete', disabled: !state.selection.size })))
     }
     for (const row of rows) {
       const picked = state.selection.has(row.id)
@@ -209,7 +223,21 @@ export function mountMistakebook({ beforeEnter }) {
   }
   async function save() {
     const draft = state.draft; if (!draft) return
-    state.draft = await call('save', { ...draft, images: draft.images.map(image => image.id ? { id: image.id } : image) }); state.dirty = false; await load(); notify('笔记已保存')
+    addHandwritingPage(draft)
+    const scrollTop = detail.querySelector('.mb-editor-form')?.scrollTop || 0
+    const activeField = document.activeElement?.dataset.mbField
+    const saveButton = document.getElementById('mb-save'), hint = document.getElementById('mb-save-state')
+    if (saveButton) { saveButton.textContent = '正在保存…'; saveButton.disabled = true }
+    if (hint) hint.textContent = '正在保存…'
+    try {
+      state.draft = await call('save', { ...draft, images: draft.images.map(image => image.id ? { id: image.id } : image) }); state.dirty = false; await load()
+      const editor = detail.querySelector('.mb-editor-form'); if (editor) editor.scrollTop = scrollTop
+      if (activeField) detail.querySelector(`[data-mb-field="${activeField}"]`)?.focus({ preventScroll: true })
+      notify('笔记已保存')
+    } finally {
+      if (saveButton?.isConnected) { saveButton.textContent = '保存笔记'; saveButton.disabled = !state.dirty && Boolean(draft.id) }
+      if (hint?.isConnected) hint.textContent = state.dirty ? '有未保存的修改' : draft.id ? '已保存' : '尚未保存'
+    }
   }
   async function perform(action) {
     if (!await discard()) return
@@ -237,8 +265,8 @@ export function mountMistakebook({ beforeEnter }) {
     const errorType = h('select', { class: 'select', 'data-mb-field': 'errorType', onChange: event => { draft.errorType = event.target.value; dirty() } }, errors.map(label => h('option', { value: label === '未记录' ? '' : label, text: label, selected: (label === '未记录' ? '' : label) === draft.errorType ? 'selected' : undefined })))
     const target = h('select', { class: 'select', 'data-mb-field': 'target', onChange: event => { draft.target = event.target.value; dirty() } }, [['gaokao','高考'],['huige','合格考']].map(([value, text]) => h('option', { value, text, selected: value === draft.target ? 'selected' : undefined })))
     const close = button('', async () => { if (await discard()) { state.draft = null; state.dirty = false; renderList(); renderDetail() } }, false, { class: 'icon-button', 'aria-label': '关闭题目' }); close.append(icon('close'))
-    const head = h('div', { class: 'mb-detail-head' }, h('div', {}, h('span', { class: 'eyebrow', text: state.review ? 'REVIEW' : NOTE_TYPES[draft.type].label }), h('h2', { text: draft.id ? state.review ? '独立回忆，再核对' : '笔记详情' : `新建${NOTE_TYPES[draft.type].label}` })), close)
-    const actions = h('div', { class: 'row mb-save-actions' }, h('span', { id: 'mb-save-state', class: state.dirty ? 'cap dirty' : 'cap', text: state.dirty ? '有未保存的修改' : draft.id ? '已保存' : '尚未保存' }), h('span', { class: 'spacer' }), button('保存笔记', save, true, { id: 'mb-save' }),button(draft.type==='physics'?'AI 构建与推导':draft.type==='vocabulary'?'AI 补全词条':'AI 自动解答', solveAI,false,{id:'mb-ai-solve'}))
+    const head = h('div', { class: 'mb-detail-head' }, h('div', {}, h('span', { class: 'eyebrow', text: state.review ? '复习' : NOTE_TYPES[draft.type].label }), h('h2', { text: draft.id ? state.review ? '独立回忆，再核对' : draft.title || draft.vocabulary?.word || '笔记详情' : `新建${NOTE_TYPES[draft.type].label}` })), close)
+    const actions = h('div', { class: 'row mb-save-actions' }, h('span', { id: 'mb-save-state', class: state.dirty ? 'cap dirty' : 'cap', role: 'status', 'aria-live': 'polite', text: state.dirty ? '有未保存的修改' : draft.id ? '已保存' : '尚未保存' }), h('span', { class: 'spacer' }), button('保存笔记', save, true, { id: 'mb-save', disabled: !state.dirty && Boolean(draft.id), title: '保存笔记 · Ctrl / ⌘ S' }),button(draft.type==='physics'?'AI 构建与推导':draft.type==='vocabulary'?'AI 补全词条':'AI 自动解答', solveAI,false,{id:'mb-ai-solve'}))
     const form = h('form', { class: 'mb-editor-form', onSubmit: event => { event.preventDefault(); void guard(save) } })
     if (state.review) {
       form.append(h('h3',{class:'mb-review-title',text:draft.title||draft.vocabulary?.word||NOTE_TYPES[draft.type].label}),h('div', { class: 'mb-review-stem', text: draft.type==='vocabulary'?draft.vocabulary.word:draft.stem || draft.physics?.object || '请查看笔记原图' }))
@@ -270,7 +298,7 @@ export function mountMistakebook({ beforeEnter }) {
         const select=h('select',{class:'select',id:'mb-simulation-id',onChange:event=>{draft.simulationId=event.target.value;dirty()}},h('option',{value:'',text:'选择对应的物理仿真'}),SIMULATIONS.map(item=>h('option',{value:item.id,text:item.name,selected:draft.simulationId===item.id?'selected':undefined})))
         form.append(h('div',{class:'mb-simulation-panel'},field('交互仿真 · PhET',select),h('p',{class:'cap',text:'在独立窗口调整参数、观察模型，将结论记入笔记。需要联网。'}),button('打开物理仿真',async()=>{if(!draft.simulationId)throw new Error('请先选择物理仿真');notify('正在打开物理仿真…');await call('simulation.open',{id:draft.simulationId});notify('仿真已打开，可调整参数观察')},false,{id:'mb-simulation-open'})))
       }
-      form.append(field('补充笔记',control('notes',2)),actions)
+      form.append(field('补充笔记',control('notes',2)))
     }
     form.append(imagePanel(draft))
     form.addEventListener('paste', event => {
@@ -297,12 +325,12 @@ export function mountMistakebook({ beforeEnter }) {
       }
       form.append(tools)
     }
-    detail.replaceChildren(head, form)
+    detail.replaceChildren(head, form, ...(!state.review ? [actions] : []))
   }
   async function solveAI() {
     if(!state.draft) return
     if(state.dirty||!state.draft.id) await save()
-    const loading=createAlayaLoader({label:'AI 正在整理这篇笔记'})
+    const loading=createLoadingStatus({label:'AI 正在整理这篇笔记'})
     const node=dialog('Alaya · AI 学习助手',h('div',{class:'mb-ai-progress'},loading.element))
     const cancel=h('button',{type:'button',class:'btn ghost',text:'取消生成',id:'mb-ai-cancel',onClick:()=>void call('cancelAI')})
     node.querySelector('[aria-label="关闭对话框"]').replaceWith(cancel)
@@ -314,7 +342,7 @@ export function mountMistakebook({ beforeEnter }) {
   function wordPhotoPane() {
     const files = [], controller = { busy: () => running || extracting, cancel: () => void call(extracting ? 'cancelAI' : 'cancelOCR'), hasWork: () => files.some(item => item.status === 'done') }
     let rows = [], edits = new Map(), existing = new Set(), running = false, extracting = false
-    const loading=createAlayaLoader({compact:true,hidden:true,label:'正在识别积累本'})
+    const loading=createLoadingStatus({compact:true,hidden:true,label:'正在识别积累本'})
     const queue = h('div', { class: 'mb-capture-queue', id: 'mb-word-queue' })
     const progress = h('p', { class: 'cap', id: 'mb-word-progress', text: '一次可加入多页积累本照片（PNG / JPEG）或 PDF 扫描件，逐张自动识别后提取英语词条。' })
     const preview = h('div', { class: 'mb-word-preview', id: 'mb-word-preview', hidden: true })
@@ -366,18 +394,19 @@ export function mountMistakebook({ beforeEnter }) {
         ...rows.map(row => {
           const input = (key, placeholder) => h('input', { class: 'input', value: row[key] ?? '', placeholder, onInput: event => { row[key] = event.target.value; importButton.disabled = !rows.some(item => item.selected && !item.duplicate && item.word.trim()) } })
           return h('div', { class: `mb-word-row${row.duplicate ? ' duplicate' : ''}`, 'data-word-row': normalizeWord(row.word) },
-            h('input', { type: 'checkbox', checked: row.selected && !row.duplicate, disabled: row.duplicate ? true : undefined, title: row.duplicate ? '词库中已存在，导入时会跳过' : '', onChange: event => { row.selected = event.target.checked } }),
+            h('input', { type: 'checkbox', checked: row.selected && !row.duplicate, disabled: row.duplicate ? true : undefined, title: row.duplicate ? '词库中已存在，导入时会跳过' : '', onChange: event => { row.selected = event.target.checked; renderPreview() } }),
             input('word', '单词或短语'), input('phonetic', '音标'), input('meaning', '中文释义'), input('examples', '例句'),
             button('删除', () => { rows.splice(rows.indexOf(row), 1); renderPreview() }, false, { class: 'btn ghost danger', 'aria-label': `删除 ${row.word}` }))
         }))
     }
     const applyEntries = (entries, keepEdits = true) => {
-      const previous = new Map(rows.map(row => [normalizeWord(row.word), row]))
+      const previous = new Map(rows.map(row => [row.sourceWord || normalizeWord(row.word), row]))
       if (keepEdits) edits = new Map([...edits, ...previous])
       rows = entries.map(entry => {
-        const prior = keepEdits ? edits.get(normalizeWord(entry.word)) : previous.get(normalizeWord(entry.word))
-        const merged = prior ? { ...entry, selected: prior.selected } : { ...entry, selected: true }
-        return { ...merged, duplicate: existing.has(normalizeWord(merged.word)) }
+        const sourceWord = normalizeWord(entry.word)
+        const prior = keepEdits ? edits.get(sourceWord) : previous.get(sourceWord)
+        const merged = prior ? keepEdits ? { ...entry, ...prior } : { ...entry, selected: prior.selected } : { ...entry, selected: true }
+        return { ...merged, sourceWord, duplicate: existing.has(normalizeWord(merged.word)) }
       })
       renderPreview()
     }
@@ -420,7 +449,7 @@ export function mountMistakebook({ beforeEnter }) {
     return pane
   }
   async function openQuiz() {
-    const loading=createAlayaLoader({compact:true,hidden:true,label:'AI 正在生成检测题'})
+    const loading=createLoadingStatus({compact:true,hidden:true,label:'AI 正在生成检测题'})
     if(!await discard())return
     state.draft=null;state.dirty=false;await load()
     const mode=h('select',{class:'select',id:'mb-quiz-mode'},h('option',{value:'spelling',text:'看中文，写英语 · 本地检测'}),h('option',{value:'cloze',text:'AI 例句填空 · 需要模型'})),count=h('input',{class:'input',type:'number',min:1,max:20,value:10,id:'mb-quiz-count'}),body=h('div',{class:'mb-quiz-body'})
@@ -450,6 +479,18 @@ export function mountMistakebook({ beforeEnter }) {
       vocab.examples?.trim() ? h('div', { class: 'mb-dict-examples' }, vocab.examples.split(/\n+/).filter(Boolean).map((line, index) => h('p', { text: `${index + 1}. ${line}` }))) : null,
       section('常用搭配', vocab.collocations), section('词形变化', vocab.forms), section('用法与辨析', vocab.usage))
   }
+  function addHandwritingPage(draft) {
+    const page = handwritingDrafts.get(draft)
+    if (!page?.strokes.length) return false
+    const data = page.canvas.toDataURL('image/png').split(',')[1]
+    if (draft.images.length + 1 > 16) throw new Error('每篇笔记最多 16 张图片')
+    if (draft.images.reduce((sum, image) => sum + (image.size || 0), 0) + data.length * 3 / 4 > 20 * 1024 * 1024) throw new Error('图片总量不能超过 20 MB')
+    const stamp = new Date().toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
+    draft.images.push({ name: `手写 ${stamp}.png`, mimeType: 'image/png', data, size: Math.floor(data.length * 3 / 4) })
+    page.strokes.length = 0
+    dirty()
+    return true
+  }
   function handwritingPanel(draft) {
     const W = 1400, H = 900
     const panel = h('div', { class: 'mb-handwrite', id: 'mb-handwrite' })
@@ -457,12 +498,15 @@ export function mountMistakebook({ beforeEnter }) {
     const ctx = canvas.getContext('2d')
     const paintBackground = () => { ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, W, H) }
     paintBackground(); ctx.lineCap = 'round'; ctx.lineJoin = 'round'
-    let strokes = [], drawing = null
-    const tool = { color: '#2b3138', width: 4, eraser: false }
+    let page = handwritingDrafts.get(draft)
+    if (!page) { page = { strokes: [], tool: { color: '#2b3138', width: 4, eraser: false } }; handwritingDrafts.set(draft, page) }
+    page.canvas = canvas
+    const strokes = page.strokes, tool = page.tool
+    let drawing = null, pointerID = null
     const drawStroke = stroke => {
       if (!stroke.points.length) return
-      ctx.globalCompositeOperation = stroke.eraser ? 'destination-out' : 'source-over'
-      ctx.strokeStyle = stroke.color; ctx.lineWidth = stroke.eraser ? stroke.width * 4 : stroke.width
+      ctx.globalCompositeOperation = 'source-over'
+      ctx.strokeStyle = stroke.eraser ? '#ffffff' : stroke.color; ctx.lineWidth = stroke.eraser ? stroke.width * 4 : stroke.width
       ctx.beginPath()
       ctx.moveTo(stroke.points[0].x, stroke.points[0].y)
       for (const point of stroke.points.slice(1)) ctx.lineTo(point.x, point.y)
@@ -470,32 +514,33 @@ export function mountMistakebook({ beforeEnter }) {
       ctx.stroke()
       ctx.globalCompositeOperation = 'source-over'
     }
-    const redraw = () => { paintBackground(); for (const stroke of strokes) drawStroke(stroke) }
+    const redraw = () => { paintBackground(); for (const stroke of strokes) drawStroke(stroke); if (drawing) drawStroke(drawing) }
     const point = event => { const rect = canvas.getBoundingClientRect(); return { x: (event.clientX - rect.left) * W / rect.width, y: (event.clientY - rect.top) * H / rect.height } }
-    canvas.addEventListener('pointerdown', event => { event.preventDefault(); try { canvas.setPointerCapture(event.pointerId) } catch { /* synthetic events in tests carry no active pointer */ } drawing = { color: tool.color, width: tool.width, eraser: tool.eraser, points: [point(event)] }; drawStroke(drawing) })
-    canvas.addEventListener('pointermove', event => { if (!drawing) return; event.preventDefault(); drawing.points.push(point(event)); redraw() })
-    const finish = () => { if (!drawing) return; strokes.push(drawing); drawing = null }
+    canvas.addEventListener('pointerdown', event => { if (drawing || event.button > 0) return; event.preventDefault(); pointerID = event.pointerId; try { canvas.setPointerCapture(event.pointerId) } catch { /* synthetic events in tests carry no active pointer */ } drawing = { color: tool.color, width: tool.width, eraser: tool.eraser, points: [point(event)] }; drawStroke(drawing) })
+    canvas.addEventListener('pointermove', event => { if (!drawing || event.pointerId !== pointerID) return; event.preventDefault(); drawing.points.push(point(event)); redraw() })
+    const finish = event => { if (!drawing || event.pointerId !== pointerID) return; strokes.push(drawing); drawing = null; pointerID = null; redraw(); dirty(); updatePageControls() }
     canvas.addEventListener('pointerup', finish)
     canvas.addEventListener('pointercancel', finish)
     const markTool = (nodes, active) => { for (const node of nodes) { const on = node === active; node.classList.toggle('on', on); node.setAttribute('aria-pressed', String(on)) } }
-    const colorButtons = ['#2b3138', '#1f5fa8', '#b23b32'].map((color, index) => h('button', { type: 'button', class: `mb-hw-color${index === 0 ? ' on' : ''}`, style: `background:${color}`, title: `笔色 ${color}`, 'aria-label': `笔色 ${color}`, 'aria-pressed': String(index === 0), onClick: event => { tool.eraser = false; tool.color = color; markTool(colorButtons, event.currentTarget); eraserButton.classList.remove('on'); eraserButton.setAttribute('aria-pressed', 'false') } }))
-    const widthButtons = [2.5, 4, 8].map((width, index) => button(String(width), event => { tool.width = width; tool.eraser = false; markTool(widthButtons, event.currentTarget); eraserButton.classList.remove('on'); eraserButton.setAttribute('aria-pressed', 'false') }, false, { class: `btn ghost mb-hw-width${index === 1 ? ' on' : ''}`, 'data-hw-width': String(width), 'aria-pressed': String(index === 1) }))
-    const eraserButton = button('橡皮', () => { tool.eraser = !tool.eraser; eraserButton.classList.toggle('on', tool.eraser); eraserButton.setAttribute('aria-pressed', String(tool.eraser)); if (tool.eraser) for (const node of colorButtons) { node.classList.remove('on'); node.setAttribute('aria-pressed', 'false') } }, false, { class: 'btn ghost', id: 'mb-hw-eraser', 'aria-pressed': 'false' })
-    const savePage = button('保存手写页', () => {
-      const data = canvas.toDataURL('image/png').split(',')[1]
-      if (draft.images.length + 1 > 16) throw new Error('每篇笔记最多 16 张图片')
-      if (draft.images.reduce((sum, image) => sum + (image.size || 0), 0) + data.length * 3 / 4 > 20 * 1024 * 1024) throw new Error('图片总量不能超过 20 MB')
-      const stamp = new Date().toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
-      draft.images.push({ name: `手写 ${stamp}.png`, mimeType: 'image/png', data, size: Math.floor(data.length * 3 / 4) })
-      strokes = []; redraw(); dirty(); renderDetail(); notify(`已加入手写页，共 ${draft.images.length} 页`)
+    const colors = ['#2b3138', '#1f5fa8', '#b23b32']
+    const refreshColors = () => { colorButtons.forEach((node, index) => { const on = !tool.eraser && colors[index] === tool.color; node.classList.toggle('on', on); node.setAttribute('aria-pressed', String(on)) }) }
+    const colorButtons = colors.map(color => h('button', { type: 'button', class: `mb-hw-color${!tool.eraser && tool.color === color ? ' on' : ''}`, style: `background:${color}`, title: `笔色 ${color}`, 'aria-label': `笔色 ${color}`, 'aria-pressed': String(!tool.eraser && tool.color === color), onClick: event => { tool.eraser = false; tool.color = color; markTool(colorButtons, event.currentTarget); eraserButton.classList.remove('on'); eraserButton.setAttribute('aria-pressed', 'false') } }))
+    const widthButtons = [2.5, 4, 8].map(width => button(String(width), event => { tool.width = width; tool.eraser = false; markTool(widthButtons, event.currentTarget); eraserButton.classList.remove('on'); eraserButton.setAttribute('aria-pressed', 'false'); refreshColors() }, false, { class: `btn ghost mb-hw-width${tool.width === width ? ' on' : ''}`, 'data-hw-width': String(width), 'aria-pressed': String(tool.width === width) }))
+    const eraserButton = button('橡皮', () => { tool.eraser = !tool.eraser; eraserButton.classList.toggle('on', tool.eraser); eraserButton.setAttribute('aria-pressed', String(tool.eraser)); refreshColors() }, false, { class: `btn ghost${tool.eraser ? ' on' : ''}`, id: 'mb-hw-eraser', 'aria-pressed': String(tool.eraser) })
+    const savePage = button('加入当前页', () => {
+      if (!addHandwritingPage(draft)) return
+      redraw(); renderDetail(); notify(`已加入手写页，共 ${draft.images.length} 页；保存笔记后入库`)
     }, true, { id: 'mb-hw-save' })
+    const undo = button('撤销', () => { strokes.pop(); redraw(); dirty(); updatePageControls() }, false, { class: 'btn ghost', id: 'mb-hw-undo' })
+    const clear = button('清空', async () => { if (!strokes.length || !await confirm('清空当前手写页？已经加入的图片会保留。')) return; strokes.length = 0; redraw(); dirty(); updatePageControls() }, false, { class: 'btn ghost', id: 'mb-hw-clear' })
+    const updatePageControls = () => { undo.disabled = clear.disabled = savePage.disabled = !strokes.length }
     append(panel, h('div', { class: 'mb-handwrite-tools' },
       ...colorButtons, ...widthButtons, eraserButton,
-      button('撤销', () => { strokes.pop(); redraw() }, false, { class: 'btn ghost', id: 'mb-hw-undo' }),
-      button('清空', () => { strokes = []; redraw() }, false, { class: 'btn ghost', id: 'mb-hw-clear' }),
+      undo, clear,
       h('span', { class: 'spacer' }), savePage),
       canvas,
-      h('p', { class: 'cap', text: '按住书写；保存后生成一页 PNG，与图片一样随笔记存储、可预览。' }))
+      h('p', { class: 'cap', text: '保存笔记会一并保存当前手写页。需要多页时，点击「加入当前页」继续书写。' }))
+    redraw(); updatePageControls()
     return panel
   }
   function imagePanel(draft) {
@@ -536,13 +581,13 @@ export function mountMistakebook({ beforeEnter }) {
       button('保存设置', async () => {
         const reply = await window.vault.settings({ baseUrl: modelURL.value, model: model.value, apiKey: modelKey.value, clearKey: clearModel.checked }); if (!reply.ok) throw new Error(reply.error)
         await call('configure', { endpoint: endpoint.value, apiKey: key.value, clearKey: clear.checked }); key.value = ''; modelKey.value = ''; node.close(); notify('设置已安全保存')
-      }, true, { id: 'mb-config-save' }), h('h3', { text: '外观' }),button('预览 Alaya 加载动画',showLoadingPreview,false,{id:'mb-loading-preview'}), h('h3', { text: '本地数据' }), h('p', { class: 'mb-data-path', text: config.path }), button('备份笔记本', async () => { if (await call('backup')) notify('笔记本已备份，包含原图') }), h('p', { class: 'cap', text: '笔记本使用独立数据库，不进入 Codex / DSH 的记忆上下文。' })))
+      }, true, { id: 'mb-config-save' }), h('h3', { text: '本地数据' }), h('p', { class: 'mb-data-path', text: config.path }), button('备份笔记本', async () => { if (await call('backup')) notify('笔记本已备份，包含原图') }), h('p', { class: 'cap', text: '笔记本使用独立数据库，不进入 Codex / DSH 的记忆上下文。' })))
   }
   async function openImport(initial = 'mistake') {
     if (!await discard()) return
     const draft = { file: null, questions: [], running: false, modified: false }
     const notes = { files: [], running: false, imported: false, type: 'note' }
-    const loading=createAlayaLoader({compact:true,hidden:true,label:'正在识别文字'})
+    const loading=createLoadingStatus({compact:true,hidden:true,label:'正在识别文字'})
     const text = h('textarea', { class: 'area mb-ocr-text', id: 'mb-import-text', placeholder: '粘贴题目或笔记文字，或选择图片 / PDF 后识别。\n\n1. 第一题\n2. 第二题', onInput: () => { draft.modified = true; draft.questions = []; results.replaceChildren() } })
     const results = h('div', { class: 'mb-segment-results', id: 'mb-segments' }), preview = h('div', { class: 'mb-source-preview', id: 'mb-ocr-preview' }, icon('book'), h('p', { text: '保留原题，校对文字' }))
     const filename = h('p', { class: 'cap', text: 'PNG / JPEG ≤ 10 MB，PDF ≤ 50 MB' }), keep = h('input', { type: 'checkbox', checked: true, id: 'mb-keep-source' })

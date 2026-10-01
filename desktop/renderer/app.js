@@ -1,10 +1,10 @@
 import { ownTags, section, subsection } from './grouping.js'
 import { icon, installIcons } from './icons.js'
 import { mountMistakebook } from './mistakebook.js'
-import { createAlayaLoader, showLoadingPreview, runAlayaStartup } from './loading.js'
+import { createLoadingStatus } from './loading.js'
 
 const el = id => document.getElementById(id)
-const state = { data: null, info: null, view: { kind: 'all' }, selected: null, draft: null, dirty: false, busy: false, open: new Set(), collapsed: new Set(), nextOffset: null, cure: null, layout: localStorage.getItem('memory-vault.layout') === 'rows' ? 'rows' : 'grid', settingsTab: 'general' }
+const state = { data: null, info: null, view: { kind: 'all' }, query: '', selected: null, draft: null, dirty: false, busy: false, open: new Set(), collapsed: new Set(), nextOffset: null, cure: null, layout: localStorage.getItem('memory-vault.layout') === 'rows' ? 'rows' : 'grid', settingsTab: 'general' }
 const kinds = { note: '笔记', fact: '事实', decision: '决策', preference: '偏好', summary: '总结', task: '任务' }
 installIcons()
 
@@ -34,6 +34,9 @@ function markDirty() {
   state.dirty = true
   const hint = el('editor-save-state')
   if (hint) { hint.textContent = '有未保存的修改'; hint.classList.add('dirty') }
+  const save = el('save-entry')
+  if (save) save.disabled = state.draft?.images === null
+  renderSearchContext()
 }
 let statusTimer
 
@@ -56,31 +59,71 @@ async function guard(action) {
   if (state.busy) return
   state.busy = true
   try { await action() } catch (error) { say(error.message ?? String(error), 'err') }
-  finally { state.busy = false }
+  finally { state.busy = false; scheduleSearch() }
 }
 async function discard() {
-  return !state.dirty || await desktop('confirm', '当前记忆有未保存的修改，放弃这些修改？')
+  if (!state.dirty) return true
+  return new Promise(resolve => {
+    let accepted = false, saving = false
+    const dialog = h('dialog', { id: 'unsaved-changes', class: 'unsaved-modal', 'aria-labelledby': 'unsaved-title', onCancel: event => { if (saving) event.preventDefault() }, onClose: () => { dialog.remove(); el('query').value = state.query; renderSearchContext(); resolve(accepted) } },
+      h('h2', { id: 'unsaved-title', text: '保存当前记忆？' }), h('p', { text: '你的修改还未保存。可以保存后继续，也可以返回编辑。' }),
+      h('p', { class: 'modal-status', role: 'status', 'aria-live': 'polite' }),
+      h('div', { class: 'unsaved-actions' },
+        h('button', { type: 'button', class: 'btn ghost danger', text: '放弃修改', onClick: () => {
+          if (state.selected?.id) selectEntry(state.selected)
+          else { state.selected = null; state.draft = null; state.dirty = false; renderList(); renderDrawer() }
+          accepted = true; dialog.close()
+        } }),
+        h('span', { class: 'spacer' }),
+        h('button', { type: 'button', class: 'btn', text: '继续编辑', autofocus: 'autofocus', onClick: () => dialog.close() }),
+        h('button', { type: 'button', class: 'btn primary', text: '保存并继续', onClick: async () => {
+          saving = true
+          dialog.querySelectorAll('button').forEach(node => { node.disabled = true })
+          try { await saveMemory(); accepted = true; dialog.close() }
+          catch (error) { saving = false; say(error.message ?? String(error), 'err'); dialog.querySelectorAll('button').forEach(node => { node.disabled = false }) }
+        } })))
+    document.body.append(dialog); dialog.showModal()
+  })
 }
 async function navigate(view) {
   if (!await discard()) return
+  clearTimeout(timer); el('query').value = state.query
   state.view = view; state.selected = null; state.draft = null; state.dirty = false
   await load()
 }
 async function load(append = false) {
   const offset = append ? state.nextOffset : 0
   if (append && offset === null) return
-  state.data = { ...await call('state'), entries: append ? state.data?.entries ?? [] : [] }
+  const data = await call('state')
   const result = await call('entries', {
-    query: el('query').value.trim(), limit: 200, offset,
+    query: state.query, limit: 200, offset,
     includeHidden: true, onlyHidden: state.view.kind === 'hidden',
     ...(state.view.kind === 'scope' ? { scope: state.view.id } : {}),
     ...(state.view.kind === 'group' ? { group: state.view.id, includeChildren: true } : {}),
   })
-  state.data.entries.push(...result.entries)
+  state.data = { ...data, entries: append ? [...state.data.entries, ...result.entries] : result.entries }
   state.nextOffset = result.nextOffset
   state.info = await desktop('info')
   receiveUpdate(state.info.updates)
   render()
+}
+async function saveMemory() {
+  const entry = state.selected, draft = state.draft
+  if (!entry || !draft) return
+  const isNew = !entry.id
+  if (!Array.isArray(draft.images)) throw new Error('请等待图片加载完成后保存')
+  if (!draft.content.trim() && !draft.images.length) { document.querySelector('#drawer [data-field="content"]')?.focus(); throw new Error('请填写正文或添加图片') }
+  const fields = { title: draft.title, content: draft.content, kind: draft.kind, tags: draft.tagsText.split(/[,，\n]/).map(text => text.trim()).filter(Boolean), priority: Number(draft.priority), base: draft.base === true, scope: draft.scope, groupId: draft.groupId }
+  fields.images = draft.images.map(image => image.id ? { id: image.id } : { name: image.name, data: image.data, mimeType: image.mimeType })
+  const save = el('save-entry')
+  if (save) { save.disabled = true; save.textContent = '正在保存…' }
+  try {
+    const result = await call(isNew ? 'entry.write' : 'entry.update', { ...fields, ...(isNew ? {} : { id: entry.id }) })
+    selectEntry(result.entry); await load(); say(isNew ? '记忆已创建' : '修改已保存', 'ok')
+  } finally {
+    const current = el('save-entry')
+    if (current) { current.disabled = state.draft?.images === null || Boolean(state.selected?.id && !state.dirty); current.textContent = state.selected?.id ? '保存修改' : '创建记忆' }
+  }
 }
 function rootOf(entry) {
   const group = state.data.groups.find(item => item.id === entry.groupId)
@@ -111,6 +154,7 @@ function renderSide() {
   }))
   el('tree').replaceChildren(...[...state.data.groups].sort((a, b) => groupLabel(a).localeCompare(groupLabel(b))).map(group => h('button', {
     class: state.view.kind === 'group' && state.view.id === group.id ? 'nav on' : 'nav', 'data-depth': group.depth,
+    title: groupLabel(group), 'aria-current': state.view.kind === 'group' && state.view.id === group.id ? 'page' : 'false',
     onClick: () => void guard(() => navigate({ kind: 'group', id: group.id })),
   }, icon('folder'), h('span', { class: 'nav-label', text: group.name, title: groupLabel(group) }), h('span', { class: 'count', text: groupCounts.get(group.id) }))))
 }
@@ -122,12 +166,12 @@ function renderList() {
   const sections = section(sorted, rootOf)
   list.replaceChildren()
   if (!sections.length) {
-    const searching = Boolean(el('query').value)
+    const searching = Boolean(state.query)
     list.append(h('div', { class: 'empty' }, h('div', { class: 'empty-art' }, icon(searching ? 'search' : 'vault')),
       h('h2', { text: searching ? '没有找到相关记忆' : '从一条记忆开始' }),
       h('p', { text: searching ? '试试更简短的关键词，或回到全部记忆浏览。' : '记下值得保留的知识、想法和约定，随时回到这里。' }),
       button(searching ? '清除搜索' : '新建记忆', async () => {
-        if (searching) { el('query').value = ''; await load() } else await newMemory()
+        if (searching) await clearSearch(); else await newMemory()
       }, true)))
   }
   for (const part of sections) {
@@ -178,15 +222,7 @@ function renderDrawer() {
     ['knowledge', 'conversation'].map(value => h('option', { value, selected: value === draft.scope ? 'selected' : undefined, text: value === 'knowledge' ? '知识库' : '对话记忆' })))
   const kind = h('select', { class: 'select', 'data-field': 'kind', onChange: event => { draft.kind = event.target.value; markDirty() } },
     [['note', '笔记'], ['fact', '事实'], ['decision', '决策'], ['preference', '偏好'], ['summary', '总结'], ['task', '任务']].map(([value, text]) => h('option', { value, text, selected: value === draft.kind ? 'selected' : undefined })))
-  const save = async () => {
-    if (!Array.isArray(draft.images)) throw new Error('请等待图片加载完成后保存')
-    if (!draft.content.trim() && !draft.images.length) throw new Error('请填写正文或添加图片')
-    const fields = { title: draft.title, content: draft.content, kind: draft.kind, tags: draft.tagsText.split(/[,，\n]/).map(text => text.trim()).filter(Boolean), priority: Number(draft.priority), base: draft.base === true, scope: draft.scope, groupId: draft.groupId }
-    fields.images = draft.images.map(image => image.id ? { id: image.id } : { name: image.name, data: image.data, mimeType: image.mimeType })
-    const result = await call(isNew ? 'entry.write' : 'entry.update', { ...fields, ...(isNew ? {} : { id: entry.id }) })
-    selectEntry(result.entry); await load(); say(isNew ? '记忆已创建' : '修改已保存', 'ok')
-  }
-  const form = h('form', { class: 'editor-form', onSubmit: event => { event.preventDefault(); void guard(save) },
+  const form = h('form', { class: 'editor-form', onSubmit: event => { event.preventDefault(); void guard(saveMemory) },
     onPaste: event => {
       const files = [...(event.clipboardData?.files ?? [])].filter(file => file.type.startsWith('image/'))
       if (files.length) { event.preventDefault(); void guard(() => addDraftImages(files)) }
@@ -199,11 +235,12 @@ function renderDrawer() {
         h('section', { id: 'editor-images', class: 'editor-images', 'aria-label': '记忆图片' })),
       h('h3', { class: 'properties-head', text: '整理信息' }),
       h('div', { class: 'properties' }, field('归属', scope), field('类型', kind), field('记忆组', group, 'full-width'),
-        field('标签', control('tagsText', 'input', { placeholder: '用逗号分隔多个标签' }), 'full-width'),
-        field('优先级 · 0–100', control('priority', 'input', { type: 'number', min: 0, max: 100, step: 1 })),
-        h('label', { class: 'switch-row' }, h('span', { text: '底层约定' }), control('base', 'input', { type: 'checkbox', checked: draft.base === true }))),
+        field('标签', control('tagsText', 'input', { placeholder: '用逗号分隔多个标签' }), 'full-width')),
+      h('details', { class: 'advanced-properties' }, h('summary', { text: '提供给 AI 的优先级与约定' }), h('p', { class: 'cap', text: '优先级决定提供给模型的顺序；底层约定使用独立的记忆预算。' }),
+        h('div', { class: 'properties' }, field('优先级 · 0–100', control('priority', 'input', { type: 'number', min: 0, max: 100, step: 1 })),
+          h('label', { class: 'switch-row' }, h('span', { text: '底层约定' }), control('base', 'input', { type: 'checkbox', checked: draft.base === true })))),
       isNew ? null : h('details', { class: 'record-info' }, h('summary', { text: '记录信息' }), h('div', { class: 'meta', text: `来源：${entry.source} · ID：${entry.id}\n更新：${new Date(entry.updatedAt).toLocaleString('zh-CN')}` }))),
-    h('div', { class: 'editor-actions' }, h('div', { id: 'editor-save-state', class: `editor-save-state${state.dirty ? ' dirty' : ''}`, text: state.dirty ? '有未保存的修改' : isNew ? '保存到当前记忆库' : '已保存到本地记忆库' }), h('div', { class: 'row' },
+    h('div', { class: 'editor-actions' }, h('div', { id: 'editor-save-state', class: `editor-save-state${state.dirty ? ' dirty' : ''}`, role: 'status', 'aria-live': 'polite', text: state.dirty ? '有未保存的修改' : isNew ? '保存到当前记忆库' : '已保存到本地记忆库' }), h('div', { class: 'row' },
       isNew ? null : button(entry.hidden ? '恢复显示' : '隐藏', async () => {
         if (!await discard()) return
         await call('entry.hide', { ids: [entry.id], hidden: !entry.hidden })
@@ -214,7 +251,7 @@ function renderDrawer() {
         if (!await desktop('confirm', `永久删除「${entry.title || '这条记忆'}」？`)) return
         await call('entry.delete', { id: entry.id }); state.selected = null; state.dirty = false; await load(); say('记忆已删除', 'ok')
       }, false, { class: 'btn ghost danger' }),
-      h('button', { type: 'submit', id: 'save-entry', class: 'btn primary', disabled: draft.images === null, text: isNew ? '创建记忆' : '保存修改' }))),
+      h('button', { type: 'submit', id: 'save-entry', class: 'btn primary', disabled: draft.images === null || (!isNew && !state.dirty), title: '保存 · Ctrl+S', text: isNew ? '创建记忆' : '保存修改' }))),
   )
   drawer.replaceChildren(h('div', { class: 'drawer-head' }, icon(isNew ? 'plus' : 'note'), h('h2', { text: isNew ? '新建记忆' : '记忆详情' }), h('span', { class: 'spacer' }), iconButton('close', '关闭记忆详情', async () => {
     if (await discard()) { state.selected = null; state.dirty = false; renderList(); renderDrawer() }
@@ -266,27 +303,38 @@ function renderImagePanel(failed = false) {
       h('div', { class: 'image-attachment-caption' }, h('span', { text: image.name, title: image.name }), button('移除', () => { draft.images.splice(index, 1); markDirty(); renderImagePanel() }, false, { class: 'btn ghost danger', 'aria-label': `移除图片 ${image.name}` }))))),
     failed ? button('重新加载图片', () => loadDraftImages(draft)) : null,
     h('p', { class: 'image-drop-hint', text: '拖入图片或粘贴截图 · 保存记忆后保留', onDragover: event => event.preventDefault(), onDrop: event => { event.preventDefault(); void guard(() => addDraftImages([...event.dataTransfer.files])) } })].filter(node => node !== null && node !== false))
-  const save = el('save-entry'); if (save) save.disabled = waiting
+  const save = el('save-entry'); if (save) save.disabled = waiting || Boolean(state.selected?.id && !state.dirty)
+}
+function viewLabel() {
+  return state.view.kind === 'group' ? state.data?.groups.find(group => group.id === state.view.id)?.name ?? '记忆组' : state.view.kind === 'scope' ? (state.view.id === 'knowledge' ? '知识库' : '对话记忆') : state.view.kind === 'hidden' ? '隐藏记忆' : '全部记忆'
+}
+function renderSearchContext() {
+  const pending = el('query').value.trim() !== state.query
+  el('search-context').classList.toggle('hidden', !state.query && !pending)
+  el('search-hint').textContent = pending && state.dirty ? '当前记忆尚未保存，按 Enter 确认后搜索。' : pending ? '准备搜索…' : state.query ? `在「${viewLabel()}」中搜索「${state.query}」` : ''
+  el('clear-search').textContent = pending && !state.query ? '取消搜索' : '清除搜索'
 }
 function render() {
   renderSide(); renderList(); renderDrawer()
-  const label = state.view.kind === 'group' ? state.data.groups.find(group => group.id === state.view.id)?.name ?? '记忆组' : state.view.kind === 'scope' ? (state.view.id === 'knowledge' ? '知识库' : '对话记忆') : state.view.kind === 'hidden' ? '隐藏记忆' : '全部记忆'
-  const searching = Boolean(el('query').value.trim())
+  const label = viewLabel()
+  const searching = Boolean(state.query)
   el('view-title').textContent = searching ? '搜索结果' : label
   el('breadcrumb').textContent = label
-  el('view-description').textContent = searching ? `与「${el('query').value.trim()}」相关的记忆。` : state.view.kind === 'hidden' ? '暂时收起的记忆，随时可以恢复。' : state.view.id === 'conversation' ? '留住对话里的线索、进展与上下文。' : state.view.id === 'knowledge' ? '值得复用的知识，下一次也用得上。' : state.view.kind === 'group' ? '围绕一个主题，整理值得保留的内容。' : '让知识、灵感与约定各归其位。'
+  el('view-description').textContent = searching ? `找到 ${state.nextOffset === null ? '' : '至少 '}${state.data.entries.length} 条相关记忆。` : state.view.kind === 'hidden' ? '暂时收起的记忆，随时可以恢复。' : state.view.id === 'conversation' ? '留住对话里的线索、进展与上下文。' : state.view.id === 'knowledge' ? '值得复用的知识，下一次也用得上。' : state.view.kind === 'group' ? '围绕一个主题，整理值得保留的内容。' : '让知识、灵感与约定各归其位。'
+  renderSearchContext()
   el('view-count').textContent = `${state.nextOffset === null ? '' : '≥'}${state.data.entries.length}`
   el('foot-left').textContent = `${state.data.groups.length} 个记忆组 · ${state.data.stats.totals.entries} 条可见记忆 · ${state.data.stats.hidden} 条隐藏`
   el('foot-right').title = state.info.databasePath
   el('curate').disabled = el('curate-review').disabled = !state.info.model.baseUrl
   el('curate').title = el('curate-review').title = state.info.model.baseUrl ? '会调用设置中的 AI 服务' : '先在设置中配置 AI 服务'
-  el('curation-hint').textContent = state.info.model.baseUrl ? '合并重复内容，梳理分组与标签。' : '先在「设置与连接 → AI 服务」中配置模型，即可预览和整理记忆。'
+  el('curation-hint').textContent = state.info.model.baseUrl ? '先预览建议，再决定是否整理保存。整理范围覆盖整个记忆库。' : '连接 AI 服务后，即可预览整理建议。'
+  el('curation-setup').classList.toggle('hidden', Boolean(state.info.model.baseUrl))
   for (const [id, layout] of [['view-grid', 'grid'], ['view-list', 'rows']]) { el(id).classList.toggle('active', state.layout === layout); el(id).setAttribute('aria-pressed', String(state.layout === layout)) }
 }
 function modal(title, ...children) {
   el('modal')?.remove()
   el('curation-menu').open = false
-  const dialog = h('dialog', { id: 'modal', class: 'modal', 'aria-labelledby': 'modal-title' }, h('div', { class: 'modal-header' }, h('h2', { id: 'modal-title', text: title }), h('span', { class: 'spacer' }), iconButton('close', '关闭', async () => dialog.close())), h('div', { class: 'modal-status', role: 'status' }), h('div', { class: 'modal-body' }, children))
+  const dialog = h('dialog', { id: 'modal', class: 'modal', 'aria-labelledby': 'modal-title', onClose: () => { dialog.remove(); scheduleSearch() } }, h('div', { class: 'modal-header' }, h('h2', { id: 'modal-title', text: title }), h('span', { class: 'spacer' }), iconButton('close', '关闭', async () => dialog.close())), h('div', { class: 'modal-status', role: 'status' }), h('div', { class: 'modal-body' }, children))
   document.body.append(dialog); dialog.showModal()
   return dialog
 }
@@ -334,7 +382,7 @@ function settings() {
           const result = await desktop('open')
           if (result) { state.selected = null; state.dirty = false; state.view = { kind: 'all' }; await load(); settings(); say('记忆库已切换', 'ok') }
         }), button('备份数据库', async () => { const result = await desktop('backup'); if (result) say(`备份已保存：${result.path}`, 'ok') }))),
-      h('section', {}, h('div', { class: 'settings-info' }, icon('vault'), h('div', {}, h('strong', { text: `Alaya ${info.version}` }), h('p', { text: '独立桌面记忆库 · 支持 Codex 与 DSH 接口' }))),button('预览加载动画',showLoadingPreview,false,{id:'loading-preview'}))],
+      h('section', {}, h('div', { class: 'settings-info' }, icon('vault'), h('div', {}, h('strong', { text: `Alaya ${info.version}` }), h('p', { text: '独立桌面记忆库 · 支持 Codex 与 DSH 接口' }))))],
     ['model', 'AI 服务', 'sparkles',
       h('section', { class: 'col' }, h('h3', { text: '连接 AI 服务' }), h('p', { class: 'cap', text: '可选。用于预览和整理记忆。候选内容会发送到你配置的服务；密钥在本机加密保存。' }),
         field('服务地址（含 /v1 等前缀，不含 /chat/completions）', url), field('模型名称', model), field('API 密钥', key), h('label', { class: 'row cap' }, clearKey, '删除已保存密钥'),
@@ -438,13 +486,14 @@ function showCure() {
 for (const [id, apply] of [['curate', true], ['curate-review', false]]) el(id).addEventListener('click', () => void guard(async () => {
   if (!await discard()) return
   say(apply ? '正在整理…' : '正在生成预览…')
-  const loading=createAlayaLoader({compact:true,label:apply?'AI 正在整理记忆':'AI 正在生成预览'});el('curation-hint').after(loading.element)
+  const loading=createLoadingStatus({compact:true,label:apply?'AI 正在整理记忆':'AI 正在生成预览'});el('curation-hint').after(loading.element)
   try {state.cure = await call('curate', { origin: el('curate-scope').value, apply, limit: 20 }); await load(); showCure(); say('完成', 'ok')}
   finally {loading.destroy()}
 }))
 async function newMemory() {
   if (!await discard()) return
-  const group = state.data.groups.find(group => group.id === state.view.id) ?? state.data.groups.find(group => group.scope === 'knowledge') ?? state.data.groups[0]
+  const scope = state.view.kind === 'scope' ? state.view.id : 'knowledge'
+  const group = state.data.groups.find(group => group.id === state.view.id) ?? state.data.groups.find(group => group.scope === scope) ?? state.data.groups[0]
   selectEntry({ id: '', title: '', content: '', tags: [], kind: 'note', scope: group.scope, priority: 0, base: false, hidden: false, groupId: group.id })
   document.querySelector('#drawer [data-field="title"]').focus()
 }
@@ -458,11 +507,36 @@ el('sort').title = '对已加载的记忆排序；加载更多后一起排序'
 el('sort').addEventListener('change', renderList)
 el('manage-groups').addEventListener('click', () => void guard(async () => { if (await discard()) groupManager() }))
 el('settings').addEventListener('click', () => void guard(async () => { if (await discard()) settings() }))
-el('refresh').addEventListener('click', () => void guard(async () => { if (await discard()) { state.dirty = false; await load(); say('已刷新', 'ok') } }))
-let timer
-el('query').addEventListener('input', () => { clearTimeout(timer); timer = setTimeout(() => void guard(async () => { if (await discard()) { state.selected = null; state.dirty = false; await load() } }), 220) })
+el('curation-setup').addEventListener('click', () => void guard(async () => { if (await discard()) { state.settingsTab = 'model'; settings() } }))
+el('refresh').addEventListener('click', () => void guard(async () => { if (await discard()) { state.selected = null; state.draft = null; state.dirty = false; await load(); say('已刷新', 'ok') } }))
+let timer, composing = false
+function scheduleSearch() {
+  clearTimeout(timer)
+  if (composing || state.dirty || state.busy || !state.data || document.body.dataset.mode === 'mistakebook' || document.querySelector('dialog[open]') || el('query').value.trim() === state.query) return
+  timer = setTimeout(() => void guard(applySearch), 220)
+}
+async function applySearch() {
+  const query = el('query').value.trim()
+  if (query === state.query) { renderSearchContext(); return }
+  if (!await discard()) { el('query').value = state.query; renderSearchContext(); return }
+  el('query').value = query
+  state.query = query; state.selected = null; state.draft = null; state.dirty = false
+  await load()
+}
+async function clearSearch() {
+  clearTimeout(timer)
+  if (!state.query) { el('query').value = ''; renderSearchContext(); return }
+  el('query').value = ''; await applySearch()
+}
+el('clear-search').addEventListener('click', () => void guard(clearSearch))
+el('query').addEventListener('input', () => { renderSearchContext(); scheduleSearch() })
+el('query').addEventListener('compositionstart', () => { composing = true; clearTimeout(timer) })
+el('query').addEventListener('compositionend', () => { composing = false; scheduleSearch() })
+el('query').addEventListener('keydown', event => {
+  if (event.key === 'Enter' && !event.isComposing) { event.preventDefault(); clearTimeout(timer); void guard(applySearch) }
+  if (event.key === 'Escape' && el('query').value.trim() !== state.query) { event.preventDefault(); event.stopPropagation(); el('query').value = state.query; renderSearchContext() }
+})
 document.addEventListener('keydown', event => {
-  if (document.body.classList.contains('alaya-booting')) return
   if (document.body.dataset.mode === 'mistakebook') return
   if (document.querySelector('dialog[open]') || !state.data) return
   if (event.ctrlKey || event.metaKey) {
@@ -478,11 +552,11 @@ document.addEventListener('keydown', event => {
 document.addEventListener('click', event => { if (!el('curation-menu').contains(event.target)) el('curation-menu').open = false })
 window.addEventListener('focus', () => { if (document.body.dataset.mode !== 'mistakebook' && !state.dirty && state.data && !document.querySelector('dialog[open]')) void guard(() => load()) })
 mountMistakebook({ beforeEnter: async () => {
-  if (state.busy || document.body.classList.contains('alaya-booting') || document.querySelector('dialog[open]') || !await discard()) return false
+  if (state.busy || document.querySelector('dialog[open]') || !await discard()) return false
   state.dirty = false; state.selected = null; state.draft = null; render(); return true
 } })
 void guard(async () => {
-  await runAlayaStartup(load)
+  await load()
 }).then(() => {
   // Open where the user left off; the notebook is this app's primary face.
   if ((localStorage.getItem('alaya.mode') ?? 'notebook') === 'notebook') document.getElementById('mode-switch').click()
