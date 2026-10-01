@@ -15,14 +15,14 @@ for (const name of ['main.mjs', 'preload.cjs', 'renderer', 'lib', 'assets']) cpS
 const pkg = JSON.parse(readFileSync(join(here, 'package.json'), 'utf8'))
 if (pkg.version !== VERSION || JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')).version !== VERSION) throw new Error('Release versions must match')
 writeFileSync(join(runtime, 'package.json'), JSON.stringify({
-  name: 'memory-vault-mistakebook', version: pkg.version, description: 'Memory Vault with a study notebook and AI learning tools',
+  name: 'memory-vault-mistakebook', version: pkg.version, description: 'Alaya memory and study notebook',
   type: 'module', main: 'desktop/main.mjs', author: 'Memory Vault contributors',
 }, null, 2))
 await build({ projectDir: here, config: {
   ...pkg.build, electronVersion: pkg.devDependencies.electron,
   electronDist: join(here, 'node_modules', 'electron', 'dist'),
   directories: { app: runtime, output: join(here, 'dist') }, npmRebuild: false,
-  artifactName: 'Memory-Vault-Notebook-${version}-Setup.${ext}',
+  artifactName: 'Alaya-${version}-Setup.${ext}',
   win: { target: ['nsis'], icon: join(here, 'assets', 'memory-vault.ico'), signAndEditExecutable: true },
   nsis: { ...pkg.build.nsis, oneClick: false, perMachine: false, allowToChangeInstallationDirectory: true, deleteAppDataOnUninstall: false },
 }, ...(process.argv.includes('--dir') ? { dir: true } : {}) })

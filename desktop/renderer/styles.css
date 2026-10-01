@@ -1,5 +1,6 @@
 :root { color-scheme: light; --bg:#f7f8fa; --surface:#fff; --side:#eef0f4; --line:#e4e6eb; --fg:#20232a; --fg-2:#616875; --fg-3:#8b919d; --accent:#007aff; --accent-soft:#e6f0ff; --ok:#29845b; --danger:#cc3543; --radius:12px; font-synthesis:none; }
 * { box-sizing:border-box; }
+:root { --ease-out:cubic-bezier(0.23,1,0.32,1); --ease-in-out:cubic-bezier(0.77,0,0.175,1); }
 html,body { height:100%; }
 body { margin:0; background:var(--bg); color:var(--fg); font:13px/1.6 -apple-system,BlinkMacSystemFont,"Microsoft YaHei UI","Microsoft YaHei","Segoe UI",system-ui,sans-serif; overflow:hidden; }
 button,input,select,textarea { font:inherit; color:inherit; }

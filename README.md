@@ -1,6 +1,6 @@
-# Memory Vault
+# Alaya
 
-This checkout is the independent `feat/notebook-mode` addon branch. **Memory Vault 笔记本 0.6.4** switches between memory and study notebook modes using the top-right vault icon. It supports mistakes, structured physics models, methods, vocabulary, notes, AI drafts, word quizzes and hosted PhET simulations. See [the addon guide](docs/notebook.zh.md). The addon is excluded from `main`.
+This checkout is the independent `feat/notebook-mode` addon branch. **Alaya 0.6.7** switches between memory and study notebook modes using the top-right vault icon. It supports mistakes, structured physics models, methods, vocabulary, notes, AI drafts, word quizzes and hosted PhET simulations. See [the addon guide](docs/notebook.zh.md). The addon is excluded from `main`.
 
 English | [中文](README.zh.md)
 

@@ -1,6 +1,7 @@
 import { ownTags, section, subsection } from './grouping.js'
 import { icon, installIcons } from './icons.js'
 import { mountMistakebook } from './mistakebook.js'
+import { createAlayaLoader, showLoadingPreview } from './loading.js'
 
 const el = id => document.getElementById(id)
 const state = { data: null, info: null, view: { kind: 'all' }, selected: null, draft: null, dirty: false, busy: false, open: new Set(), collapsed: new Set(), nextOffset: null, cure: null, layout: localStorage.getItem('memory-vault.layout') === 'rows' ? 'rows' : 'grid', settingsTab: 'general' }
@@ -333,7 +334,7 @@ function settings() {
           const result = await desktop('open')
           if (result) { state.selected = null; state.dirty = false; state.view = { kind: 'all' }; await load(); settings(); say('记忆库已切换', 'ok') }
         }), button('备份数据库', async () => { const result = await desktop('backup'); if (result) say(`备份已保存：${result.path}`, 'ok') }))),
-      h('section', {}, h('div', { class: 'settings-info' }, icon('vault'), h('div', {}, h('strong', { text: `Memory Vault ${info.version}` }), h('p', { text: '独立桌面记忆库 · 支持 Codex 与 DSH 接口' }))))],
+      h('section', {}, h('div', { class: 'settings-info' }, icon('vault'), h('div', {}, h('strong', { text: `Alaya ${info.version}` }), h('p', { text: '独立桌面记忆库 · 支持 Codex 与 DSH 接口' }))),button('预览加载动画',showLoadingPreview,false,{id:'loading-preview'}))],
     ['model', 'AI 服务', 'sparkles',
       h('section', { class: 'col' }, h('h3', { text: '连接 AI 服务' }), h('p', { class: 'cap', text: '可选。用于预览和整理记忆。候选内容会发送到你配置的服务；密钥在本机加密保存。' }),
         field('服务地址（含 /v1 等前缀，不含 /chat/completions）', url), field('模型名称', model), field('API 密钥', key), h('label', { class: 'row cap' }, clearKey, '删除已保存密钥'),
@@ -385,7 +386,7 @@ function receiveUpdate(snapshot) {
   }
   const visible = snapshot.status === 'available' && snapshot.settings?.notify !== false && snapshot.settings?.dismissedVersion !== snapshot.release?.version
   banner.classList.toggle('hidden', !visible)
-  if (visible) banner.replaceChildren(icon('refresh'), h('span', { text: `Memory Vault ${snapshot.release.version} 已发布` }), h('span', { class: 'spacer' }), updateButton('查看更新', () => { state.settingsTab = 'updates'; settings() }, false, { class: 'btn soft' }), updateButton('稍后', () => updateAction('dismiss'), false, { class: 'btn ghost' }))
+  if (visible) banner.replaceChildren(icon('refresh'), h('span', { text: `Alaya ${snapshot.release.version} 已发布` }), h('span', { class: 'spacer' }), updateButton('查看更新', () => { state.settingsTab = 'updates'; settings() }, false, { class: 'btn soft' }), updateButton('稍后', () => updateAction('dismiss'), false, { class: 'btn ghost' }))
   renderUpdateStatus()
 }
 function updatePanel() {
@@ -394,7 +395,7 @@ function updatePanel() {
   const auto = h('input', { type: 'checkbox', checked: snapshot.settings.autoCheck, id: 'update-auto' })
   const notify = h('input', { type: 'checkbox', checked: snapshot.settings.notify, id: 'update-notify' })
   return h('div', { class: 'col' },
-    h('section', { class: 'update-overview' }, h('div', { class: 'settings-info' }, icon('vault'), h('div', {}, h('h3', { text: 'Memory Vault' }), h('p', { text: `当前版本 ${state.info.version}` }))),
+    h('section', { class: 'update-overview' }, h('div', { class: 'settings-info' }, icon('vault'), h('div', {}, h('h3', { text: 'Alaya' }), h('p', { text: `当前版本 ${state.info.version}` }))),
       h('strong', { id: 'update-status', role: 'status', 'aria-live': 'polite' }), h('p', { class: 'cap', id: 'update-last-checked' }), h('p', { class: 'update-error hidden', id: 'update-error' }),
       h('div', { class: 'update-progress hidden', id: 'update-progress' }, h('progress', { id: 'update-progress-bar', max: 100, value: 0, 'aria-label': '安装包下载进度' }), h('span', { id: 'update-progress-label', class: 'cap' })),
       h('div', { class: 'row', id: 'update-actions' })),
@@ -437,7 +438,9 @@ function showCure() {
 for (const [id, apply] of [['curate', true], ['curate-review', false]]) el(id).addEventListener('click', () => void guard(async () => {
   if (!await discard()) return
   say(apply ? '正在整理…' : '正在生成预览…')
-  state.cure = await call('curate', { origin: el('curate-scope').value, apply, limit: 20 }); await load(); showCure(); say('完成', 'ok')
+  const loading=createAlayaLoader({compact:true,label:apply?'AI 正在整理记忆':'AI 正在生成预览',detail:'使用已配置的模型服务。'});el('curation-hint').after(loading.element)
+  try {state.cure = await call('curate', { origin: el('curate-scope').value, apply, limit: 20 }); await load(); showCure(); say('完成', 'ok')}
+  finally {loading.destroy()}
 }))
 async function newMemory() {
   if (!await discard()) return
@@ -477,4 +480,9 @@ mountMistakebook({ beforeEnter: async () => {
   if (state.busy || document.querySelector('dialog[open]') || !await discard()) return false
   state.dirty = false; state.selected = null; state.draft = null; render(); return true
 } })
-void guard(async () => { await load(); say('记忆库已打开') })
+void guard(async () => {
+  let startup
+  const timer=setTimeout(()=>{const loading=createAlayaLoader({label:'正在打开你的记忆库',detail:'Alaya · 让知识与记忆各归其位。'});startup=h('div',{class:'alaya-startup'},loading.element);document.body.append(startup)},160)
+  try {await load();say('Alaya 已打开')}
+  finally {clearTimeout(timer);startup?.remove()}
+})

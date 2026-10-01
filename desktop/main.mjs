@@ -203,7 +203,7 @@ function registerDesktop() {
 }
 async function openWindow() {
   window = new BrowserWindow({
-    width: 1440, height: 940, minWidth: 1040, minHeight: 650, backgroundColor: '#f7f8fa', title: 'Memory Vault · 笔记本',
+    width: 1440, height: 940, minWidth: 1040, minHeight: 650, backgroundColor: '#f7f8fa', title: 'Alaya · 记忆与笔记',
     autoHideMenuBar: true, show: !selftest,
     icon: join(here, 'assets', 'memory-vault.png'),
     webPreferences: { preload: join(here, 'preload.cjs'), contextIsolation: true, nodeIntegration: false, sandbox: true, spellcheck: false, offscreen: selftest, backgroundThrottling: !selftest },
@@ -252,7 +252,7 @@ app.whenReady().then(async () => {
           if (!selftest && snapshot.status === 'available' && snapshot.settings.notify && snapshot.settings.dismissedVersion !== version && notifiedVersion !== version) {
             notifiedVersion = version
             if (window && !window.isFocused() && Notification.isSupported()) {
-              const notice = new Notification({ title: 'Memory Vault 有新版本', body: `版本 ${version} 已发布，打开软件查看更新。`, icon: join(here, 'assets', 'memory-vault.png') })
+              const notice = new Notification({ title: 'Alaya 有新版本', body: `版本 ${version} 已发布，打开软件查看更新。`, icon: join(here, 'assets', 'memory-vault.png') })
               notice.on('click', () => { if (window && !window.isDestroyed()) { window.show(); window.focus() } })
               notice.show()
             }
@@ -267,7 +267,7 @@ app.whenReady().then(async () => {
         updateTimer = setTimeout(() => { check(); updateTimer = setInterval(check, 6 * 60 * 60 * 1000) }, 5000)
         updateTimer.unref()
       }
-    } catch (error) { diagnostic(error.stack ?? error); if (!selftest) dialog.showErrorBox('记忆库无法启动', error.message); app.exit(1) }
+    } catch (error) { diagnostic(error.stack ?? error); if (!selftest) dialog.showErrorBox('Alaya 无法启动', error.message); app.exit(1) }
 })
 app.on('window-all-closed', () => app.quit())
 app.on('before-quit', () => { aiRequest?.abort(); ocrRequest?.abort(); clearTimeout(updateTimer); clearInterval(updateTimer); updater?.dispose(); mistakebook?.close(); bridge?.close() })

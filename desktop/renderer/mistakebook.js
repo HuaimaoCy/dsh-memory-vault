@@ -1,4 +1,5 @@
 import { icon } from './icons.js'
+import { createAlayaLoader, showLoadingPreview } from './loading.js'
 import { NOTE_TYPES, STRUCTURED_FIELDS, normalizeFields } from '../../addons/mistakebook/fields.mjs'
 import { SIMULATIONS } from '../../addons/mistakebook/simulations.mjs'
 import { extractWords, normalizeWord } from '../../addons/mistakebook/words.mjs'
@@ -107,7 +108,7 @@ export function mountMistakebook({ beforeEnter }) {
   }) })
   const order = h('select', { id: 'mb-sort', class: 'select', 'aria-label': '错题排序', onChange: event => void guard(async () => { state.order = event.target.value; await load() }) }, h('option', { value: 'priority', text: '复习优先级' }), h('option', { value: 'updated', text: '最近更新' }))
   shell.append(h('aside', { class: 'mb-side' },
-    h('div', { class: 'brand' }, h('div', { class: 'mb-book-mark' }, icon('book')), h('div', {}, h('div', { class: 'brand-name', text: '笔记本' }), h('div', { class: 'brand-caption', text: 'STUDY NOTEBOOK' }))),
+    h('div', { class: 'brand' }, h('div', { class: 'mb-book-mark' }, icon('book')), h('div', {}, h('div', { class: 'brand-name', text: '笔记本' }), h('div', { class: 'brand-caption', text: 'ALAYA NOTEBOOK' }))),
     h('div', { class: 'mb-side-scroll' }, h('div', { class: 'side-head', text: '我的学习' }), sideViews, h('div', { class: 'side-head mb-subject-heading', text: '笔记类型' }), categories, h('div', { class: 'side-head mb-subject-heading', text: '按学科整理' }), subjects),
     h('div', { class: 'mb-side-bottom' }, h('div', { class: 'mb-local' }, h('span', { class: 'library-dot' }), h('span', { text: '独立保存在本机' })),
       button([icon('settings'), '笔记本设置'], openSettings, false, { class: 'nav', id: 'mb-settings' }))),
@@ -243,7 +244,8 @@ export function mountMistakebook({ beforeEnter }) {
   async function solveAI() {
     if(!state.draft) return
     if(state.dirty||!state.draft.id) await save()
-    const node=dialog('AI 正在整理这篇笔记',h('div',{class:'mb-ai-progress'},icon('sparkles'),h('p',{text:'正在生成解答、推导或词条。内容会先保存为可核对的草稿。'})))
+    const loading=createAlayaLoader({label:'AI 正在整理这篇笔记',detail:'生成解答、推导或词条，先保存为可核对的草稿。'})
+    const node=dialog('Alaya · AI 学习助手',h('div',{class:'mb-ai-progress'},loading.element))
     const cancel=h('button',{type:'button',class:'btn ghost',text:'取消生成',id:'mb-ai-cancel',onClick:()=>void call('cancelAI')})
     node.querySelector('[aria-label="关闭对话框"]').replaceWith(cancel)
     node.addEventListener('cancel',event=>{event.preventDefault();void call('cancelAI')})
@@ -252,8 +254,9 @@ export function mountMistakebook({ beforeEnter }) {
     finally{node.close()}
   }
   function wordPhotoPane() {
-    const files = [], controller = { busy: () => running || extracting, cancel: () => void call('cancelOCR'), hasWork: () => files.some(item => item.status === 'done') }
+    const files = [], controller = { busy: () => running || extracting, cancel: () => void call(extracting ? 'cancelAI' : 'cancelOCR'), hasWork: () => files.some(item => item.status === 'done') }
     let rows = [], edits = new Map(), existing = new Set(), running = false, extracting = false
+    const loading=createAlayaLoader({compact:true,hidden:true,label:'正在识别积累本',detail:'识别结果可校对，再导入词条。'})
     const queue = h('div', { class: 'mb-capture-queue', id: 'mb-word-queue' })
     const progress = h('p', { class: 'cap', id: 'mb-word-progress', text: '一次可加入多页积累本照片（PNG / JPEG）或 PDF 扫描件，逐张自动识别后提取英语词条。' })
     const preview = h('div', { class: 'mb-word-preview', id: 'mb-word-preview', hidden: true })
@@ -284,13 +287,14 @@ export function mountMistakebook({ beforeEnter }) {
       if (!text.trim()) throw new Error('请先完成拍照识别，再用 AI 整理')
       if (!await confirm('AI 识别整理会把整页识别原文交给已配置的模型重新提取，更适合表格、勾选或潦草的手写页；本地提取的行可以手动改。继续？')) return
       extracting = true; extractButton.disabled = true; extractCancel.hidden = false; notify('AI 正在从识别原文提取词条…')
+      loading.show('AI 正在重新提取词条','保留原词形，完成后请核对释义。')
       try {
         const entries = await call('words.extract', { text })
         existing = await existingVocabularyWords()
         applyEntries(entries, false)
         notify(`AI 提取到 ${entries.length} 个词条，请核对后导入`)
       } catch (error) { throw new Error(/abort|cancel/i.test(error.message) ? 'AI 识别已取消，本地提取结果保留' : error.message) }
-      finally { extracting = false; extractButton.disabled = false; extractCancel.hidden = true }
+      finally { extracting = false; extractButton.disabled = false; extractCancel.hidden = true; loading.hide() }
     }, false, { id: 'mb-word-extract', hidden: true })
     void call('settings').then(config => { extractButton.hidden = !config.modelConfigured }).catch(() => {})
     const renderPreview = () => {
@@ -329,11 +333,13 @@ export function mountMistakebook({ beforeEnter }) {
       const pending = files.filter(item => item.status === 'pending' || item.status === 'failed')
       if (!pending.length) throw new Error('请先选择要识别的照片或 PDF')
       running = true; recognizeButton.disabled = true; cancelButton.hidden = false
+      loading.show()
       let cancelled = false
       try {
         for (const item of pending) {
           if (cancelled) break
           item.status = 'running'; renderQueue()
+          loading.setLabel(`正在识别 ${pending.indexOf(item)+1}/${pending.length} 页`)
           try { const result = await call('ocr', item.file); item.text = result.text; item.status = 'done'; item.error = '' }
           catch (error) { if (/abort|cancel/i.test(error.message)) { item.status = 'pending'; cancelled = true } else { item.status = 'failed'; item.error = error.message } }
           progress.textContent = cancelled ? '识别已取消，可继续识别剩余页面' : `正在识别 ${files.filter(entry => entry.status === 'done').length}/${files.length} 张…`
@@ -344,11 +350,11 @@ export function mountMistakebook({ beforeEnter }) {
           const failed = files.filter(item => item.status === 'failed').length
           notify(failed ? `识别完成，${failed} 个文件失败，已从成功页面提取词条` : `识别完成，共提取 ${rows.length} 个词条，请核对`)
         }
-      } finally { running = false; recognizeButton.disabled = false; cancelButton.hidden = true }
+      } finally { running = false; recognizeButton.disabled = false; cancelButton.hidden = true; loading.hide() }
     }, true, { id: 'mb-word-ocr-start' })
     const picker = h('input', { type: 'file', accept: 'image/png,image/jpeg,application/pdf', multiple: true, hidden: true, id: 'mb-word-file', onChange: event => { const picked = Array.from(event.target.files); event.target.value = ''; void guard(() => addFiles(picked)) } })
     const choose = button('选择照片 / PDF', () => picker.click(), false, { class: 'btn ghost' })
-    const pane = h('div', { class: 'mb-capture', id: 'mb-word-photo-pane' }, picker, h('div', { class: 'row' }, choose, h('span', { class: 'spacer' }), recognizeButton, cancelButton), queue, progress, summary, preview, h('div', { class: 'row mb-capture-actions' }, extractButton, extractCancel, h('span', { class: 'spacer' }), importButton))
+    const pane = h('div', { class: 'mb-capture', id: 'mb-word-photo-pane' }, picker, h('div', { class: 'row' }, choose, h('span', { class: 'spacer' }), recognizeButton, cancelButton), loading.element, queue, progress, summary, preview, h('div', { class: 'row mb-capture-actions' }, extractButton, extractCancel, h('span', { class: 'spacer' }), importButton))
     pane.addEventListener('dragover', event => event.preventDefault())
     pane.addEventListener('drop', event => { event.preventDefault(); void guard(() => addFiles(event.dataTransfer.files)) })
     pane.addEventListener('paste', event => { if (event.clipboardData?.files.length) { event.preventDefault(); void guard(() => addFiles(event.clipboardData.files)) } })
@@ -381,6 +387,7 @@ export function mountMistakebook({ beforeEnter }) {
     if (tab === 'manual') text.focus()
   }
   async function openQuiz() {
+    const loading=createAlayaLoader({compact:true,hidden:true,label:'AI 正在生成检测题',detail:'根据积累的词条生成例句填空。'})
     if(!await discard())return
     state.draft=null;state.dirty=false;await load()
     const mode=h('select',{class:'select',id:'mb-quiz-mode'},h('option',{value:'spelling',text:'看中文，写英语 · 本地检测'}),h('option',{value:'cloze',text:'AI 例句填空 · 需要模型'})),count=h('input',{class:'input',type:'number',min:1,max:20,value:10,id:'mb-quiz-count'}),body=h('div',{class:'mb-quiz-body'})
@@ -388,14 +395,15 @@ export function mountMistakebook({ beforeEnter }) {
     const cancel=h('button',{type:'button',class:'btn ghost',text:'取消生成',id:'mb-quiz-cancel',hidden:true,onClick:()=>void call('cancelAI')})
     body.append(h('div',{class:'mb-quiz-intro'},h('p',{class:'cap',text:'从已积累、未归档且有释义的词条中随机抽取。拼写检测不需要联网；AI 例句可以检验词义与语境。'}),h('div',{class:'mb-fields-row'},field('检测方式',mode),field('词条数量',count)),h('div',{class:'row'},button('开始检测',async()=>{
       const startMode=mode.value;cancel.hidden=startMode!=='cloze'
+      if(startMode==='cloze')loading.show()
       let quiz
-      try{quiz=await call('quiz.start',{mode:startMode,count:Number(count.value)})}finally{cancel.hidden=true}
+      try{quiz=await call('quiz.start',{mode:startMode,count:Number(count.value)})}finally{cancel.hidden=true;loading.hide()}
       const answers=new Map(),questions=quiz.questions.map((question,index)=>h('label',{class:'mb-quiz-question'},h('strong',{text:`${index+1}. ${question.prompt}`}),h('span',{class:'cap',text:question.hint}),h('input',{class:'input',autocomplete:'off',spellcheck:'false','data-quiz-id':question.id,onInput:event=>answers.set(question.id,event.target.value)})))
       body.replaceChildren(h('p',{class:'cap',text:`共 ${quiz.questions.length} 个词条，请填写原词形。提交后显示答案，并记录复习。`}),...questions,button('提交检测',async()=>{
         const result=await call('quiz.submit',{id:quiz.id,answers:[...answers].map(([id,answer])=>({id,answer}))});await load()
         body.replaceChildren(h('div',{class:'mb-quiz-score',id:'mb-quiz-score'},h('strong',{text:`${result.score}%`}),h('span',{text:`答对 ${result.results.filter(row=>row.correct).length} / ${result.results.length}`})),h('div',{class:'mb-quiz-results'},result.results.map(row=>h('div',{class:`mb-quiz-result${row.correct?' correct':' incorrect'}`},h('strong',{text:row.expected}),h('span',{text:row.correct?'正确':`你的答案：${row.answer||'未填写'}`}),h('span',{class:'cap',text:row.recorded?'已记入复习记录':'词条已修改，本次只显示成绩'})))),button('再检测一组',async()=>{node.close();await openQuiz()},true,{id:'mb-quiz-again'}))
       },true,{id:'mb-quiz-submit'}));node.querySelector('input')?.focus()
-    },true,{id:'mb-quiz-start'}),cancel)))
+    },true,{id:'mb-quiz-start'}),cancel)),loading.element)
     node.addEventListener('cancel',()=>void call('cancelAI'))
   }
   function imagePanel(draft) {
@@ -436,12 +444,13 @@ export function mountMistakebook({ beforeEnter }) {
       button('保存设置', async () => {
         const reply = await window.vault.settings({ baseUrl: modelURL.value, model: model.value, apiKey: modelKey.value, clearKey: clearModel.checked }); if (!reply.ok) throw new Error(reply.error)
         await call('configure', { endpoint: endpoint.value, apiKey: key.value, clearKey: clear.checked }); key.value = ''; modelKey.value = ''; node.close(); notify('设置已安全保存')
-      }, true, { id: 'mb-config-save' }), h('h3', { text: '本地数据' }), h('p', { class: 'mb-data-path', text: config.path }), button('备份笔记本', async () => { if (await call('backup')) notify('笔记本已备份，包含原图') }), h('p', { class: 'cap', text: '笔记本使用独立数据库，不进入 Codex / DSH 的记忆上下文。' })))
+      }, true, { id: 'mb-config-save' }), h('h3', { text: '外观' }),button('预览 Alaya 加载动画',showLoadingPreview,false,{id:'mb-loading-preview'}), h('h3', { text: '本地数据' }), h('p', { class: 'mb-data-path', text: config.path }), button('备份笔记本', async () => { if (await call('backup')) notify('笔记本已备份，包含原图') }), h('p', { class: 'cap', text: '笔记本使用独立数据库，不进入 Codex / DSH 的记忆上下文。' })))
   }
   async function openImport() {
     if (!await discard()) return
     const draft = { file: null, questions: [], running: false, modified: false }
     const notes = { files: [], running: false, imported: false, type: 'note' }
+    const loading=createAlayaLoader({compact:true,hidden:true,label:'正在识别文字',detail:'完成后可校对文字，原图会保留。'})
     const text = h('textarea', { class: 'area mb-ocr-text', id: 'mb-import-text', placeholder: '粘贴题目或笔记文字，或选择图片 / PDF 后识别。\n\n1. 第一题\n2. 第二题', onInput: () => { draft.modified = true; draft.questions = []; results.replaceChildren() } })
     const results = h('div', { class: 'mb-segment-results', id: 'mb-segments' }), preview = h('div', { class: 'mb-source-preview', id: 'mb-ocr-preview' }, icon('book'), h('p', { text: '保留原题，校对文字' }))
     const filename = h('p', { class: 'cap', text: 'PNG / JPEG ≤ 10 MB，PDF ≤ 50 MB' }), keep = h('input', { type: 'checkbox', checked: true, id: 'mb-keep-source' })
@@ -458,12 +467,13 @@ export function mountMistakebook({ beforeEnter }) {
       if (!draft.file) throw new Error('请先选择图片或 PDF')
       if (text.value.trim() && !await confirm('识别结果将替换当前文字，继续？')) return
       draft.running = true; text.disabled = true; recognizeButton.disabled = true; cancel.hidden = false; notify('正在识别文字…')
+      loading.show()
       try {
         const result = await call('ocr', draft.file)
         if (!node.isConnected) return
         text.value = result.text; draft.modified = true; draft.questions = []; results.replaceChildren(); notify('识别完成，请校对题干与公式再拆题')
       } catch (error) { if (node.isConnected) throw new Error(/abort|cancel/i.test(error.message) ? '识别已取消，可以重试' : error.message) }
-      finally { draft.running = false; text.disabled = false; recognizeButton.disabled = false; cancel.hidden = true }
+      finally { draft.running = false; text.disabled = false; recognizeButton.disabled = false; cancel.hidden = true; loading.hide() }
     }, true, { id: 'mb-ocr-start' })
     const split = button('预览拆题', async () => {
       const reply = await call('segment', { text: text.value }); draft.questions = reply.questions.map(stem => ({ stem, selected: true })); results.replaceChildren()
@@ -511,11 +521,13 @@ export function mountMistakebook({ beforeEnter }) {
       const pending = notes.files.filter(item => item.status === 'pending' || item.status === 'failed')
       if (!pending.length) throw new Error('请先选择要识别的照片或 PDF')
       notes.running = true; noteRecognize.disabled = true; noteCancel.hidden = false
+      loading.show()
       let cancelled = false
       try {
         for (const item of pending) {
           if (cancelled) break
           item.status = 'running'; renderNoteQueue()
+          loading.setLabel(`正在识别 ${pending.indexOf(item)+1}/${pending.length} 页`)
           try { const result = await call('ocr', item.file); item.text = result.text; item.title ??= firstMeaningfulLine(result.text); item.status = 'done'; item.error = '' }
           catch (error) { if (/abort|cancel/i.test(error.message)) { item.status = 'pending'; cancelled = true } else { item.status = 'failed'; item.error = error.message } }
           noteProgress.textContent = cancelled ? '识别已取消，可继续识别剩余页面' : `正在识别 ${notes.files.filter(entry => entry.status === 'done').length}/${notes.files.length} 张…`
@@ -526,7 +538,7 @@ export function mountMistakebook({ beforeEnter }) {
           const failed = notes.files.filter(item => item.status === 'failed').length
           notify(failed ? `识别完成，${failed} 个文件失败，其余页面已生成笔记草稿` : `识别完成，共 ${notes.files.filter(item => item.status === 'done').length} 篇草稿，请核对后导入`)
         }
-      } finally { notes.running = false; noteRecognize.disabled = false; noteCancel.hidden = true }
+      } finally { notes.running = false; noteRecognize.disabled = false; noteCancel.hidden = true; loading.hide() }
     }, true, { id: 'mb-note-ocr-start' })
     const notePicker = h('input', { type: 'file', accept: 'image/png,image/jpeg,application/pdf', multiple: true, hidden: true, id: 'mb-note-file', onChange: event => { const picked = Array.from(event.target.files); event.target.value = ''; void guard(() => addNoteFiles(picked)) } })
     const addNoteFiles = async picked => {
@@ -549,7 +561,7 @@ export function mountMistakebook({ beforeEnter }) {
       noteSource.hidden = noteContent.hidden = mistake
       if (!mistake) noteProgress.textContent = `每一张图片识别为一篇${NOTE_TYPES[notes.type].label}并保留原图；PDF 只导入识别文字。`
     } }, h('option', { value: 'mistake', text: '错题 · 拆题导入' }), h('option', { value: 'note', text: '普通笔记 · 每张一篇' }), h('option', { value: 'physics', text: '物理模型 · 每张一篇' }), h('option', { value: 'method', text: '解题方法 · 每张一篇' }), h('option', { value: 'vocabulary', text: '英语词汇 · 批量识别词条' }))
-    const node = dialog('识别录入', h('div', { class: 'mb-import-layout' }, h('div', { class: 'mb-import-source' }, field('导入为', typeSelect), mistakeSource, noteSource), h('div', { class: 'mb-import-content' }, mistakeContent, noteContent)), true)
+    const node = dialog('识别录入', h('div', { class: 'mb-import-layout' }, h('div', { class: 'mb-import-source' }, field('导入为', typeSelect), loading.element, mistakeSource, noteSource), h('div', { class: 'mb-import-content' }, mistakeContent, noteContent)), true)
     const closeButton = node.querySelector('[aria-label="关闭对话框"]')
     const close = async () => {
       if (draft.running || notes.running) await call('cancelOCR')

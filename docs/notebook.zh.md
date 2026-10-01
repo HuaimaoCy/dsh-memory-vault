@@ -1,4 +1,4 @@
-# Memory Vault 笔记本 0.6.6
+# Alaya 0.6.7
 
 这是 `feat/notebook-mode` 分支上的独立外挂，保留 Memory Vault 的 Codex MCP、DSH、CLI 和本地 RPC。正式版 `main` 不包含笔记本。桌面程序点击右上角菱形记忆库图标，双向切换记忆库与笔记本。
 
@@ -65,7 +65,7 @@
 
 ## 从错题本 0.6.3 升级
 
-使用 `Memory-Vault-Notebook-0.6.6-Setup.exe`。可见名称和快捷方式变成「Memory Vault 笔记本」，沿用原独立安装身份、安装目录与 `%APPDATA%\Memory Vault Mistakebook`，其中 `mistakebook.sqlite` 保存笔记、图片与复习历史，`settings.json` 保存加密设置。0.6.4 及以上的数据库直接打开，无需再次迁移。
+使用 `Alaya-0.6.7-Setup.exe`。可见名称和快捷方式变成「Alaya」，沿用原独立安装身份、安装目录与 `%APPDATA%\Memory Vault Mistakebook`，其中 `mistakebook.sqlite` 保存笔记、图片与复习历史，`settings.json` 保存加密设置。0.6.4 及以上的数据库直接打开，无需再次迁移。
 
 首次打开旧版数据库时会在旁边生成 `.v1-时间戳-随机标识.bak` 快照，再迁移到 schema 2；旧记录归为错题，保留 ID、图片、时间与复习历史。JSON 导入继续兼容旧错题本；新导出含全部类型和图片。也可在设置中备份 SQLite 文件。
 
@@ -78,3 +78,13 @@
 Electron 的 `--selftest --db <临时数据库> --user-data <临时目录> --test-module tests/desktop-notebook.mjs` 验证窗口（含拍照识别单词、重复标记、AI 整理与通用识别录入笔记），`--test-simulation` 追加官方在线仿真测试。网络测试通过真实鼠标拖动检查重力参数变化。`npm run build:desktop` 生成独立安装包。
 
 AI 与 OCR 的请求格式、取消和失败处理以本地模拟服务测试。用户服务商的解答质量、价格及识别质量需由其实际配置决定。
+
+## Alaya 名称与加载动画（0.6.7）
+
+软件对外名称为 Alaya。保留原安装身份、数据目录和程序文件名，已连接的 Codex/DSH 路径可以沿用；桌面快捷方式变为 Alaya。
+
+加载动画为原创的黑白几何序列：小菱形旋转、双层线框展开、浅色背景过渡、ALAYA 字标与横线成形。约 2.4 秒完成起始序列，然后保持轻微的等待线条。任务结束或取消后立即退出，不延迟结果、不显示虚假的完成百分比。
+
+已接入 AI 学习解答、AI 词条提取、AI 例句检测、错题/笔记/词条 OCR 和记忆整理。快速打开记忆库不播放动画；打开较慢时才显示。两个模式的设置中都可以预览、重播或开启减少动态效果，系统的减少动态偏好也会自动生效。
+
+样式参考用户提供的 PRTS 开机视频，动画由本项目的 CSS 与文字重新实现，未复用视频、标志、音频或远程资源。
