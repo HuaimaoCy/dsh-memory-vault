@@ -1,0 +1,26 @@
+{
+  "name": "dsh-memory-vault-desktop",
+  "version": "0.5.0",
+  "private": true,
+  "description": "Desktop window for the DSH memory vault, built on the same host-free core as the plugin, the CLI and the RPC service.",
+  "type": "module",
+  "main": "main.mjs",
+  "scripts": {
+    "start": "electron .",
+    "selftest": "electron . --selftest"
+  },
+  "devDependencies": {
+    "electron": "^44.5.0"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": ["electron"]
+  },
+  "build": {
+    "appId": "dev.huaimaocy.dsh-memory-vault",
+    "productName": "Memory Vault",
+    "files": ["main.mjs", "preload.cjs", "renderer/**", "lib/**"],
+    "extraResources": [{ "from": "../src", "to": "src" }],
+    "win": { "target": ["nsis"] },
+    "nsis": { "oneClick": false, "allowToChangeInstallationDirectory": true }
+  }
+}

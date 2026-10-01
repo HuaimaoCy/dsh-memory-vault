@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <!-- No network at all: the window talks to the main process, never the web. -->
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'none'; form-action 'none'; base-uri 'none'" />
+  <title>记忆库</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header class="bar">
+    <div class="brand">记忆库</div>
+    <input id="query" class="search" type="search" placeholder="搜索记忆（空格分隔多个关键词）" autocomplete="off" />
+    <span class="spacer"></span>
+    <span id="scope-hint" class="cap"></span>
+    <select id="curate-scope" class="select" title="整理范围（按来源）">
+      <option value="generated">仅 AI 生成</option>
+      <option value="manual">仅人工输入</option>
+      <option value="all">全部</option>
+    </select>
+    <button id="curate" class="btn">AI 整理</button>
+    <button id="curate-review" class="btn ghost">预览</button>
+    <button id="new" class="btn primary">新建记忆</button>
+  </header>
+
+  <div class="body">
+    <aside class="side">
+      <div class="side-head">视图</div>
+      <div id="views" class="views"></div>
+      <div class="side-head">记忆组</div>
+      <div id="tree" class="tree"></div>
+    </aside>
+
+    <main class="main">
+      <div id="status" class="status"></div>
+      <div id="cure-card" class="card hidden"></div>
+      <div id="list" class="list"></div>
+    </main>
+
+    <section id="drawer" class="drawer hidden"></section>
+  </div>
+
+  <footer class="foot"><span id="foot-left"></span><span class="spacer"></span><span id="foot-right"></span></footer>
+  <script type="module" src="app.js"></script>
+</body>
+</html>
