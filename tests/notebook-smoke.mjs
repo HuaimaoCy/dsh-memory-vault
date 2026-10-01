@@ -5,7 +5,8 @@ import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import { createServer } from 'node:http'
 import { MistakebookStore, taxonomy, evaluate } from '../addons/mistakebook/store.mjs'
-import { solve, createCloze } from '../addons/mistakebook/services.mjs'
+import { solve, createCloze, refineWords } from '../addons/mistakebook/services.mjs'
+import { extractWords } from '../addons/mistakebook/words.mjs'
 import { SIMULATIONS, simulationURL } from '../addons/mistakebook/simulations.mjs'
 import { createModelAdapter } from '../src/model.js'
 
@@ -68,6 +69,21 @@ try {
   const exercises=await createCloze(rows,adapter);assert.equal(store.startQuiz(rows,exercises).mode,'cloze')
   response.choices[0].message.content=JSON.stringify({exercises:[{id:word.id,prompt:'Conserve energy: ___.',hint:''}]})
   await assert.rejects(()=>createCloze(rows,adapter),/暴露/)
+  const page=extractWords('# Unit 3 手写积累\nabandon /əˈbændən/ v. 放弃\n**conserve** — 保存；守恒\ngive up | 放弃 | Never give up hope.\n这一行没有英文\n1. assumption 假设\nmomentum 动量\nabandon 重复行\na')
+  assert.deepEqual(page.map(row=>row.word),['abandon','conserve','give up','assumption','momentum'])
+  assert.equal(page[0].phonetic,'/əˈbændən/');assert.equal(page[0].meaning,'v. 放弃')
+  assert.equal(page[2].meaning,'放弃');assert.equal(page[2].examples,'Never give up hope.')
+  assert.equal(page[3].meaning,'假设')
+  assert.equal(extractWords('这页只有中文\n没有词条').length,0)
+  try{extractWords(Array.from({length:1001},(_,index)=>`w${index.toString(2).replaceAll('0','b').replaceAll('1','c')} 释义`).join('\n'));throw new Error('should cap')}catch(error){assert.match(error.message,/1000/)}
+  const draftWords=extractWords('resilient\nassumption 假设')
+  response.choices[0].message.content=JSON.stringify({entries:draftWords.map(row=>({word:row.word,phonetic:'',meaning:row.meaning?`已校对：${row.meaning}`:'AI 补全释义',examples:''}))})
+  const refined=await refineWords(draftWords,adapter)
+  assert.equal(refined[0].meaning,'AI 补全释义');assert.equal(refined[1].meaning,'已校对：假设')
+  response.choices[0].message.content=JSON.stringify({entries:[...draftWords].reverse().map(row=>({word:row.word,phonetic:'',meaning:'x',examples:''}))})
+  await assert.rejects(()=>refineWords(draftWords,adapter),/原词|顺序/)
+  await assert.rejects(()=>refineWords(draftWords,{resolveRoute:()=>undefined}),/配置/)
+  await assert.rejects(()=>refineWords(Array.from({length:501},()=>({word:'x'})),adapter),/500/)
   assert.throws(()=>simulationURL('unknown'),/仿真/);assert.equal(SIMULATIONS.length,4);for(const item of SIMULATIONS)assert.match(simulationURL(item.id),/^https:\/\/phet.colorado.edu\/sims\/html\//)
   const legacy=store.read(mistake.id);store.close()
   const db=new DatabaseSync(path);const old={...legacy};for(const field of ['type','title','physics','method','vocabulary','simulationId','aiResult','contentHash','aiStale','images','value'])delete old[field]
@@ -75,5 +91,5 @@ try {
   store=new MistakebookStore(path);assert.ok(existsSync(store.migrationBackup));const migrated=store.read(old.id)
   assert.equal(migrated.type,'mistake');assert.equal(migrated.updatedAt,old.updatedAt);assert.equal(migrated.createdAt,old.createdAt);assert.equal(migrated.revision,old.revision);assert.equal(migrated.images[0].data,image.data)
   const before=store.records().length, restored=new MistakebookStore(join(folder,'restored.sqlite'));try{restored.import(store.export());assert.equal(restored.records().length,before)}finally{restored.close()}
-  console.log('Notebook: five types, structure/search, v1 backup/migration, vision API, AI validation/cancel/provenance, manual preservation, word dedup, private quizzes/scoring/review/stale/deleted entries, cloze and simulation allowlist passed')
+  console.log('Notebook: five types, structure/search, v1 backup/migration, vision API, AI validation/cancel/provenance, manual preservation, word capture from OCR pages with dedupe/limits, AI word refinement, word dedup, private quizzes/scoring/review/stale/deleted entries, cloze and simulation allowlist passed')
 } finally {store.close();server.close();server.closeAllConnections();rmSync(folder,{recursive:true,force:true})}

@@ -9,7 +9,7 @@ import { createModelAdapter, validateModelSettings } from '../src/model.js'
 import { validateVaultFile } from './lib/databases.mjs'
 import { createDesktopUpdater } from './lib/updates.mjs'
 import { MistakebookStore, segmentQuestions } from '../addons/mistakebook/store.mjs'
-import { recognize, analyze, solve, createCloze, validateOCRSettings } from '../addons/mistakebook/services.mjs'
+import { recognize, analyze, solve, createCloze, refineWords, validateOCRSettings } from '../addons/mistakebook/services.mjs'
 import { SIMULATIONS, simulationURL } from '../addons/mistakebook/simulations.mjs'
 
 const here = dirname(fileURLToPath(import.meta.url))
@@ -80,6 +80,12 @@ function registerDesktop() {
         finally { if (aiRequest === request) aiRequest = undefined }
       }
       case 'quiz.submit': return mistakebook.submitQuiz(body.id, body.answers)
+      case 'words.refine': {
+        if (aiRequest) throw new Error('已有 AI 任务正在进行')
+        const request = new AbortController(); aiRequest = request
+        try { return await refineWords(body?.entries, adapter(), request.signal) }
+        finally { if (aiRequest === request) aiRequest = undefined }
+      }
       case 'simulation.info': return SIMULATIONS
       case 'simulation.open': {
         const url = simulationURL(body.id)
