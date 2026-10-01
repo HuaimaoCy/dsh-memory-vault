@@ -24,7 +24,8 @@
  */
 
 import { homedir } from 'node:os'
-import { join } from 'node:path'
+import { createUpdateChecker } from '../updates.js'
+import { join, resolve } from 'node:path'
 import { ENTRY_KINDS, MemoryStore } from '../store.js'
 import { resolveVaultConfig } from '../config.js'
 import { validateEntryWrite } from '../policy.js'
@@ -84,8 +85,10 @@ export function createMemoryVault(options = {}) {
     throw new Error(`memory-vault config invalid at ${first.path.length === 0 ? '(root)' : first.path.join('.')}: ${first.message}`)
   }
   const config = resolvedConfig.value
-  const databasePath = options.databasePath
+  const updates = options.updates ?? createUpdateChecker()
+  const requestedPath = options.databasePath
     ?? (config.databasePath !== null ? config.databasePath : defaultDatabasePath())
+  const databasePath = requestedPath === ':memory:' ? requestedPath : resolve(requestedPath)
   const logger = options.logger ?? {}
   const log = { warn: logger.warn ?? (() => {}), info: logger.info ?? (() => {}) }
 
@@ -239,7 +242,7 @@ export function createMemoryVault(options = {}) {
     const sessionId = request.session.id
     // The tag follows how the text was produced, not which button started the
     // run: a model-written record is never labelled as hand-written.
-    const source = request.mode === 'auto' ? 'auto-summary' : 'manual'
+    const source = request.source === 'model-write' ? 'model-write' : request.mode === 'auto' ? 'auto-summary' : 'manual'
 
     if (request.content !== undefined && String(request.content).trim() !== '') {
       const fields = validateEntryWrite(
@@ -528,6 +531,7 @@ export function createMemoryVault(options = {}) {
     databasePath,
     /** Groups the vault was seeded with, for whoever logs readiness. */
     seeded,
+    updates,
 
     /** Record a change and wake listeners that derive state from the vault. */
     notify,
@@ -583,6 +587,7 @@ export function createMemoryVault(options = {}) {
 
     /** Abort in-flight summarizations and close the store. */
     dispose() {
+      if (!options.updates) updates.dispose()
       for (const controller of locks.values()) controller.abort(new Error('memory vault unloaded'))
       locks.clear()
       listeners.length = 0

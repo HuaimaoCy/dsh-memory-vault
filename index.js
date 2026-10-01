@@ -108,7 +108,16 @@ export function apply(ctx, config) {
 
   // Tools are the vault's primary surface: everything a person can do from the
   // Web panel, the model can do from a turn.
-  for (const definition of buildTools({ store, config: vault.config, summarize: vault.summarize, curate: vault.curate, notify })) {
+  for (const definition of buildTools({ store, config: vault.config, summarize: vault.summarize, curate: vault.curate, notify, updates: vault.updates,
+    saveImageAttachment: async (image, signal) => {
+      signal?.throwIfAborted()
+      const attachments = ctx.get('attachments')
+      if (!attachments?.saveImage) throw new Error('DSH 图片附件服务不可用，请升级宿主或通过记忆库界面查看')
+      const ref = await attachments.saveImage({ data: Buffer.from(image.data, 'base64'), mediaType: image.mimeType, name: image.name })
+      signal?.throwIfAborted()
+      return ref
+    },
+  })) {
     ctx.tools.register(definition)
   }
 
@@ -118,7 +127,7 @@ export function apply(ctx, config) {
   }, 'memory-vault: prompt index')
 
   ctx.effect(() => {
-    const dispose = registerVaultRoutes(ctx, { store, config: vault.config, notify, curate: vault.curate })
+    const dispose = registerVaultRoutes(ctx, { store, config: vault.config, notify, curate: vault.curate, updates: vault.updates })
     return () => { dispose?.() }
   }, 'memory-vault: panel routes')
 

@@ -29,6 +29,12 @@ import {
  * so every transport can enforce the same rule.
  */
 export const VAULT_OPS = {
+  'image.list': { write: false },
+  'image.read': { write: false },
+  'image.add': { write: true },
+  'image.delete': { write: true },
+  'updates.status': { write: false },
+  'updates.check': { write: false },
   state: { write: false },
   entries: { write: false },
   'apply.get': { write: false },
@@ -95,9 +101,23 @@ export function stateOf(store, config) {
  * @returns {Promise<Record<string, unknown>>} Operation result.
  * @throws {Error} When the op is unknown or its parameters break a rule.
  */
-export async function operateVault({ store, config, notify, curate }, body) {
+export async function operateVault({ store, config, notify, curate, updates }, body) {
   const op = body.op
   switch (op) {
+    case 'image.list': return { images: store.listImages(String(body.entryId ?? '')) }
+    case 'image.read': return { image: store.readImage(String(body.id ?? '')) }
+    case 'image.add': {
+      const images = store.addImage(String(body.entryId ?? ''), body)
+      notify(); return { images }
+    }
+    case 'image.delete': {
+      const image = store.deleteImage(String(body.id ?? ''))
+      notify(); return { image }
+    }
+    case 'updates.status':
+    case 'updates.check':
+      if (!updates) throw new Error('此宿主未接入更新服务')
+      return body.op === 'updates.check' ? updates.check() : updates.status()
     case 'state':
       return stateOf(store, config)
     case 'entries': {
@@ -109,11 +129,16 @@ export async function operateVault({ store, config, notify, curate }, body) {
       const includeHidden = body.includeHidden === true || body.includeHidden === 'true'
       const limit = intParam(body.limit, { min: 1, max: 500, fallback: 100 }, 'limit')
       const offset = intParam(body.offset, { min: 0, max: 1000000, fallback: 0 }, 'offset')
+      const filter = {
+        ...(group === undefined ? {} : body.includeChildren === true ? { groupIds: [group.id, ...store.descendantIds(group.id)] } : { groupId: group.id }),
+        scope, tags, includeHidden, limit: limit + 1, offset,
+        ...(body.onlyHidden === true ? { hidden: true } : {}),
+      }
       // One row past the page proves another page exists without a second
       // counting query over the whole table.
       const rows = query === ''
-        ? store.listEntries({ groupId: group?.id, scope, tags, includeHidden, limit: limit + 1, offset })
-        : store.searchEntries({ query, scope, groupId: group?.id, tags, includeHidden, limit: limit + 1, offset })
+        ? store.listEntries(filter)
+        : store.searchEntries({ ...filter, query })
       const hasMore = rows.length > limit
       return {
         entries: hasMore ? rows.slice(0, limit) : rows,
@@ -218,10 +243,11 @@ export async function operateVault({ store, config, notify, curate }, body) {
     }
     case 'entry.write': {
       const groupId = String(body.groupId ?? body.group ?? '')
-      const fields = validateEntryWrite(body, ENTRY_KINDS, config)
+      const fields = validateEntryWrite(body, ENTRY_KINDS, config, { allowEmpty: Array.isArray(body.images) && body.images.length > 0 })
       const entry = store.createEntry({
         groupId,
         ...fields,
+        images: body.images ?? [],
         // Provenance follows the surface the write came through; a caller may
         // only pick from the declared labels, never free-text one.
         source: typeof body.source === 'string' && WRITE_SOURCES.includes(body.source) ? body.source : 'panel',
@@ -245,8 +271,17 @@ export async function operateVault({ store, config, notify, curate }, body) {
         // leaving it out defaulted every save to `false`, which silently
         // cleared the flag on any edit and made the panel's toggle a no-op.
         base: body.base === undefined ? current.base : body.base,
-      }, ENTRY_KINDS, config)
-      const entry = store.updateEntry(current.id, fields)
+      }, ENTRY_KINDS, config, { allowEmpty: body.images === undefined ? current.imageCount > 0 : Array.isArray(body.images) && body.images.length > 0 })
+      if (body.scope !== undefined && !SCOPES.includes(body.scope)) throw new Error('scope 必须为 conversation 或 knowledge')
+      const target = body.groupId === undefined ? undefined : store.requireGroup(String(body.groupId))
+      const entry = store.transaction(() => {
+        store.updateEntry(current.id, { ...fields, allowEmpty: Array.isArray(body.images) && body.images.length > 0 })
+        if (body.images !== undefined) store.replaceImages(current.id, body.images)
+        if (target !== undefined || body.scope !== undefined) store.assignEntries({
+          ids: [current.id], scope: body.scope ?? null, groupId: target?.id ?? null, assignedBy: 'manual',
+        })
+        return store.requireEntry(current.id)
+      })
       notify()
       return { entry }
     }

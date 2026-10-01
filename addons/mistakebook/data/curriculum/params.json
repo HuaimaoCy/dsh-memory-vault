@@ -1,0 +1,29 @@
+{
+  "version": "params-1.0.0",
+  "staticWeights": {
+    "hourShare": 0.18,
+    "cognitive": 0.18,
+    "examWeight": 0.27,
+    "scope": 0.17,
+    "centrality": 0.10,
+    "competency": 0.10,
+    "_note": "某特征缺数据时自动关闭并按剩余权重归一（importance.py 已实现）"
+  },
+  "scopeTable": {
+    "gaokao": { "必修": 1.0, "选择性必修": 0.9, "必修+选择性必修": 0.95, "选修": 0.15, "跨主题": 0.8, "跨课程类型": 0.8 },
+    "huige": { "必修": 1.0, "选择性必修": 0.05, "必修+选择性必修": 0.6, "选修": 0.05, "跨主题": 0.6, "跨课程类型": 0.6 }
+  },
+  "repeat": { "alpha": 0.25, "cap": 1.75, "formula": "min(1+alpha*log2(1+n), cap)" },
+  "targetFit": {
+    "normal": 1.0,
+    "stretch": 0.6,
+    "beyond": 0.1,
+    "F_base": 0.5,
+    "_note": "fit: 认知层级≤高考水平=1；=高考水平+1=0.6；更高或超考试范围=0.1。F_target=F_base+0.5*fit"
+  },
+  "propagation": { "lambda": 0.15, "cap": 1.4 },
+  "priority": { "gamma": 1.2 },
+  "mastery": { "ewmaAlpha": 0.3, "reviewPassBonus": 0.3 },
+  "dueFactor": { "firstPending": 1.0, "overdueShort": 1.1, "overdueLong": 1.2, "notDue": 0.6, "unplanned": 0.85 },
+  "levels": { "high": 70, "medium": 40 }
+}

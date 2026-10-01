@@ -17,3 +17,4 @@ memory-vault/
 desktop/node_modules/
 desktop/selftest.png
 desktop/dist/
+desktop/.runtime/

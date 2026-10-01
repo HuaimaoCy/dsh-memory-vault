@@ -25,7 +25,7 @@ export const ROUTE_PREFIX = '/memory-vault'
 export const CLIENT_HEADER = 'x-dsh-memory-vault'
 
 /** Largest request body accepted, in bytes. */
-const MAX_BODY_BYTES = 1024 * 1024
+const MAX_BODY_BYTES = 32 * 1024 * 1024
 
 /**
  * Write one JSON response.

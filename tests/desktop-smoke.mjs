@@ -1,9 +1,8 @@
 /**
  * Desktop-app smoke test: the bridge and the board's arrangement rules.
  *
- * Electron cannot open a window from a non-interactive shell on this machine,
- * so the window itself is verified by a person. Everything underneath it is
- * verified here, against a real database and the real operation table: the
+ * This suite verifies the bridge against a real database and operation table.
+ * The real Electron window is covered separately by desktop-ui.mjs. The
  * bridge is the same code the main process runs, and the grouping rules are the
  * same module the renderer imports.
  *

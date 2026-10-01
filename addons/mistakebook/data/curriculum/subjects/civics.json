@@ -1,0 +1,62 @@
+{
+  "subjectID": "civics",
+  "name": "思想政治",
+  "attributesVersion": "civics-attrs-1.0.0",
+  "standard": {
+    "credits": { "required": 6, "selective": 6, "elective": 4 },
+    "classHours": { "required": 108, "selective": 108 },
+    "competencies": ["政治认同", "科学精神", "法治意识", "公共参与"],
+    "qualityLevels": 4,
+    "qualityLevelPass": 2,
+    "qualityLevelGaokao": 3,
+    "notes": [
+      "必修模块学分不均：中国特色社会主义1 / 经济与社会1 / 政治与法治2 / 哲学与文化2",
+      "选必：当代国际政治与经济 / 法律与生活 / 逻辑与思维（各2学分）",
+      "水平三=等级性考试(高考)命题依据；水平四纳入综合素质档案"
+    ]
+  },
+  "attributes": {
+    "civics/socialism": {
+      "courseType": "必修", "theme": "中国特色社会主义(1学分)", "hours": null, "hoursBasis": null,
+      "cognitiveLevel": 1, "competencies": ["政治认同"], "qualityMax": 3, "examScope": "高考",
+      "examWeightPrior": 0.08, "prerequisites": [],
+      "citation": "课标 四·(一)必修 必修1"
+    },
+    "civics/economics": {
+      "courseType": "必修", "theme": "经济与社会(1学分)", "hours": null, "hoursBasis": null,
+      "cognitiveLevel": 2, "competencies": ["政治认同", "科学精神"], "qualityMax": 3, "examScope": "高考",
+      "examWeightPrior": 0.18, "prerequisites": ["civics/socialism"],
+      "citation": "课标 四·(一)必修 必修2"
+    },
+    "civics/politics-law": {
+      "courseType": "必修", "theme": "政治与法治(2学分)", "hours": null, "hoursBasis": null,
+      "cognitiveLevel": 2, "competencies": ["政治认同", "法治意识", "公共参与"], "qualityMax": 3, "examScope": "高考",
+      "examWeightPrior": 0.26, "prerequisites": ["civics/socialism"],
+      "citation": "课标 四·(一)必修 必修3"
+    },
+    "civics/philosophy": {
+      "courseType": "必修", "theme": "哲学与文化(2学分)", "hours": null, "hoursBasis": null,
+      "cognitiveLevel": 3, "competencies": ["科学精神"], "qualityMax": 3, "examScope": "高考",
+      "examWeightPrior": 0.22, "prerequisites": [],
+      "citation": "课标 四·(一)必修 必修4"
+    },
+    "civics/international": {
+      "courseType": "选择性必修", "theme": "当代国际政治与经济(2学分)", "hours": null, "hoursBasis": null,
+      "cognitiveLevel": 2, "competencies": ["政治认同", "科学精神"], "qualityMax": 3, "examScope": "高考",
+      "examWeightPrior": 0.10, "prerequisites": ["civics/politics-law"],
+      "citation": "课标 四·(二)选择性必修 选必1"
+    },
+    "civics/law-life": {
+      "courseType": "选择性必修", "theme": "法律与生活(2学分)", "hours": null, "hoursBasis": null,
+      "cognitiveLevel": 2, "competencies": ["法治意识"], "qualityMax": 3, "examScope": "高考",
+      "examWeightPrior": 0.08, "prerequisites": ["civics/politics-law"],
+      "citation": "课标 四·(二)选择性必修 选必2"
+    },
+    "civics/logic": {
+      "courseType": "选择性必修", "theme": "逻辑与思维(2学分)", "hours": null, "hoursBasis": null,
+      "cognitiveLevel": 3, "competencies": ["科学精神"], "qualityMax": 3, "examScope": "高考",
+      "examWeightPrior": 0.08, "prerequisites": [],
+      "citation": "课标 四·(二)选择性必修 选必3"
+    }
+  }
+}

@@ -221,10 +221,10 @@ const panelRoute = routes.find(entry => entry.kind === 'prefix')
 const indexSection = () => routes.find(entry => entry.kind === 'prompt-section').section
 
 console.log('registration')
-check('seven tools are registered', () => {
+check('nine tools are registered', () => {
   assert.deepEqual([...harness.tools.keys()].sort(), [
-    'memory_apply', 'memory_assign', 'memory_curate', 'memory_group', 'memory_recall',
-    'memory_summarize', 'memory_write',
+    'memory_apply', 'memory_assign', 'memory_curate', 'memory_group', 'memory_image', 'memory_recall',
+    'memory_summarize', 'memory_updates', 'memory_write',
   ])
 })
 check('a session/event listener is installed', () => {

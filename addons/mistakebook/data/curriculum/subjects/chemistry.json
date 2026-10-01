@@ -1,0 +1,94 @@
+{
+  "subjectID": "chemistry",
+  "name": "化学",
+  "attributesVersion": "chemistry-attrs-1.0.0",
+  "standard": {
+    "credits": { "required": 4, "selective": 6, "elective": 4 },
+    "classHours": { "required": 72, "selective": 108 },
+    "competencies": ["宏观辨识与微观探析", "变化观念与平衡思想", "证据推理与模型认知", "科学探究与创新意识", "科学态度与社会责任"],
+    "qualityLevels": 4,
+    "qualityLevelPass": 2,
+    "qualityLevelGaokao": 4,
+    "notes": [
+      "必修不划分模块共4学分；必修主题：化学科学与实验探究/常见的无机物及其应用/物质结构基础与化学反应规律/简单的有机化合物及其应用/化学与社会发展",
+      "选必1 化学反应原理：化学反应与能量/化学反应的方向限度和速率/水溶液中的离子反应与平衡",
+      "选必2 物质结构与性质：原子结构与元素的性质/微粒间的相互作用与物质的性质/研究物质结构的方法与价值",
+      "选必3 有机化学基础",
+      "高考需修满选必3个模块（课标(三)学分与选课）"
+    ]
+  },
+  "attributes": {
+    "chemistry/experiment": {
+      "courseType": "必修+选择性必修", "theme": "化学科学与实验探究（贯穿）", "hours": null, "hoursBasis": null,
+      "cognitiveLevel": 3, "competencies": ["科学探究与创新意识", "证据推理与模型认知"], "qualityMax": 4, "examScope": "高考",
+      "examWeightPrior": 0.10, "prerequisites": [],
+      "citation": "课标 四·(一)必修 主题1"
+    },
+    "chemistry/quantity": {
+      "courseType": "必修", "theme": "常见的无机物及其应用(计量)", "hours": null, "hoursBasis": null,
+      "cognitiveLevel": 2, "competencies": ["宏观辨识与微观探析"], "qualityMax": 4, "examScope": "高考",
+      "examWeightPrior": 0.06, "prerequisites": [],
+      "citation": "课标 四·(一)必修 主题2"
+    },
+    "chemistry/classification": {
+      "courseType": "必修", "theme": "常见的无机物及其应用(分类与离子反应)", "hours": null, "hoursBasis": null,
+      "cognitiveLevel": 3, "competencies": ["宏观辨识与微观探析", "证据推理与模型认知"], "qualityMax": 4, "examScope": "高考",
+      "examWeightPrior": 0.08, "prerequisites": ["chemistry/quantity"],
+      "citation": "课标 四·(一)必修 主题2"
+    },
+    "chemistry/redox": {
+      "courseType": "必修", "theme": "常见的无机物及其应用(氧化还原)", "hours": null, "hoursBasis": null,
+      "cognitiveLevel": 3, "competencies": ["宏观辨识与微观探析", "证据推理与模型认知"], "qualityMax": 4, "examScope": "高考",
+      "examWeightPrior": 0.08, "prerequisites": ["chemistry/classification"],
+      "citation": "课标 四·(一)必修 主题2"
+    },
+    "chemistry/metals": {
+      "courseType": "必修", "theme": "常见的无机物及其应用(金属)", "hours": null, "hoursBasis": null,
+      "cognitiveLevel": 2, "competencies": ["宏观辨识与微观探析", "科学态度与社会责任"], "qualityMax": 4, "examScope": "高考",
+      "examWeightPrior": 0.06, "prerequisites": ["chemistry/redox"],
+      "citation": "课标 四·(一)必修 主题2"
+    },
+    "chemistry/nonmetals": {
+      "courseType": "必修", "theme": "常见的无机物及其应用(非金属)", "hours": null, "hoursBasis": null,
+      "cognitiveLevel": 2, "competencies": ["宏观辨识与微观探析"], "qualityMax": 4, "examScope": "高考",
+      "examWeightPrior": 0.08, "prerequisites": ["chemistry/redox"],
+      "citation": "课标 四·(一)必修 主题2"
+    },
+    "chemistry/structure": {
+      "courseType": "必修+选择性必修", "theme": "物质结构基础与化学反应规律 / 物质结构与性质", "hours": null, "hoursBasis": null,
+      "cognitiveLevel": 2, "competencies": ["宏观辨识与微观探析", "证据推理与模型认知"], "qualityMax": 4, "examScope": "高考",
+      "examWeightPrior": 0.10, "prerequisites": [],
+      "citation": "课标 四·(一)必修 主题3 / 四·(二)选必2"
+    },
+    "chemistry/energy": {
+      "courseType": "必修+选择性必修", "theme": "化学反应与能量", "hours": null, "hoursBasis": null,
+      "cognitiveLevel": 3, "competencies": ["变化观念与平衡思想", "宏观辨识与微观探析"], "qualityMax": 4, "examScope": "高考",
+      "examWeightPrior": 0.08, "prerequisites": ["chemistry/redox", "chemistry/quantity"],
+      "citation": "课标 四·(一)必修 主题3 / 四·(二)选必1 主题1"
+    },
+    "chemistry/kinetics": {
+      "courseType": "选择性必修", "theme": "选必1·化学反应的方向、限度和速率", "hours": null, "hoursBasis": null,
+      "cognitiveLevel": 3, "competencies": ["变化观念与平衡思想", "证据推理与模型认知"], "qualityMax": 4, "examScope": "高考",
+      "examWeightPrior": 0.12, "prerequisites": ["chemistry/energy"],
+      "citation": "课标 四·(二)选必1 主题2"
+    },
+    "chemistry/aqueous": {
+      "courseType": "选择性必修", "theme": "选必1·水溶液中的离子反应与平衡", "hours": null, "hoursBasis": null,
+      "cognitiveLevel": 4, "competencies": ["变化观念与平衡思想", "证据推理与模型认知", "宏观辨识与微观探析"], "qualityMax": 4, "examScope": "高考",
+      "examWeightPrior": 0.10, "prerequisites": ["chemistry/kinetics", "chemistry/classification"],
+      "citation": "课标 四·(二)选必1 主题3"
+    },
+    "chemistry/organic": {
+      "courseType": "必修+选择性必修", "theme": "简单的有机化合物及其应用 / 有机化学基础", "hours": null, "hoursBasis": null,
+      "cognitiveLevel": 3, "competencies": ["宏观辨识与微观探析", "证据推理与模型认知", "科学态度与社会责任"], "qualityMax": 4, "examScope": "高考",
+      "examWeightPrior": 0.14, "prerequisites": ["chemistry/structure", "chemistry/redox"],
+      "citation": "课标 四·(一)必修 主题4 / 四·(二)选必3"
+    },
+    "chemistry/stse": {
+      "courseType": "必修", "theme": "化学与社会发展", "hours": null, "hoursBasis": null,
+      "cognitiveLevel": 1, "competencies": ["科学态度与社会责任"], "qualityMax": 4, "examScope": "高考",
+      "examWeightPrior": 0.02, "prerequisites": [],
+      "citation": "课标 四·(一)必修 主题5"
+    }
+  }
+}

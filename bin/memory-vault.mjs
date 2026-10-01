@@ -24,10 +24,13 @@
  */
 
 import { createServer } from 'node:http'
-import { readFileSync } from 'node:fs'
+import { readFileSync, statSync } from 'node:fs'
+import { basename } from 'node:path'
+import { IMAGE_MAX_BYTES } from '../src/images.js'
 import { pathToFileURL } from 'node:url'
 import { createMemoryVault } from '../src/core/vault.js'
 import { VAULT_OPS, operateVault } from '../src/core/ops.js'
+import { serveMcp } from '../src/mcp.js'
 
 /** Default port for `serve`; loopback only unless explicitly overridden. */
 const DEFAULT_PORT = 47321
@@ -37,7 +40,7 @@ const DEFAULT_HOST = '127.0.0.1'
 const CLIENT_HEADER = 'x-dsh-memory-vault'
 
 /** Largest RPC body accepted, in bytes. */
-const MAX_RPC_BYTES = 1024 * 1024
+const MAX_RPC_BYTES = 32 * 1024 * 1024
 
 /**
  * Parse CLI arguments into positionals and flags.
@@ -138,6 +141,7 @@ export function usage() {
     '数据库位置: --db <path> 或 $MEMORY_VAULT_DB，默认与 DSH 插件相同（$DSH_HOME/memory-vault/vault.sqlite）。',
     '',
     '命令:',
+    '  mcp [--session <id>]                              启动供 Codex 使用的 stdio MCP 接口',
     '  state                                             记忆库总览：统计、记忆组、标签、限额',
     '  groups [--scope conversation|knowledge]           列出记忆组（树形）',
     '  recall [--query q] [--group g] [--tag t]… [--scope s] [--limit n] [--offset n] [--include-hidden]',
@@ -166,6 +170,9 @@ export function usage() {
     '  rpc --op <op> [--json \'{"k":v}\']                   直接调用面板同款 op 接口',
     `  serve [--port ${String(DEFAULT_PORT)}] [--host ${DEFAULT_HOST}]    启动本地 JSON RPC 服务（POST /rpc）`,
     '  help                                              显示本说明',
+    '  updates [--check]                                 查询版本；--check 检查发布源',
+    '  image list <entryId> | read <imageId> | remove <imageId>',
+    '  image add <entryId> --file <图片路径>                添加图片附件',
     '',
     'serve 模式:',
     `  POST /rpc  body {"op":"…",…参数} → {"ok":true,"result":…}；请求需带 ${CLIENT_HEADER}: 1 头。`,
@@ -206,6 +213,23 @@ function commandToOp(command, parsed) {
   const { positionals, flags } = parsed
   const body = { op: '' }
   switch (command) {
+    case 'image': {
+      const action = positionals[0], id = positionals[1]
+      if (!id) throw new Error('image 需要记忆或图片 ID')
+      if (action === 'list') return { body: { op: 'image.list', entryId: id } }
+      if (action === 'read') return { body: { op: 'image.read', id } }
+      if (action === 'remove') return { body: { op: 'image.delete', id } }
+      if (action === 'add') {
+        const file = option(flags, 'file')
+        if (!file) throw new Error('image add 需要 --file 图片路径')
+        const metadata = statSync(file)
+        if (!metadata.isFile() || metadata.size > IMAGE_MAX_BYTES) throw new Error('每张图片不能超过 10 MB')
+        return { body: { op: 'image.add', entryId: id, name: basename(file), data: readFileSync(file).toString('base64') } }
+      }
+      throw new Error('image action 必须为 list/read/add/remove')
+    }
+    case 'updates':
+      return { body: { op: flag(flags, 'check') ? 'updates.check' : 'updates.status' } }
     case 'state':
       body.op = 'state'
       return { body }
@@ -380,6 +404,8 @@ function commandToOp(command, parsed) {
     }
     case 'serve':
       return { direct: 'serve' }
+    case 'mcp':
+      return { direct: 'mcp' }
     case 'help':
     case '--help':
     case '-h':
@@ -415,7 +441,18 @@ export async function runCli(argv, io = {}) {
       return 0
     }
     vault = vaultFrom(parsed.flags)
-    const deps = { store: vault.store, config: vault.config, notify: vault.notify, curate: vault.curate }
+    if ('direct' in plan && plan.direct === 'mcp') {
+      vaultLivesOn = true
+      const server = serveMcp(vault, { sessionId: option(parsed.flags, 'session') })
+      const stop = () => server.close()
+      process.once('SIGINT', stop)
+      process.once('SIGTERM', stop)
+      await server.done
+      process.removeListener('SIGINT', stop)
+      process.removeListener('SIGTERM', stop)
+      return 0
+    }
+    const deps = { store: vault.store, config: vault.config, notify: vault.notify, curate: vault.curate, updates: vault.updates }
     let result
     if ('direct' in plan) {
       switch (plan.direct) {
@@ -489,7 +526,7 @@ export async function runCli(argv, io = {}) {
  * @returns {Promise<number>} Resolves when the server stops.
  */
 export function serve({ vault, port, host, stdout, stderr, onListening }) {
-  const deps = { store: vault.store, config: vault.config, notify: vault.notify, curate: vault.curate }
+  const deps = { store: vault.store, config: vault.config, notify: vault.notify, curate: vault.curate, updates: vault.updates }
   const server = createServer((req, res) => {
     void handleRpc(req, res, deps).catch((error) => {
       const message = error instanceof Error ? error.message : String(error)

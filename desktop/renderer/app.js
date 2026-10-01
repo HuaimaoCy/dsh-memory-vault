@@ -1,453 +1,480 @@
-/**
- * The desktop window's interface.
- *
- * Plain DOM on purpose: the app ships one HTML file, one script and one
- * stylesheet, so there is no bundler to run and nothing to keep in sync with a
- * framework version. Every action goes through `window.vault.invoke`, which the
- * preload narrows to the vault's own operation table — this file never touches
- * a file, a socket, or a database.
- *
- * The board keeps the hierarchy the vault is organised by: a section per
- * **root** group, sub-headings by each memory's own first label inside it, and
- * hidden memories quarantined into a last section of their own.
- */
+import { ownTags, section, subsection } from './grouping.js'
+import { icon, installIcons } from './icons.js'
+import { mountMistakebook } from './mistakebook.js'
 
-import { ownTags, section, subsection, SYSTEM_TAGS } from './grouping.js'
+const el = id => document.getElementById(id)
+const state = { data: null, info: null, view: { kind: 'all' }, selected: null, draft: null, dirty: false, busy: false, open: new Set(), collapsed: new Set(), nextOffset: null, cure: null, layout: localStorage.getItem('memory-vault.layout') === 'rows' ? 'rows' : 'grid', settingsTab: 'general' }
+const kinds = { note: '笔记', fact: '事实', decision: '决策', preference: '偏好', summary: '总结', task: '任务' }
+installIcons()
 
-const el = (id) => document.getElementById(id)
-
-const state = {
-  /** @type {Record<string, any>|null} */ data: null,
-  /** @type {{ kind: 'all'|'scope'|'hidden'|'group', id?: string }} */ view: { kind: 'all' },
-  /** @type {string} */ query: '',
-  /** @type {Record<string, any>|null} */ selected: null,
-  /** @type {Record<string, any>|null} */ cure: null,
-  /** @type {boolean} */ busy: false,
-  /** @type {string[]} */ open: [],
-}
-
-/**
- * Call one vault operation.
- * @param {string} op - Operation name.
- * @param {Record<string, unknown>} [body] - Operation body.
- * @returns {Promise<Record<string, any>>} The result.
- */
-async function call(op, body = {}) {
-  const reply = await window.vault.invoke(op, body)
-  if (reply === undefined || reply.ok !== true) {
-    throw new Error(reply?.error ?? `${op} 失败`)
-  }
-  return reply.result ?? {}
-}
-
-/**
- * Say something in the status line.
- * @param {string} message - Text to show.
- * @param {'info'|'ok'|'err'} [tone] - How to show it.
- * @returns {void}
- */
-function say(message, tone = 'info') {
-  const node = el('status')
-  node.textContent = message
-  node.className = `status ${tone === 'info' ? '' : tone}`
-}
-
-/**
- * Run an action, reporting failure without losing the window.
- * @param {() => Promise<void>} action - Work to run.
- * @returns {Promise<void>} Resolution once it finished or failed.
- */
-async function guard(action) {
-  if (state.busy) return
-  state.busy = true
-  try {
-    await action()
-  } catch (error) {
-    say(error instanceof Error ? error.message : String(error), 'err')
-  } finally {
-    state.busy = false
-  }
-}
-
-/** Reload the vault state and the current view. */
-async function load() {
-  state.data = await call('state')
-  const wanted = el('query').value.trim()
-  state.query = wanted
-  const result = await call('entries', {
-    limit: 300,
-    includeHidden: state.view.kind === 'hidden' ? true : true,
-    ...(wanted === '' ? {} : { query: wanted }),
-  })
-  state.data.entries = Array.isArray(result.entries) ? result.entries : []
-  if (state.selected !== null) {
-    const fresh = state.data.entries.find((entry) => entry.id === state.selected.id)
-    state.selected = fresh ?? state.selected
-  }
-  render()
-}
-
-/** The root group name an entry files under. */
-function rootOf(entry) {
-  const group = (state.data?.groups ?? []).find((item) => item.id === entry.groupId)
-  if (group === undefined) return entry.groupName ?? '未分组'
-  const path = Array.isArray(group.path) ? group.path : []
-  return path.length > 0 ? path[0] : group.name
-}
-
-/** The entries the current view shows, before sectioning. */
-function visible() {
-  const rows = state.data?.entries ?? []
-  if (state.view.kind === 'scope') return rows.filter((entry) => entry.scope === state.view.id)
-  if (state.view.kind === 'hidden') return rows.filter((entry) => entry.hidden === true)
-  if (state.view.kind === 'group') {
-    const group = (state.data?.groups ?? []).find((item) => item.id === state.view.id)
-    if (group === undefined) return rows
-    const path = Array.isArray(group.path) ? group.path : []
-    const roots = path.length > 0 ? path[0] : group.name
-    return rows.filter((entry) => rootOf(entry) === roots)
-  }
-  return rows
-}
-
-/**
- * Build a DOM node.
- * @param {string} tag - Element name.
- * @param {Record<string, any>} [props] - Properties and attributes.
- * @param {(Node|string|null|undefined)[]} [children] - Child nodes.
- * @returns {HTMLElement} The element.
- */
-function h(tag, props = {}, children = []) {
+function h(tag, props = {}, ...children) {
   const node = document.createElement(tag)
   for (const [key, value] of Object.entries(props)) {
     if (value === undefined || value === null || value === false) continue
-    if (key === 'class') node.className = String(value)
-    else if (key === 'text') node.textContent = String(value)
-    else if (key === 'onClick') node.addEventListener('click', value)
-    else if (key === 'onChange') node.addEventListener('change', value)
-    else if (key === 'onInput') node.addEventListener('input', value)
-    else if (key === 'onKeyDown') node.addEventListener('keydown', value)
+    if (key === 'class') node.className = value
+    else if (key === 'text') node.textContent = value
+    else if (key.startsWith('on')) node.addEventListener(key.slice(2).toLowerCase(), value)
+    else if (['value', 'checked', 'disabled'].includes(key)) node[key] = value
     else node.setAttribute(key, String(value))
   }
-  for (const child of children) {
-    if (child === null || child === undefined) continue
-    node.append(typeof child === 'string' ? document.createTextNode(child) : child)
-  }
+  for (const child of children.flat(Infinity)) if (child !== null && child !== undefined && child !== false) node.append(child instanceof Node ? child : String(child))
   return node
 }
-
-/** A tag pill. */
-function tag(text, tone = '') {
-  return h('span', { class: tone === '' ? 'tag' : `tag ${tone}`, text })
+const button = (text, action, primary = false, props = {}) => h('button', { type: 'button', class: primary ? 'btn primary' : 'btn', text, onClick: () => void guard(action), ...props })
+const tag = text => h('span', { class: 'tag', text })
+const groupLabel = group => [...(group.path ?? []), group.name].join(' / ')
+const field = (label, control, className = '') => h('label', { class: `col ${className}` }, h('span', { class: 'label', text: label }), control)
+const groupSelect = (selected, top = false) => h('select', { class: 'select' }, top ? h('option', { value: '', text: '顶层' }) : null, (state.data?.groups ?? []).map(group => h('option', { value: group.id, selected: group.id === selected ? 'selected' : undefined, text: groupLabel(group) })))
+const iconButton = (name, label, action) => {
+  const node = button('', action, false, { class: 'icon-button', title: label, 'aria-label': label })
+  node.append(icon(name)); return node
 }
+function markDirty() {
+  state.dirty = true
+  const hint = el('editor-save-state')
+  if (hint) { hint.textContent = '有未保存的修改'; hint.classList.add('dirty') }
+}
+let statusTimer
 
-/** Draw the sidebar. */
-function renderSide() {
-  const stats = state.data?.stats ?? { totals: { entries: 0 }, hidden: 0 }
-  const groups = state.data?.groups ?? []
-  const views = el('views')
-  views.replaceChildren()
-  const view = (kind, label, count, id) => h('button', {
-    class: state.view.kind === kind && state.view.id === id ? 'nav on' : 'nav',
-    onClick: () => { state.view = { kind, ...(id === undefined ? {} : { id }) }; void guard(load) },
-  }, h('span', { text: label }), h('span', { class: 'count', text: String(count) }))
-  views.append(
-    view('all', '全部记忆', stats.totals.entries),
-    view('scope', '知识库', stats.entries?.knowledge ?? 0, 'knowledge'),
-    view('scope', '对话记忆', stats.entries?.conversation ?? 0, 'conversation'),
-    view('hidden', '隐藏', stats.hidden ?? 0),
-  )
-  const tree = el('tree')
-  tree.replaceChildren()
-  const ordered = [...groups].sort((left, right) => {
-    const leftKey = [...(left.path ?? []), left.name].join('\u0000')
-    const rightKey = [...(right.path ?? []), right.name].join('\u0000')
-    return leftKey < rightKey ? -1 : leftKey > rightKey ? 1 : 0
+async function unwrap(promise) {
+  const reply = await promise
+  if (reply?.ok !== true) throw new Error(reply?.error ?? '操作失败')
+  return reply.result
+}
+const call = (op, body = {}) => unwrap(window.vault.invoke(op, body))
+const desktop = (name, ...args) => unwrap(window.vault[name](...args))
+function say(message, tone = 'info') {
+  el('status').textContent = message
+  el('status').className = `status ${tone} show`
+  clearTimeout(statusTimer)
+  if (tone !== 'err') statusTimer = setTimeout(() => el('status').classList.remove('show'), 3200)
+  const modalStatus = document.querySelector('dialog[open] .modal-status')
+  if (modalStatus) { modalStatus.textContent = message; modalStatus.className = `modal-status ${tone}` }
+}
+async function guard(action) {
+  if (state.busy) return
+  state.busy = true
+  try { await action() } catch (error) { say(error.message ?? String(error), 'err') }
+  finally { state.busy = false }
+}
+async function discard() {
+  return !state.dirty || await desktop('confirm', '当前记忆有未保存的修改，放弃这些修改？')
+}
+async function navigate(view) {
+  if (!await discard()) return
+  state.view = view; state.selected = null; state.draft = null; state.dirty = false
+  await load()
+}
+async function load(append = false) {
+  const offset = append ? state.nextOffset : 0
+  if (append && offset === null) return
+  state.data = { ...await call('state'), entries: append ? state.data?.entries ?? [] : [] }
+  const result = await call('entries', {
+    query: el('query').value.trim(), limit: 200, offset,
+    includeHidden: true, onlyHidden: state.view.kind === 'hidden',
+    ...(state.view.kind === 'scope' ? { scope: state.view.id } : {}),
+    ...(state.view.kind === 'group' ? { group: state.view.id, includeChildren: true } : {}),
   })
-  for (const group of ordered) {
-    const depth = Math.max(1, Number(group.depth ?? 1))
-    tree.append(h('button', {
-      class: state.view.kind === 'group' && state.view.id === group.id ? 'nav on' : 'nav',
-      'data-depth': String(Math.min(3, depth)),
-      onClick: () => { state.view = { kind: 'group', id: group.id }; void guard(load) },
-    }, h('span', { text: group.name }), h('span', { class: 'count', text: String(group.entryCount ?? 0) })))
-  }
+  state.data.entries.push(...result.entries)
+  state.nextOffset = result.nextOffset
+  state.info = await desktop('info')
+  receiveUpdate(state.info.updates)
+  render()
 }
-
-/** Draw the list of memories. */
+function rootOf(entry) {
+  const group = state.data.groups.find(item => item.id === entry.groupId)
+  return group?.path?.[0] ?? group?.name ?? entry.groupName ?? '未分组'
+}
+function renderSide() {
+  const stats = state.data.stats
+  const groupsById = new Map(state.data.groups.map(group => [group.id, group]))
+  const groupCounts = new Map(state.data.groups.map(group => [group.id, group.entryCount]))
+  for (const group of state.data.groups) {
+    let parent = groupsById.get(group.parentId)
+    while (parent) { groupCounts.set(parent.id, groupCounts.get(parent.id) + group.entryCount); parent = groupsById.get(parent.parentId) }
+  }
+  const view = (kind, label, count, id) => button('', () => navigate({ kind, id }), false, {
+    class: state.view.kind === kind && state.view.id === id ? 'nav on' : 'nav',
+  })
+  const rows = [
+    ['all', '全部记忆', stats.totals.entries + stats.hidden],
+    ['scope', '知识库', stats.entries.knowledge, 'knowledge'],
+    ['scope', '对话记忆', stats.entries.conversation, 'conversation'],
+    ['hidden', '隐藏', stats.hidden],
+  ]
+  el('views').replaceChildren(...rows.map(([kind, label, count, id]) => {
+    const node = view(kind, label, count, id)
+    node.setAttribute('aria-current', state.view.kind === kind && state.view.id === id ? 'page' : 'false')
+    node.append(icon(kind === 'scope' ? (id === 'knowledge' ? 'book' : 'conversation') : kind === 'hidden' ? 'hidden' : 'library'), h('span', { class: 'nav-label', text: label }), h('span', { class: 'count', text: count }))
+    return node
+  }))
+  el('tree').replaceChildren(...[...state.data.groups].sort((a, b) => groupLabel(a).localeCompare(groupLabel(b))).map(group => h('button', {
+    class: state.view.kind === 'group' && state.view.id === group.id ? 'nav on' : 'nav', 'data-depth': group.depth,
+    onClick: () => void guard(() => navigate({ kind: 'group', id: group.id })),
+  }, icon('folder'), h('span', { class: 'nav-label', text: group.name, title: groupLabel(group) }), h('span', { class: 'count', text: groupCounts.get(group.id) }))))
+}
 function renderList() {
-  const rows = visible()
   const list = el('list')
+  list.classList.toggle('rows', state.layout === 'rows')
+  const order = el('sort').value
+  const sorted = [...state.data.entries].sort((a, b) => order === 'title' ? (a.title || a.content).localeCompare(b.title || b.content, 'zh-CN') : order === 'updated' ? new Date(b.updatedAt) - new Date(a.updatedAt) : Number(b.base) - Number(a.base) || b.priority - a.priority || new Date(b.updatedAt) - new Date(a.updatedAt))
+  const sections = section(sorted, rootOf)
   list.replaceChildren()
-  const sections = section(rows, rootOf)
-  if (sections.length === 0) {
-    list.append(h('div', { class: 'empty', text: state.query === '' ? '这里还没有记忆。' : '没有匹配的记忆。' }))
-    return
+  if (!sections.length) {
+    const searching = Boolean(el('query').value)
+    list.append(h('div', { class: 'empty' }, h('div', { class: 'empty-art' }, icon(searching ? 'search' : 'vault')),
+      h('h2', { text: searching ? '没有找到相关记忆' : '从一条记忆开始' }),
+      h('p', { text: searching ? '试试更简短的关键词，或回到全部记忆浏览。' : '记下值得保留的知识、想法和约定，随时回到这里。' }),
+      button(searching ? '清除搜索' : '新建记忆', async () => {
+        if (searching) { el('query').value = ''; await load() } else await newMemory()
+      }, true)))
   }
-  for (const sectionRow of sections) {
-    const open = state.open.includes(sectionRow.key)
+  for (const part of sections) {
+    if (!state.collapsed.has(part.key) && (part.key !== '__hidden__' || state.view.kind === 'hidden')) state.open.add(part.key)
+    const open = state.open.has(part.key)
+    const head = h('button', { class: 'sec-head', 'aria-expanded': String(open), onClick: () => {
+      if (open) { state.open.delete(part.key); state.collapsed.add(part.key) }
+      else { state.open.add(part.key); state.collapsed.delete(part.key) }
+      renderList()
+    } }, h('span', { class: 'section-icon' }, icon(part.key === '__hidden__' ? 'hidden' : 'folder')), h('span', { text: part.label }), h('span', { class: 'count', text: `${part.entries.length}` }), icon(open ? 'chevron-down' : 'chevron-right'))
     const body = h('div', { class: open ? 'sec-body' : 'sec-body hidden' })
-    const parts = subsection(sectionRow.entries)
-    for (const part of parts) {
-      const grid = h('div', { class: 'grid' }, part.entries.map((entry) => tile(entry)))
-      body.append(parts.length > 1
-        ? h('div', { class: 'sub' }, h('div', { class: 'sub-head' },
-            h('span', { text: part.label }), h('span', { class: 'cap', text: String(part.entries.length) })), grid)
-        : grid)
+    const subsections = subsection(part.entries)
+    for (const sub of subsections) {
+      const cards = sub.entries.map(entry => h('button', {
+      class: `tile${entry.hidden ? ' hidden-tile' : ''}${entry.id === state.selected?.id ? ' selected' : ''}`, 'data-id': entry.id, 'aria-pressed': String(entry.id === state.selected?.id), onClick: () => void guard(async () => { if (await discard()) selectEntry(entry) }),
+    }, h('div', { class: 'tile-top' }, h('span', { class: `kind-icon ${entry.kind}` }, icon(entry.kind)), h('span', { class: 'kind-label', text: kinds[entry.kind] ?? '笔记' }), entry.base ? h('span', { class: 'base-mark', text: '底层约定' }) : null),
+    h('div', { class: 'tile-title', text: entry.title || entry.content.slice(0, 40) }), h('div', { class: 'tile-body', text: entry.content.replace(/^\s{0,3}#{1,6}\s+/gm, '').replace(/\*\*([^*]+)\*\*/g, '$1').replace(/\s+/g, ' ').slice(0, 170) }), h('div', { class: 'tags' },
+      entry.groupName !== rootOf(entry) ? tag(entry.groupName) : null,
+      entry.hidden ? tag('已隐藏') : null, entry.imageCount ? tag(`${entry.imageCount} 张图片`) : null, ownTags(entry).slice(0, 3).map(tag)),
+      h('div', { class: 'tile-footer' }, h('span', { text: entry.source === 'panel' ? '手动记录' : entry.tags.includes('AI 生成') ? 'AI 生成' : entry.source || '记忆' }), h('span', { class: 'date', text: new Date(entry.updatedAt).toLocaleDateString('zh-CN', { month: 'short', day: 'numeric' }) }))))
+      body.append(h('div', { class: 'sub' }, sub.label === '未打标签' && subsections.length === 1 ? null : h('div', { class: 'sub-head' }, sub.label === '未打标签' ? '其他记忆' : sub.label, h('span', { class: 'cap', text: sub.entries.length })), h('div', { class: 'grid' }, cards)))
     }
-    list.append(h('section', { class: 'sec' },
-      h('div', {
-        class: 'sec-head',
-        onClick: () => {
-          state.open = open ? state.open.filter((key) => key !== sectionRow.key) : [...state.open, sectionRow.key]
-          renderList()
-        },
-      },
-        h('span', { text: open ? '▾' : '▸' }),
-        h('span', { text: sectionRow.label }),
-        h('span', { class: 'count', text: `${sectionRow.entries.length} 条` })),
-      body))
+    list.append(h('section', { class: 'sec' }, head, body))
   }
+  if (state.nextOffset !== null) list.append(button('加载更多', () => load(true), false, { id: 'load-more' }))
 }
-
-/** One memory card. */
-function tile(entry) {
-  const title = entry.title === '' ? String(entry.content).slice(0, 40) : entry.title
-  const group = (state.data?.groups ?? []).find((item) => item.id === entry.groupId)
-  const root = rootOf(entry)
-  return h('div', {
-    class: entry.hidden === true ? 'tile hidden-tile' : 'tile',
-    onClick: () => { state.selected = entry; renderDrawer() },
-  },
-    h('div', { class: 'tile-title', text: title }),
-    h('div', { class: 'tile-body', text: String(entry.content).replace(/\s+/g, ' ').slice(0, 110) }),
-    h('div', { class: 'tags' },
-      entry.groupName !== root ? tag(entry.groupName ?? '') : null,
-      entry.hidden === true ? tag('已隐藏', 'warn') : null,
-      Number(entry.priority ?? 0) > 0 ? tag(`P${entry.priority}`, 'info') : null,
-      entry.base === true ? tag('底层 prompt', 'ok') : null,
-      ...ownTags(entry).slice(0, 3).map((item) => tag(item)),
-      group === undefined ? null : null),
-  )
+function selectEntry(entry) {
+  state.selected = entry
+  state.draft = { ...entry, tagsText: ownTags(entry).join(', '), images: entry.id ? null : [] }
+  state.dirty = false
+  renderList(); renderDrawer()
+  if (entry.id) void loadDraftImages(state.draft)
 }
-
-/** Draw the detail drawer, or hide it. */
 function renderDrawer() {
   const drawer = el('drawer')
-  if (state.selected === null) {
-    drawer.classList.add('hidden')
-    return
-  }
-  const entry = state.selected
-  drawer.classList.remove('hidden')
-  const title = h('input', { class: 'input', value: entry.title ?? '' })
-  const body = h('textarea', { class: 'area' })
-  body.value = entry.content ?? ''
-  const groups = state.data?.groups ?? []
-  const group = h('select', { class: 'select' },
-    ...groups.map((item) => h('option', { value: item.id, text: item.name, ...(item.id === entry.groupId ? { selected: 'selected' } : {}) })))
-  group.value = entry.groupId
-  const draft = h('input', { class: 'input', placeholder: '输入标签后回车' })
-  const chips = h('div', { class: 'tags' }, ...ownTags(entry).map((item) => h('span', { class: 'chip' },
-    item,
-    h('button', {
-      text: '×',
-      title: '移除这个标签',
-      onClick: () => { void guard(() => save({ tags: ownTags(entry).filter((tag2) => tag2 !== item) })) },
-    }))))
-  draft.addEventListener('keydown', (event) => {
-    if (event.key !== 'Enter') return
-    event.preventDefault()
-    const value = draft.value.trim()
-    if (value === '' || SYSTEM_TAGS.includes(value)) return
-    void guard(() => save({ tags: [...new Set([...ownTags(entry), value])] }))
+  drawer.classList.toggle('hidden', !state.selected)
+  document.querySelector('.body').classList.toggle('with-inspector', Boolean(state.selected))
+  if (!state.selected) return
+  const entry = state.selected, draft = state.draft, isNew = !entry.id
+  const control = (name, tagName = 'input', props = {}) => h(tagName, {
+    class: tagName === 'textarea' ? 'area' : 'input', value: draft[name] ?? '', 'data-field': name,
+    onInput: event => { draft[name] = event.target.type === 'checkbox' ? event.target.checked : event.target.value; markDirty() }, ...props,
   })
-
-  /**
-   * Write one patch onto the open memory.
-   * @param {Record<string, unknown>} patch - Fields to change.
-   * @returns {Promise<void>} Resolution after the reload.
-   */
-  async function save(patch) {
-    await call('entry.update', { id: entry.id, ...patch })
-    say('已保存', 'ok')
-    await load()
-    renderDrawer()
+  const group = groupSelect(draft.groupId)
+  group.dataset.field = 'groupId'
+  group.addEventListener('change', () => { draft.groupId = group.value; markDirty() })
+  const scope = h('select', { class: 'select', 'data-field': 'scope', onChange: event => { draft.scope = event.target.value; markDirty() } },
+    ['knowledge', 'conversation'].map(value => h('option', { value, selected: value === draft.scope ? 'selected' : undefined, text: value === 'knowledge' ? '知识库' : '对话记忆' })))
+  const kind = h('select', { class: 'select', 'data-field': 'kind', onChange: event => { draft.kind = event.target.value; markDirty() } },
+    [['note', '笔记'], ['fact', '事实'], ['decision', '决策'], ['preference', '偏好'], ['summary', '总结'], ['task', '任务']].map(([value, text]) => h('option', { value, text, selected: value === draft.kind ? 'selected' : undefined })))
+  const save = async () => {
+    if (!Array.isArray(draft.images)) throw new Error('请等待图片加载完成后保存')
+    if (!draft.content.trim() && !draft.images.length) throw new Error('请填写正文或添加图片')
+    const fields = { title: draft.title, content: draft.content, kind: draft.kind, tags: draft.tagsText.split(/[,，\n]/).map(text => text.trim()).filter(Boolean), priority: Number(draft.priority), base: draft.base === true, scope: draft.scope, groupId: draft.groupId }
+    fields.images = draft.images.map(image => image.id ? { id: image.id } : { name: image.name, data: image.data, mimeType: image.mimeType })
+    const result = await call(isNew ? 'entry.write' : 'entry.update', { ...fields, ...(isNew ? {} : { id: entry.id }) })
+    selectEntry(result.entry); await load(); say(isNew ? '记忆已创建' : '修改已保存', 'ok')
   }
-
-  drawer.replaceChildren(
-    h('div', { class: 'row' },
-      h('h2', { text: '记忆' }),
-      h('span', { class: 'spacer' }),
-      h('button', { class: 'btn ghost', text: '关闭', onClick: () => { state.selected = null; renderDrawer() } })),
-    h('div', { class: 'col' },
-      h('span', { class: 'label', text: '标题' }),
-      title,
-      h('span', { class: 'label', text: '正文（Markdown）' }),
-      body,
-      h('div', { class: 'row' },
-        h('button', {
-          class: 'btn primary',
-          text: '保存',
-          onClick: () => { void guard(() => save({ title: title.value, content: body.value })) },
-        }),
-        h('button', {
-          class: 'btn',
-          text: '创建',
-          onClick: () => { void guard(async () => {
-            await call('entry.write', { groupId: group.value, content: body.value, title: title.value, tags: ownTags(entry) })
-            say('已创建', 'ok')
-            state.selected = null
-            await load()
-          }) },
-        }),
-        h('button', {
-          class: 'btn',
-          text: entry.hidden === true ? '恢复显示' : '隐藏',
-          onClick: () => { void guard(async () => {
-            // Visibility has its own operation: hiding is not an edit of the
-            // memory, and `entry.update` deliberately does not carry it.
-            await call('entry.hide', { ids: [entry.id], hidden: entry.hidden !== true })
-            say(entry.hidden === true ? '已恢复显示' : '已隐藏', 'ok')
-            await load()
-            renderDrawer()
-          }) },
-        }),
-        h('button', {
-          class: 'btn',
-          text: '删除',
-          onClick: () => { void guard(async () => {
-            if (!window.confirm('删除这条记忆？')) return
-            await call('entry.delete', { id: entry.id })
-            state.selected = null
-            await load()
-          }) },
-        })),
-      h('span', { class: 'label', text: '归属' }),
-      h('div', { class: 'row' },
-        h('button', {
-          class: entry.scope === 'knowledge' ? 'btn primary' : 'btn',
-          text: '知识库',
-          onClick: () => { void guard(() => save({ scope: 'knowledge' })) },
-        }),
-        h('button', {
-          class: entry.scope === 'conversation' ? 'btn primary' : 'btn',
-          text: '对话记忆',
-          onClick: () => { void guard(() => save({ scope: 'conversation' })) },
-        })),
-      h('span', { class: 'label', text: '记忆组' }),
-      h('div', { class: 'row' }, group, h('button', {
-        class: 'btn',
-        text: '移入',
-        onClick: () => { void guard(() => save({ groupId: group.value })) },
-      })),
-      h('span', { class: 'label', text: '优先级' }),
-      h('div', { class: 'row' }, ...[0, 40, 70, 90].map((value) => h('button', {
-        class: Number(entry.priority ?? 0) === value ? 'btn primary' : 'btn',
-        text: value === 0 ? '0' : `P${value}`,
-        onClick: () => { void guard(() => save({ priority: value })) },
-      }))),
-      h('span', { class: 'label', text: '底层 prompt（每次对话都注入，不占知识配额）' }),
-      h('div', { class: 'row' }, h('button', {
-        class: entry.base === true ? 'btn primary' : 'btn',
-        text: entry.base === true ? '已开启' : '未开启',
-        onClick: () => { void guard(() => save({ base: entry.base !== true })) },
-      })),
-      h('span', { class: 'label', text: '标签（就地增删）' }),
-      chips,
-      draft,
-      h('div', { class: 'tags' }, ...(entry.tags ?? []).filter((item) => SYSTEM_TAGS.includes(item)).map((item) => tag(item, 'sys'))),
-    ),
+  const form = h('form', { class: 'editor-form', onSubmit: event => { event.preventDefault(); void guard(save) },
+    onPaste: event => {
+      const files = [...(event.clipboardData?.files ?? [])].filter(file => file.type.startsWith('image/'))
+      if (files.length) { event.preventDefault(); void guard(() => addDraftImages(files)) }
+    },
+  },
+    h('div', { class: 'editor-scroll' },
+      h('div', { class: 'editor-paper' },
+        h('label', { class: 'col' }, h('span', { class: 'sr-only', text: '标题' }), control('title', 'input', { class: 'input editor-title', placeholder: '给记忆起个名字' })),
+        field('正文 · 支持 Markdown 与公式源码', control('content', 'textarea', { class: 'area editor-content', placeholder: '写下值得留下来的内容，或添加图片…' })),
+        h('section', { id: 'editor-images', class: 'editor-images', 'aria-label': '记忆图片' })),
+      h('h3', { class: 'properties-head', text: '整理信息' }),
+      h('div', { class: 'properties' }, field('归属', scope), field('类型', kind), field('记忆组', group, 'full-width'),
+        field('标签', control('tagsText', 'input', { placeholder: '用逗号分隔多个标签' }), 'full-width'),
+        field('优先级 · 0–100', control('priority', 'input', { type: 'number', min: 0, max: 100, step: 1 })),
+        h('label', { class: 'switch-row' }, h('span', { text: '底层约定' }), control('base', 'input', { type: 'checkbox', checked: draft.base === true }))),
+      isNew ? null : h('details', { class: 'record-info' }, h('summary', { text: '记录信息' }), h('div', { class: 'meta', text: `来源：${entry.source} · ID：${entry.id}\n更新：${new Date(entry.updatedAt).toLocaleString('zh-CN')}` }))),
+    h('div', { class: 'editor-actions' }, h('div', { id: 'editor-save-state', class: `editor-save-state${state.dirty ? ' dirty' : ''}`, text: state.dirty ? '有未保存的修改' : isNew ? '保存到当前记忆库' : '已保存到本地记忆库' }), h('div', { class: 'row' },
+      isNew ? null : button(entry.hidden ? '恢复显示' : '隐藏', async () => {
+        if (!await discard()) return
+        await call('entry.hide', { ids: [entry.id], hidden: !entry.hidden })
+        const changed = state.data.entries.find(row => row.id === entry.id) ?? entry
+        selectEntry({ ...changed, hidden: !entry.hidden }); await load(); say('可见性已更新', 'ok')
+      }, false, { class: 'btn ghost' }),
+      isNew ? null : button('删除', async () => {
+        if (!await desktop('confirm', `永久删除「${entry.title || '这条记忆'}」？`)) return
+        await call('entry.delete', { id: entry.id }); state.selected = null; state.dirty = false; await load(); say('记忆已删除', 'ok')
+      }, false, { class: 'btn ghost danger' }),
+      h('button', { type: 'submit', id: 'save-entry', class: 'btn primary', disabled: draft.images === null, text: isNew ? '创建记忆' : '保存修改' }))),
   )
+  drawer.replaceChildren(h('div', { class: 'drawer-head' }, icon(isNew ? 'plus' : 'note'), h('h2', { text: isNew ? '新建记忆' : '记忆详情' }), h('span', { class: 'spacer' }), iconButton('close', '关闭记忆详情', async () => {
+    if (await discard()) { state.selected = null; state.dirty = false; renderList(); renderDrawer() }
+  })), form)
+  renderImagePanel()
 }
-
-/** Draw the curation result card. */
-function renderCure() {
-  const card = el('cure-card')
-  if (state.cure === null) {
-    card.classList.add('hidden')
-    return
+async function loadDraftImages(draft) {
+  try {
+    const listed = await call('image.list', { entryId: draft.id })
+    const images = await Promise.all(listed.images.map(async image => (await call('image.read', { id: image.id })).image))
+    if (state.draft !== draft) return
+    draft.images = images; renderImagePanel()
+  } catch (error) {
+    if (state.draft === draft) { say(`图片加载失败：${error.message}`, 'err'); renderImagePanel(true) }
   }
-  const cure = state.cure
-  const items = cure.mode === 'applied' ? (cure.applied ?? []) : (cure.verdicts ?? [])
-  card.classList.remove('hidden')
-  card.replaceChildren(
-    h('div', { class: 'row' },
-      h('h3', { text: cure.mode === 'applied' ? '已归类' : '整理预览' }),
-      h('span', { class: 'cap', text: `${cure.model?.provider ?? ''}/${cure.model?.model ?? ''}` }),
-      h('span', { class: 'spacer' }),
-      h('button', {
-        class: 'btn ghost',
-        text: '收起',
-        onClick: () => { state.cure = null; renderCure() },
-      })),
-    ...items.map((item) => h('div', { class: 'kv' },
-      tag(item.verdict === 'reusable' ? '可复用' : '单次性', item.verdict === 'reusable' ? 'ok' : ''),
-      tag(item.origin ?? '', 'sys'),
-      h('span', { class: 'reason', text: item.reason ?? '' }),
-      item.group === undefined || item.group === '' ? null : tag(item.group))),
-    (cure.tagMap ?? []).length === 0 ? null : h('div', { class: 'kv' },
-      h('span', { class: 'label', text: '标签合并' }),
-      ...(cure.tagMap ?? []).map((change) => {
-        const done = (cure.tagChanges ?? []).find((row) => row.from === change.from)
-        return h('span', { class: 'kv' },
-          tag(change.from, 'sys'), h('span', { class: 'cap', text: '→' }),
-          tag(change.to === '' ? '删除该标签' : change.to, change.to === '' ? 'warn' : 'info'),
-          h('span', { class: 'cap', text: done === undefined ? String(change.reason ?? '') : `${done.updated} 条` }))
-      })),
-  )
 }
-
-/** Draw everything. */
+async function addDraftImages(files) {
+  const draft = state.draft
+  if (!draft || draft.images === null) throw new Error('请等待已有图片加载完成')
+  if (draft.images.length + files.length > 16) throw new Error('每条记忆最多 16 张图片')
+  const added = []
+  for (const file of files) {
+    if (!['image/png', 'image/jpeg', 'image/webp', 'image/gif'].includes(file.type)) throw new Error('支持 PNG、JPEG、WebP 和 GIF 图片')
+    if (file.size > 10 * 1048576) throw new Error('每张图片不能超过 10 MB')
+    const url = await new Promise((resolve, reject) => { const reader = new FileReader(); reader.onload = () => resolve(reader.result); reader.onerror = () => reject(new Error('无法读取图片')); reader.readAsDataURL(file) })
+    const image = new Image(); image.src = url
+    await image.decode().catch(() => { throw new Error('图片损坏，无法打开') })
+    if (image.naturalWidth > 16384 || image.naturalHeight > 16384 || image.naturalWidth * image.naturalHeight > 40000000) throw new Error('图片超过尺寸上限')
+    added.push({ name: file.name || '粘贴的图片.png', mimeType: file.type, size: file.size, data: url.slice(url.indexOf(',') + 1), width: image.naturalWidth, height: image.naturalHeight })
+  }
+  if ([...draft.images, ...added].reduce((sum, image) => sum + image.size, 0) > 20 * 1048576) throw new Error('每条记忆的图片总大小不能超过 20 MB')
+  if (state.draft !== draft) return
+  draft.images.push(...added); markDirty(); renderImagePanel()
+}
+function imagePreview(image) {
+  const dialog = h('dialog', { class: 'image-viewer', 'aria-label': image.name, onClick: event => { if (event.target === dialog) dialog.close() }, onClose: () => dialog.remove() },
+    h('div', { class: 'image-viewer-head' }, h('span', { text: image.name }), h('span', { class: 'spacer' }), iconButton('close', '关闭图片预览', () => dialog.close())),
+    h('img', { src: `data:${image.mimeType};base64,${image.data}`, alt: image.name }), h('p', { class: 'cap', text: `${image.width} × ${image.height} · ${(image.size / 1024).toFixed(0)} KB` }))
+  document.body.append(dialog); dialog.showModal()
+}
+function renderImagePanel(failed = false) {
+  const panel = el('editor-images'), draft = state.draft
+  if (!panel || !draft) return
+  const picker = h('input', { type: 'file', class: 'sr-only', id: 'image-picker', multiple: 'multiple', accept: 'image/png,image/jpeg,image/webp,image/gif', onChange: event => { const files = [...event.target.files]; event.target.value = ''; void guard(() => addDraftImages(files)) } })
+  const waiting = draft.images === null
+  panel.replaceChildren(...[h('div', { class: 'row image-panel-head' }, h('span', { class: 'label', text: `图片${waiting ? '' : ` · ${draft.images.length}`}` }), h('span', { class: 'spacer' }), button('添加图片', () => picker.click(), false, { id: 'add-image', class: 'btn soft', disabled: waiting })), picker,
+    waiting ? h('p', { class: 'cap', text: failed ? '图片加载失败，重试后再编辑。' : '正在加载图片…' }) : h('div', { class: 'image-attachments' }, draft.images.map((image, index) => h('div', { class: 'image-attachment' },
+      h('button', { type: 'button', class: 'image-thumbnail', title: `查看 ${image.name}`, onClick: () => imagePreview(image) }, h('img', { src: `data:${image.mimeType};base64,${image.data}`, alt: image.name, loading: 'lazy' })),
+      h('div', { class: 'image-attachment-caption' }, h('span', { text: image.name, title: image.name }), button('移除', () => { draft.images.splice(index, 1); markDirty(); renderImagePanel() }, false, { class: 'btn ghost danger', 'aria-label': `移除图片 ${image.name}` }))))),
+    failed ? button('重新加载图片', () => loadDraftImages(draft)) : null,
+    h('p', { class: 'image-drop-hint', text: '拖入图片或粘贴截图 · 保存记忆后保留', onDragover: event => event.preventDefault(), onDrop: event => { event.preventDefault(); void guard(() => addDraftImages([...event.dataTransfer.files])) } })].filter(node => node !== null && node !== false))
+  const save = el('save-entry'); if (save) save.disabled = waiting
+}
 function render() {
-  renderSide()
-  renderList()
-  renderDrawer()
-  renderCure()
-  const stats = state.data?.stats ?? { totals: { entries: 0, groups: 0 }, hidden: 0 }
-  el('foot-left').textContent = `${state.data?.groups?.length ?? 0} 个记忆组 · ${stats.totals.entries} 条记忆（隐藏 ${stats.hidden ?? 0}）`
+  renderSide(); renderList(); renderDrawer()
+  const label = state.view.kind === 'group' ? state.data.groups.find(group => group.id === state.view.id)?.name ?? '记忆组' : state.view.kind === 'scope' ? (state.view.id === 'knowledge' ? '知识库' : '对话记忆') : state.view.kind === 'hidden' ? '隐藏记忆' : '全部记忆'
+  const searching = Boolean(el('query').value.trim())
+  el('view-title').textContent = searching ? '搜索结果' : label
+  el('breadcrumb').textContent = label
+  el('view-description').textContent = searching ? `与「${el('query').value.trim()}」相关的记忆。` : state.view.kind === 'hidden' ? '暂时收起的记忆，随时可以恢复。' : state.view.id === 'conversation' ? '留住对话里的线索、进展与上下文。' : state.view.id === 'knowledge' ? '值得复用的知识，下一次也用得上。' : state.view.kind === 'group' ? '围绕一个主题，整理值得保留的内容。' : '让知识、灵感与约定各归其位。'
+  el('view-count').textContent = `${state.nextOffset === null ? '' : '≥'}${state.data.entries.length}`
+  el('foot-left').textContent = `${state.data.groups.length} 个记忆组 · ${state.data.stats.totals.entries} 条可见记忆 · ${state.data.stats.hidden} 条隐藏`
+  el('foot-right').title = state.info.databasePath
+  el('curate').disabled = el('curate-review').disabled = !state.info.model.baseUrl
+  el('curate').title = el('curate-review').title = state.info.model.baseUrl ? '会调用设置中的 AI 服务' : '先在设置中配置 AI 服务'
+  el('curation-hint').textContent = state.info.model.baseUrl ? '合并重复内容，梳理分组与标签。' : '先在「设置与连接 → AI 服务」中配置模型，即可预览和整理记忆。'
+  for (const [id, layout] of [['view-grid', 'grid'], ['view-list', 'rows']]) { el(id).classList.toggle('active', state.layout === layout); el(id).setAttribute('aria-pressed', String(state.layout === layout)) }
 }
-
-el('curate').addEventListener('click', () => { void guard(async () => {
-  const origin = el('curate-scope').value
-  say('正在整理（会用一次模型调用）…')
-  state.cure = await call('curate', { origin, apply: true, limit: 20 })
-  say('整理完成', 'ok')
-  await load()
-}) })
-
-el('curate-review').addEventListener('click', () => { void guard(async () => {
-  const origin = el('curate-scope').value
-  say('正在预览（会用一次模型调用）…')
-  state.cure = await call('curate', { origin, apply: false, limit: 20 })
-  say('预览完成，未写入任何改动', 'ok')
-  renderCure()
-}) })
-
-el('new').addEventListener('click', () => {
-  state.selected = {
-    id: '', title: '', content: '', tags: [], scope: 'conversation', priority: 0, base: false, hidden: false,
-    groupId: state.data?.groups?.[0]?.id ?? '', groupName: '',
+function modal(title, ...children) {
+  el('modal')?.remove()
+  el('curation-menu').open = false
+  const dialog = h('dialog', { id: 'modal', class: 'modal', 'aria-labelledby': 'modal-title' }, h('div', { class: 'modal-header' }, h('h2', { id: 'modal-title', text: title }), h('span', { class: 'spacer' }), iconButton('close', '关闭', async () => dialog.close())), h('div', { class: 'modal-status', role: 'status' }), h('div', { class: 'modal-body' }, children))
+  document.body.append(dialog); dialog.showModal()
+  return dialog
+}
+function groupManager() {
+  const newName = h('input', { class: 'input', placeholder: '例如：项目约定', id: 'new-group-name', required: 'required' })
+  const parent = groupSelect('', true)
+  const createScope = h('select', { class: 'select' }, h('option', { value: 'knowledge', text: '知识库' }), h('option', { value: 'conversation', text: '对话记忆' }))
+  modal('管理记忆组',
+    h('p', { class: 'cap', text: '按主题整理记忆。记忆组支持三层结构，也可以随时移动与重命名。' }),
+    h('form', { class: 'group-create', onSubmit: event => { event.preventDefault(); void guard(async () => {
+      await call('group.create', { name: newName.value, parent: parent.value, scope: createScope.value }); await load(); groupManager(); say('记忆组已创建', 'ok')
+    }) } }, h('div', { class: 'group-create-grid' }, field('新记忆组', newName), field('上级记忆组', parent), field('归属', createScope), h('button', { type: 'submit', id: 'create-group', class: 'btn primary', text: '创建组' }))),
+    h('div', { class: 'group-rows' }, state.data.groups.map(group => {
+      const name = h('input', { class: 'input', value: group.name })
+      const move = groupSelect(group.parentId ?? '', true)
+      const priority = h('input', { class: 'input', type: 'number', min: 0, max: 100, value: group.priority })
+      const scope = h('select', { class: 'select' }, ['knowledge', 'conversation'].map(value => h('option', { value, selected: group.scope === value ? 'selected' : undefined, text: value === 'knowledge' ? '知识库' : '对话记忆' })))
+      const auto = h('input', { type: 'checkbox', checked: group.autoSummary })
+      return h('div', { class: 'group-row' }, h('div', { class: 'group-row-title' }, icon('folder'), h('span', { text: groupLabel(group) })),
+        h('div', { class: 'group-fields' }, field('名称', name), field('上级记忆组', move), field('归属', scope), field('优先级 · 0–100', priority)),
+        h('div', { class: 'group-actions' }, h('label', { class: 'switch-row' }, auto, 'DSH 自动总结'), h('span', { class: 'spacer' }),
+          button('删除', async () => {
+            if (!await desktop('confirm', `删除记忆组「${group.name}」？条目会移回默认组。`)) return
+            await call('group.delete', { id: group.id }); state.view = { kind: 'all' }; await load(); groupManager(); say('记忆组已删除', 'ok')
+          }, false, { class: 'btn ghost danger' }),
+          button('保存', async () => {
+            await call('group.update', { id: group.id, name: name.value, parent: move.value, scope: scope.value, priority: Number(priority.value), autoSummary: auto.checked }); await load(); groupManager(); say('分组已保存', 'ok')
+          })))
+    })))
+}
+function settings() {
+  const info = state.info
+  const url = h('input', { class: 'input', value: info.model.baseUrl ?? '', placeholder: 'https://api.deepseek.com/v1', id: 'model-url' })
+  const model = h('input', { class: 'input', value: info.model.model ?? '', placeholder: '模型名称', id: 'model-name' })
+  const key = h('input', { class: 'input', type: 'password', autocomplete: 'off', placeholder: info.hasKey ? '已保存密钥，留空则保留' : 'API 密钥（本机服务可留空）', id: 'model-key' })
+  const clearKey = h('input', { type: 'checkbox' })
+  const limits = state.data.limits
+  const limitControls = ['maxEntries', 'maxChars', 'baseMaxEntries', 'baseMaxChars'].map((name, i) => field(['知识条数', '知识字符预算', '底层约定条数', '底层约定字符预算'][i], h('input', { class: 'input', type: 'number', min: 1, value: limits[name], 'data-limit': name })))
+  const panels = [
+    ['general', '通用', 'database',
+      h('section', { class: 'col' }, h('h3', { text: '当前记忆库' }), h('p', { class: 'cap', text: '记忆保存在本机。打开其他记忆库，或为当前内容留一份备份。' }),
+        h('code', { class: 'path-box', text: info.databasePath }),
+        h('div', { class: 'row' }, button('打开其他记忆库', async () => {
+          if (!await discard()) return
+          const result = await desktop('open')
+          if (result) { state.selected = null; state.dirty = false; state.view = { kind: 'all' }; await load(); settings(); say('记忆库已切换', 'ok') }
+        }), button('备份数据库', async () => { const result = await desktop('backup'); if (result) say(`备份已保存：${result.path}`, 'ok') }))),
+      h('section', {}, h('div', { class: 'settings-info' }, icon('vault'), h('div', {}, h('strong', { text: `Memory Vault ${info.version}` }), h('p', { text: '独立桌面记忆库 · 支持 Codex 与 DSH 接口' }))))],
+    ['model', 'AI 服务', 'sparkles',
+      h('section', { class: 'col' }, h('h3', { text: '连接 AI 服务' }), h('p', { class: 'cap', text: '可选。用于预览和整理记忆。候选内容会发送到你配置的服务；密钥在本机加密保存。' }),
+        field('服务地址（含 /v1 等前缀，不含 /chat/completions）', url), field('模型名称', model), field('API 密钥', key), h('label', { class: 'row cap' }, clearKey, '删除已保存密钥'),
+        button('保存 AI 服务', async () => {
+          state.info = await desktop('settings', { baseUrl: url.value, model: model.value, apiKey: key.value, clearKey: clearKey.checked }); key.value = ''; render(); settings(); say('AI 服务设置已保存', 'ok')
+        }, true))],
+    ['limits', '记忆预算', 'book',
+      h('section', {}, h('h3', { text: '知识预算' }), h('p', { class: 'cap', text: '控制提供给模型的知识数量与长度。底层约定使用独立预算。' }), h('div', { class: 'limits-grid' }, limitControls), button('保存知识预算', async () => {
+        const fields = Object.fromEntries([...document.querySelectorAll('[data-limit]')].map(node => [node.dataset.limit, Number(node.value)]))
+        await call('settings.set', fields); await load(); say('知识预算已保存', 'ok')
+      }, true))],
+    ['connectors', 'Codex 与 DSH', 'code',
+      h('section', { class: 'col' }, h('h3', { text: '连接你的助手' }), h('p', { class: 'cap', text: '将配置合并到各自的配置文件，两个接口即可共用当前记忆库。切换库后请同步更新路径。' }),
+        h('div', { class: 'connector-label' }, icon('code'), 'Codex · config.toml'), h('textarea', { class: 'area config', readonly: 'readonly', value: info.connectors.codex, 'aria-label': 'Codex 接口配置' })),
+      h('section', { class: 'col' }, h('div', { class: 'connector-label' }, icon('conversation'), 'DSH · cordis.patch.yml'), h('span', { class: 'cap', text: '保留原插件安装，更新配置后重启 DSH。' }),
+        h('textarea', { class: 'area config', readonly: 'readonly', value: info.connectors.dsh, 'aria-label': 'DSH 接口配置' }))],
+    ['updates', '软件更新', 'refresh', updatePanel()],
+  ]
+  const activate = id => {
+    state.settingsTab = id
+    document.querySelectorAll('.settings-tab').forEach(node => { const active = node.dataset.tab === id; node.classList.toggle('active', active); node.setAttribute('aria-selected', String(active)); node.tabIndex = active ? 0 : -1 })
+    document.querySelectorAll('.settings-panel').forEach(node => node.classList.toggle('hidden', node.id !== `settings-${id}`))
   }
-  renderDrawer()
-  say('填好内容后按「创建」')
+  const tabs = h('nav', { class: 'settings-tabs', role: 'tablist', 'aria-label': '设置分类', 'aria-orientation': 'vertical' }, panels.map(([id, label, name]) => h('button', {
+    type: 'button', id: `tab-${id}`, class: `settings-tab${state.settingsTab === id ? ' active' : ''}`, role: 'tab', 'data-tab': id, 'aria-controls': `settings-${id}`, 'aria-selected': String(state.settingsTab === id), tabindex: state.settingsTab === id ? 0 : -1,
+    onClick: () => activate(id), onKeydown: event => {
+      if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return
+      event.preventDefault()
+      const index = panels.findIndex(row => row[0] === id)
+      const next = event.key === 'Home' ? 0 : event.key === 'End' ? panels.length - 1 : (index + (event.key === 'ArrowDown' ? 1 : -1) + panels.length) % panels.length
+      activate(panels[next][0]); el(`tab-${panels[next][0]}`).focus()
+    },
+  }, icon(name), label)))
+  modal('设置与连接', h('div', { class: 'settings-layout' }, tabs, h('div', {}, panels.map(([id, _label, _name, ...children]) => h('div', { class: `settings-panel${state.settingsTab === id ? '' : ' hidden'}`, id: `settings-${id}`, role: 'tabpanel', 'aria-labelledby': `tab-${id}` }, children)))))
+  renderUpdateStatus()
+}
+let updateSnapshot
+const updateLabels = { idle: '随时检查软件更新', checking: '正在检查更新…', available: '有新版本可用', up_to_date: '你已使用最新版本', unpublished: '发布源尚未提供更新清单', error: '暂时无法检查更新' }
+const updateAction = async (action, body) => { const snapshot = await desktop('updates', action, body); receiveUpdate(snapshot); return snapshot }
+// Update actions have their own state; long downloads never lock memory editing.
+const updateButton = (label, action, primary = false, props = {}) => h('button', { type: 'button', class: primary ? 'btn primary' : 'btn', text: label, onClick: () => { void Promise.resolve().then(action).catch(error => say(error.message, 'err')) }, ...props })
+function receiveUpdate(snapshot) {
+  if (!snapshot) return
+  updateSnapshot = snapshot
+  let banner = el('update-banner')
+  if (!banner) {
+    banner = h('div', { id: 'update-banner', class: 'update-banner hidden', role: 'status' })
+    document.querySelector('.workspace').insertBefore(banner, document.querySelector('.body'))
+  }
+  const visible = snapshot.status === 'available' && snapshot.settings?.notify !== false && snapshot.settings?.dismissedVersion !== snapshot.release?.version
+  banner.classList.toggle('hidden', !visible)
+  if (visible) banner.replaceChildren(icon('refresh'), h('span', { text: `Memory Vault ${snapshot.release.version} 已发布` }), h('span', { class: 'spacer' }), updateButton('查看更新', () => { state.settingsTab = 'updates'; settings() }, false, { class: 'btn soft' }), updateButton('稍后', () => updateAction('dismiss'), false, { class: 'btn ghost' }))
+  renderUpdateStatus()
+}
+function updatePanel() {
+  const snapshot = updateSnapshot ?? state.info.updates
+  const source = h('input', { class: 'input', id: 'update-source', value: snapshot.feedUrl, type: 'url', spellcheck: 'false' })
+  const auto = h('input', { type: 'checkbox', checked: snapshot.settings.autoCheck, id: 'update-auto' })
+  const notify = h('input', { type: 'checkbox', checked: snapshot.settings.notify, id: 'update-notify' })
+  return h('div', { class: 'col' },
+    h('section', { class: 'update-overview' }, h('div', { class: 'settings-info' }, icon('vault'), h('div', {}, h('h3', { text: 'Memory Vault' }), h('p', { text: `当前版本 ${state.info.version}` }))),
+      h('strong', { id: 'update-status', role: 'status', 'aria-live': 'polite' }), h('p', { class: 'cap', id: 'update-last-checked' }), h('p', { class: 'update-error hidden', id: 'update-error' }),
+      h('div', { class: 'update-progress hidden', id: 'update-progress' }, h('progress', { id: 'update-progress-bar', max: 100, value: 0, 'aria-label': '安装包下载进度' }), h('span', { id: 'update-progress-label', class: 'cap' })),
+      h('div', { class: 'row', id: 'update-actions' })),
+    h('section', { id: 'update-release', class: 'hidden' }, h('h3', { id: 'update-release-title' }), h('p', { class: 'update-notes', id: 'update-notes' })),
+    h('section', { class: 'col' }, h('h3', { text: '更新偏好' }),
+      h('label', { class: 'switch-row' }, auto, '自动检查更新'), h('p', { class: 'cap', text: '启动后检查，并在软件运行期间每 6 小时检查一次。' }),
+      h('label', { class: 'switch-row' }, notify, '发现新版本时提醒我'),
+      h('details', { class: 'update-source-settings' }, h('summary', { text: '发布源 · GitHub Releases' }), field('更新清单地址', source), h('p', { class: 'cap', text: '从发布页读取版本与安装包信息。' })),
+      updateButton('保存更新设置', async () => { await updateAction('configure', { feedUrl: source.value, autoCheck: auto.checked, notify: notify.checked }); say('更新设置已保存', 'ok') })))
+}
+function renderUpdateStatus() {
+  if (!el('update-status') || !updateSnapshot) return
+  const snapshot = updateSnapshot, transfer = snapshot.download
+  el('update-status').textContent = transfer.status === 'ready' ? '更新已下载，可以安装' : transfer.status === 'downloading' ? '正在下载安装包…' : updateLabels[snapshot.status] ?? '检查软件更新'
+  el('update-last-checked').textContent = snapshot.lastChecked ? `上次检查 ${new Date(snapshot.lastChecked).toLocaleString('zh-CN')}` : '尚未检查'
+  const error = transfer.error ?? snapshot.error
+  el('update-error').textContent = error ?? ''; el('update-error').classList.toggle('hidden', !error)
+  const progress = transfer.status === 'downloading'
+  el('update-progress').classList.toggle('hidden', !progress)
+  el('update-progress-bar').value = transfer.total ? Math.round(transfer.received / transfer.total * 100) : 0
+  el('update-progress-label').textContent = `${(transfer.received / 1048576).toFixed(1)} / ${(transfer.total / 1048576).toFixed(1)} MB`
+  el('update-release').classList.toggle('hidden', !snapshot.release)
+  el('update-release-title').textContent = snapshot.release ? `版本 ${snapshot.release.version}` : ''
+  el('update-notes').textContent = snapshot.release?.notes ?? ''
+  const actions = [updateButton('检查更新', () => updateAction('check'), false, { id: 'update-check', disabled: snapshot.status === 'checking' || progress })]
+  if (snapshot.status === 'available') {
+    if (progress) actions.push(updateButton('取消下载', () => updateAction('cancel'), false, { id: 'update-cancel' }))
+    else if (transfer.status === 'ready') actions.push(updateButton('安装更新并退出', async () => { if (await discard()) await desktop('updates', 'install') }, true, { id: 'update-install' }))
+    else actions.push(updateButton(transfer.status === 'cancelled' ? '重新下载' : '下载更新', () => updateAction('download'), true, { id: 'update-download' }))
+  }
+  el('update-actions').replaceChildren(...actions)
+}
+window.vault.onUpdates(receiveUpdate)
+function showCure() {
+  const result = state.cure
+  const rows = result.applied?.length ? result.applied : result.verdicts ?? []
+  modal(result.mode === 'applied' ? 'AI 整理结果' : 'AI 整理预览', h('span', { class: 'cap', text: result.mode === 'review' ? '此预览未修改数据库。' : '已应用整理结果。' }), rows.map(row => h('div', { class: 'group-row' }, h('div', { class: 'row' }, tag(row.verdict === 'reusable' ? '可复用' : '单次性'), tag(row.group ?? row.groupName ?? ''), h('span', { text: row.reason ?? '' })))),
+    (result.tagMap ?? []).map(row => h('div', { class: 'cap', text: `${row.from} → ${row.to || '删除标签'}：${row.reason ?? ''}` })))
+}
+for (const [id, apply] of [['curate', true], ['curate-review', false]]) el(id).addEventListener('click', () => void guard(async () => {
+  if (!await discard()) return
+  say(apply ? '正在整理…' : '正在生成预览…')
+  state.cure = await call('curate', { origin: el('curate-scope').value, apply, limit: 20 }); await load(); showCure(); say('完成', 'ok')
+}))
+async function newMemory() {
+  if (!await discard()) return
+  const group = state.data.groups.find(group => group.id === state.view.id) ?? state.data.groups.find(group => group.scope === 'knowledge') ?? state.data.groups[0]
+  selectEntry({ id: '', title: '', content: '', tags: [], kind: 'note', scope: group.scope, priority: 0, base: false, hidden: false, groupId: group.id })
+  document.querySelector('#drawer [data-field="title"]').focus()
+}
+el('new').addEventListener('click', () => void guard(newMemory))
+for (const [id, layout] of [['view-grid', 'grid'], ['view-list', 'rows']]) el(id).addEventListener('click', () => {
+  state.layout = layout; localStorage.setItem('memory-vault.layout', layout)
+  renderList()
+  for (const [buttonId, value] of [['view-grid', 'grid'], ['view-list', 'rows']]) { el(buttonId).classList.toggle('active', value === layout); el(buttonId).setAttribute('aria-pressed', String(value === layout)) }
 })
-
+el('sort').title = '对已加载的记忆排序；加载更多后一起排序'
+el('sort').addEventListener('change', renderList)
+el('manage-groups').addEventListener('click', () => void guard(async () => { if (await discard()) groupManager() }))
+el('settings').addEventListener('click', () => void guard(async () => { if (await discard()) settings() }))
+el('refresh').addEventListener('click', () => void guard(async () => { if (await discard()) { state.dirty = false; await load(); say('已刷新', 'ok') } }))
 let timer
-el('query').addEventListener('input', () => {
-  clearTimeout(timer)
-  timer = setTimeout(() => { void guard(load) }, 220)
+el('query').addEventListener('input', () => { clearTimeout(timer); timer = setTimeout(() => void guard(async () => { if (await discard()) { state.selected = null; state.dirty = false; await load() } }), 220) })
+document.addEventListener('keydown', event => {
+  if (document.body.dataset.mode === 'mistakebook') return
+  if (document.querySelector('dialog[open]') || !state.data) return
+  if (event.ctrlKey || event.metaKey) {
+    if (event.key.toLowerCase() === 'f') { event.preventDefault(); el('query').focus(); el('query').select() }
+    if (event.key.toLowerCase() === 'n') { event.preventDefault(); void guard(newMemory) }
+    if (event.key.toLowerCase() === 's' && state.selected) { event.preventDefault(); document.querySelector('.editor-form').requestSubmit() }
+  }
+  if (event.key === 'Escape') {
+    if (el('curation-menu').open) { el('curation-menu').open = false; return }
+    if (state.selected) void guard(async () => { if (await discard()) { state.selected = null; state.dirty = false; renderList(); renderDrawer() } })
+  }
 })
-
-document.addEventListener('keydown', (event) => {
-  if (event.key === 'Escape') { state.selected = null; renderDrawer() }
-})
-
-window.vault.onNote((message) => { say(message) })
-state.open = []
-void guard(async () => {
-  const info = await window.vault.info()
-  el('foot-right').textContent = info.databasePath
-  say('已打开记忆库')
-  await load()
-})
+document.addEventListener('click', event => { if (!el('curation-menu').contains(event.target)) el('curation-menu').open = false })
+window.addEventListener('focus', () => { if (document.body.dataset.mode !== 'mistakebook' && !state.dirty && state.data && !document.querySelector('dialog[open]')) void guard(() => load()) })
+mountMistakebook({ beforeEnter: async () => {
+  if (state.busy || document.querySelector('dialog[open]') || !await discard()) return false
+  state.dirty = false; state.selected = null; state.draft = null; render(); return true
+} })
+void guard(async () => { await load(); say('记忆库已打开') })

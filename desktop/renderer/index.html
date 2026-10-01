@@ -2,46 +2,51 @@
 <html lang="zh-CN">
 <head>
   <meta charset="utf-8" />
-  <!-- No network at all: the window talks to the main process, never the web. -->
-  <meta http-equiv="Content-Security-Policy"
-        content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'none'; form-action 'none'; base-uri 'none'" />
-  <title>记忆库</title>
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'none'; form-action 'none'; base-uri 'none'" />
+  <title>Memory Vault · 记忆库</title>
   <link rel="stylesheet" href="styles.css" />
+  <link rel="stylesheet" href="mistakebook.css" />
 </head>
 <body>
-  <header class="bar">
-    <div class="brand">记忆库</div>
-    <input id="query" class="search" type="search" placeholder="搜索记忆（空格分隔多个关键词）" autocomplete="off" />
-    <span class="spacer"></span>
-    <span id="scope-hint" class="cap"></span>
-    <select id="curate-scope" class="select" title="整理范围（按来源）">
-      <option value="generated">仅 AI 生成</option>
-      <option value="manual">仅人工输入</option>
-      <option value="all">全部</option>
-    </select>
-    <button id="curate" class="btn">AI 整理</button>
-    <button id="curate-review" class="btn ghost">预览</button>
-    <button id="new" class="btn primary">新建记忆</button>
-  </header>
-
-  <div class="body">
-    <aside class="side">
-      <div class="side-head">视图</div>
-      <div id="views" class="views"></div>
-      <div class="side-head">记忆组</div>
-      <div id="tree" class="tree"></div>
+  <div class="app-shell">
+    <aside class="side" aria-label="记忆库导航">
+      <div class="brand"><div class="brand-mark" aria-hidden="true"><span data-icon="vault"></span></div><div><div class="brand-name">记忆库</div><div class="brand-caption">Memory Vault</div></div></div>
+      <div class="side-scroll">
+        <div class="side-head">资料库</div><nav id="views" class="views" aria-label="记忆视图"></nav>
+        <div class="side-head groups-head"><span>记忆组</span><button id="manage-groups" class="icon-button" title="管理记忆组" aria-label="管理记忆组"><span data-icon="plus"></span></button></div>
+        <nav id="tree" class="tree" aria-label="记忆组"></nav>
+      </div>
+      <div class="side-bottom">
+        <div class="local-library"><span class="library-dot"></span><div><span class="library-name">本地记忆库</span><span class="library-caption">保存在你的电脑上</span></div><span data-icon="shield"></span></div>
+        <button id="settings" class="nav settings-link"><span data-icon="settings"></span><span>设置与连接</span><span data-icon="chevron-right" class="trailing"></span></button>
+      </div>
     </aside>
-
-    <main class="main">
-      <div id="status" class="status"></div>
-      <div id="cure-card" class="card hidden"></div>
-      <div id="list" class="list"></div>
-    </main>
-
-    <section id="drawer" class="drawer hidden"></section>
+    <div class="workspace">
+      <header class="bar">
+        <div class="breadcrumb"><span data-icon="library"></span><span id="breadcrumb">全部记忆</span></div>
+        <div class="toolbar-actions">
+          <label class="search-wrap"><span data-icon="search"></span><input id="query" class="search" type="search" placeholder="搜索记忆" aria-label="搜索记忆，空格分隔多个关键词" autocomplete="off" /><kbd>Ctrl F</kbd></label>
+          <button id="refresh" class="icon-button" title="刷新记忆" aria-label="刷新记忆"><span data-icon="refresh"></span></button>
+          <button id="new" class="btn primary" title="新建记忆 · Ctrl+N"><span data-icon="plus"></span><span>新建记忆</span></button>
+          <button id="mode-switch" class="mode-switch" title="切换到错题本" aria-label="切换到错题本" aria-pressed="false"><span data-icon="vault"></span></button>
+        </div>
+      </header>
+      <div class="body">
+        <main class="main">
+          <div class="page-heading"><div><div class="eyebrow">YOUR MEMORY, ORGANIZED</div><h1 id="view-title">全部记忆</h1><p id="view-description">让知识、灵感与约定各归其位。</p></div><div class="view-total"><strong id="view-count">0</strong><span>条记忆</span></div></div>
+          <div class="board-toolbar">
+            <div class="segmented" role="group" aria-label="显示方式"><button id="view-grid" class="segment active" title="卡片视图" aria-label="卡片视图" aria-pressed="true"><span data-icon="grid"></span></button><button id="view-list" class="segment" title="列表视图" aria-label="列表视图" aria-pressed="false"><span data-icon="list"></span></button></div>
+            <label class="sort-control"><span data-icon="sort"></span><select id="sort" aria-label="记忆排序"><option value="priority">优先级排序</option><option value="updated">最近更新</option><option value="title">按标题排序</option></select></label><span class="spacer"></span>
+            <details id="curation-menu" class="curation-menu"><summary class="btn soft"><span data-icon="sparkles"></span><span>AI 整理</span><span data-icon="chevron-down"></span></summary><div class="curation-popover"><h3>整理记忆</h3><p id="curation-hint" class="cap">合并重复内容，梳理分组与标签。</p><label class="col"><span class="label">整理范围</span><select id="curate-scope" class="select"><option value="generated">仅 AI 生成</option><option value="manual">仅人工输入</option><option value="all">全部记忆</option></select></label><div class="row"><button id="curate-review" class="btn">预览结果</button><button id="curate" class="btn primary">开始整理</button></div></div></details>
+          </div>
+          <div id="list" class="list"></div>
+        </main>
+        <section id="drawer" class="drawer hidden" aria-label="记忆编辑器"></section>
+      </div>
+      <footer class="foot"><span id="foot-left"></span><span class="spacer"></span><span id="foot-right">Codex / DSH 接口</span></footer>
+    </div>
   </div>
-
-  <footer class="foot"><span id="foot-left"></span><span class="spacer"></span><span id="foot-right"></span></footer>
+  <div id="status" class="status" role="status" aria-live="polite"></div>
   <script type="module" src="app.js"></script>
 </body>
 </html>

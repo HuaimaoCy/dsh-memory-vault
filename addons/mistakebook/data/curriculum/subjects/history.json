@@ -1,0 +1,55 @@
+{
+  "subjectID": "history",
+  "name": "历史",
+  "attributesVersion": "history-attrs-1.0.0",
+  "standard": {
+    "credits": { "required": 4, "selective": 6, "elective": 4 },
+    "classHours": { "required": 72, "selective": 108 },
+    "competencies": ["唯物史观", "时空观念", "史料实证", "历史解释", "家国情怀"],
+    "qualityLevels": 4,
+    "qualityLevelPass": 2,
+    "qualityLevelGaokao": 4,
+    "notes": [
+      "必修：中外历史纲要(4学分)；选必：国家制度与社会治理 / 经济与社会生活 / 文化交流与传播（各2学分）",
+      "水平2=毕业合格要求；水平4=等级性考试命题依据"
+    ]
+  },
+  "attributes": {
+    "history/ancient-china": {
+      "courseType": "必修", "theme": "中外历史纲要(上)·中国古代史", "hours": null, "hoursBasis": null,
+      "cognitiveLevel": 2, "competencies": ["唯物史观", "时空观念", "家国情怀"], "qualityMax": 4, "examScope": "高考",
+      "examWeightPrior": 0.26, "prerequisites": [],
+      "citation": "课标 四·(一)必修 中外历史纲要"
+    },
+    "history/modern-china": {
+      "courseType": "必修", "theme": "中外历史纲要(上)·中国近代史", "hours": null, "hoursBasis": null,
+      "cognitiveLevel": 2, "competencies": ["唯物史观", "家国情怀", "历史解释"], "qualityMax": 4, "examScope": "高考",
+      "examWeightPrior": 0.22, "prerequisites": ["history/ancient-china"],
+      "citation": "课标 四·(一)必修 中外历史纲要"
+    },
+    "history/contemporary-china": {
+      "courseType": "必修", "theme": "中外历史纲要(上)·中国现代史", "hours": null, "hoursBasis": null,
+      "cognitiveLevel": 2, "competencies": ["唯物史观", "家国情怀"], "qualityMax": 4, "examScope": "高考",
+      "examWeightPrior": 0.10, "prerequisites": ["history/modern-china"],
+      "citation": "课标 四·(一)必修 中外历史纲要"
+    },
+    "history/world-premodern": {
+      "courseType": "必修", "theme": "中外历史纲要(下)·世界古代与近代史", "hours": null, "hoursBasis": null,
+      "cognitiveLevel": 2, "competencies": ["时空观念", "历史解释"], "qualityMax": 4, "examScope": "高考",
+      "examWeightPrior": 0.14, "prerequisites": [],
+      "citation": "课标 四·(一)必修 中外历史纲要"
+    },
+    "history/world-modern": {
+      "courseType": "必修", "theme": "中外历史纲要(下)·世界现代史", "hours": null, "hoursBasis": null,
+      "cognitiveLevel": 2, "competencies": ["唯物史观", "历史解释"], "qualityMax": 4, "examScope": "高考",
+      "examWeightPrior": 0.18, "prerequisites": ["history/world-premodern"],
+      "citation": "课标 四·(一)必修 中外历史纲要"
+    },
+    "history/historiography": {
+      "courseType": "跨主题", "theme": "史学素养与史料实证（贯穿）", "hours": null, "hoursBasis": null,
+      "cognitiveLevel": 4, "competencies": ["史料实证", "历史解释", "唯物史观"], "qualityMax": 4, "examScope": "高考",
+      "examWeightPrior": 0.10, "prerequisites": [],
+      "citation": "课标 二·学科核心素养（高考开放性试题的主要立意）"
+    }
+  }
+}

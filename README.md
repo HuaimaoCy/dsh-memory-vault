@@ -1,10 +1,20 @@
-# dsh-memory-vault
+# Memory Vault
+
+This checkout is the independent `feat/mistake-notebook-mode` addon branch. The separate **Memory Vault 错题本** desktop app switches between memory and mistake-notebook modes using the top-right vault icon. See [the addon guide](docs/mistakebook.zh.md). The addon is excluded from `main`.
 
 English | [中文](README.zh.md)
 
+An independent desktop memory manager with Codex stdio MCP, the existing DSH plugin, CLI and loopback RPC over one SQLite database. The package name remains `dsh-memory-vault` for compatibility.
+
+See [the standalone app guide](docs/standalone.zh.md) for installation, host connections, backups and reproducible Windows builds. The sections below document the preserved DSH integration.
+
+Version 0.6.2 adds GitHub Releases update checks, desktop notifications, verified downloads and installation with a database backup. Codex, DSH, CLI and RPC can query updates. See [the update and release guide](docs/updates.zh.md).
+
+Version 0.6.3 adds image attachments, clipboard paste, drag/drop and large previews. Images are stored in the shared SQLite vault and included in backups. See [the image guide](docs/images.zh.md).
+
 ## Summary
 
-A knowledge and memory vault for DSH: conversations settle into **memory groups**, every memory is assigned freely between **conversation memory** and the **knowledge base**, the conversation-creation screen offers a **knowledge application** choice that pulls memories in from elsewhere, and useless memories can be **hidden** at any time. The model gets six tools and a standing memory index; a person gets a tile board in the sidebar, built from the shell's own components and design tokens.
+A knowledge and memory vault for DSH: conversations settle into **memory groups**, every memory is assigned freely between **conversation memory** and the **knowledge base**, the conversation-creation screen offers a **knowledge application** choice that pulls memories in from elsewhere, and useless memories can be **hidden** at any time. The model gets nine tools and a standing memory index; a person gets a tile board in the sidebar, built from the shell's own components and design tokens.
 
 ## Core concepts
 
@@ -372,7 +382,7 @@ dsh-memory-vault/
 │   ├── config.js         Config defaults and Standard Schema validation
 │   ├── store.js          SQLite schema, migrations, and every read/write operation
 │   ├── policy.js         Write rules shared by every surface
-│   ├── tools.js          The six model tools and their result rendering
+│   ├── tools.js          The nine model tools and their result rendering
 │   ├── prompt.js         The memory index and the applied-knowledge block
 │   ├── summarize.js      Out-of-band model-call driver and summarization prompt
 │   ├── curate.js         Curation prompt and verdict parsing

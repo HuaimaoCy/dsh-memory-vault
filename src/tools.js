@@ -34,7 +34,7 @@ function tool(spec) {
     parameters: spec.parameters,
     output: {
       schema: OPEN_OBJECT_OUTPUT,
-      render: (args, value) => [{ type: 'text', text: spec.render(args, value) }],
+      render: spec.renderContent ?? ((args, value) => [{ type: 'text', text: spec.render(args, value) }]),
     },
     execute: spec.execute,
   }
@@ -57,7 +57,7 @@ function entryLine(entry, withContent = true) {
   const group = entry.groupName === undefined || entry.groupName === null || entry.groupName === assignment
     ? ''
     : ` · 记忆组「${entry.groupName}」`
-  const head = `- ${entry.id} · 归属 ${assignment}${manual}${hidden}${group} · ${entry.kind}${priority}${tags}`
+  const head = `- ${entry.id} · 归属 ${assignment}${manual}${hidden}${group} · ${entry.kind}${priority}${tags}${entry.imageCount ? ` · ${entry.imageCount} 张图片（用 memory_image 读取）` : ''}`
   const title = entry.title === '' ? '' : `\n  标题: ${entry.title}`
   return withContent ? `${head}${title}\n  ${entry.content.replace(/\n/g, '\n  ')}` : `${head}${title}`
 }
@@ -100,7 +100,7 @@ function scopeDescription(subject) {
  * @param {() => void} deps.notify - Invalidate the memory index and Web page.
  * @returns {Record<string, unknown>[]} Definitions to register.
  */
-export function buildTools({ store, config, summarize, curate, notify }) {
+export function buildTools({ store, config, summarize, curate, notify, updates, saveImageAttachment }) {
   /** @type {Record<string, unknown>[]} */
   const definitions = []
 
@@ -805,5 +805,43 @@ export function buildTools({ store, config, summarize, curate, notify }) {
     },
   }))
 
+  definitions.push(tool({
+    name: 'memory_updates',
+    description: '查询 Memory Vault 的版本状态，或检查已配置的发布源。不会下载或安装软件。',
+    parameters: { type: 'object', properties: { action: { type: 'string', enum: ['status', 'check'] } }, required: ['action'] },
+    execute: async args => {
+      if (!updates) throw new Error('此宿主未接入更新服务')
+      if (!['status', 'check'].includes(args.action)) throw new Error('action 必须为 status 或 check')
+      return args.action === 'check' ? updates.check() : updates.status()
+    },
+    render: (_args, value) => JSON.stringify(value, null, 2),
+  }))
+  definitions.push(tool({
+    name: 'memory_image',
+    description: '管理记忆的图片附件。list 需 entryId，read/remove 需 id，add 需 entryId 与 Base64 data，可给 name/mimeType。读取会返回图像；支持 PNG、JPEG、WebP、GIF，每张最多 10 MB。',
+    parameters: { type: 'object', properties: {
+      action: { type: 'string', enum: ['list', 'read', 'add', 'remove'] }, entryId: { type: 'string' }, id: { type: 'string' }, data: { type: 'string' }, name: { type: 'string' }, mimeType: { type: 'string' },
+    }, required: ['action'] },
+    execute: async (args, exec) => {
+      switch (args.action) {
+        case 'list': return { images: store.listImages(String(args.entryId ?? '')) }
+        case 'read': {
+          const image = store.readImage(String(args.id ?? ''))
+          if (!saveImageAttachment) return { image }
+          const attachment = await saveImageAttachment(image, exec?.signal)
+          const { data, ...metadata } = image
+          return { image: metadata, attachment }
+        }
+        case 'add': { const images = store.addImage(String(args.entryId ?? ''), args); notify(); return { images } }
+        case 'remove': { const image = store.deleteImage(String(args.id ?? '')); notify(); return { image } }
+        default: throw new Error('未知图片操作')
+      }
+    },
+    renderContent: (_args, value) => {
+      const image = value.image ? { ...value.image } : null
+      if (image) delete image.data
+      return [{ type: 'text', text: JSON.stringify(image ? { image } : value, null, 2) }, ...(value.attachment ? [{ type: 'image', attachment: value.attachment }] : [])]
+    },
+  }))
   return definitions
 }

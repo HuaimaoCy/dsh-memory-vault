@@ -1939,10 +1939,24 @@ window.__ModuleLoader__.load({
       const [tags, setTags] = React.useState([])
       const [scope, setScope] = React.useState('conversation')
       const [groupRef, setGroupRef] = React.useState('')
+      const [images, setImages] = React.useState(creating ? [] : null)
+      const [imageError, setImageError] = React.useState(null)
+      const picker = React.useRef(null)
+      const [previewImage, setPreviewImage] = React.useState(null)
+      const previewDialog = React.useRef(null)
+      React.useEffect(() => { if (previewImage && previewDialog.current && !previewDialog.current.open) previewDialog.current.showModal() }, [previewImage])
 
       // The row can be replaced by a poll between renders; re-seed the editor
       // only when the identity or the stored revision changes.
       const revision = entry === undefined ? `new:${String(view.kind)}` : `${entry.id}:${String(entry.updatedAt)}`
+      React.useEffect(() => {
+        let active = true
+        setImageError(null)
+        if (!entry?.id) { setImages([]); return }
+        setImages(null)
+        void call('image.list', { entryId: entry.id }).then(result => Promise.all(result.images.map(async image => (await call('image.read', { id: image.id })).image))).then(result => { if (active) setImages(result) }).catch(error => { if (active) setImageError(error.message) })
+        return () => { active = false }
+      }, [revision])
       const [seeded, setSeeded] = React.useState(null)
       if (seeded !== revision) {
         setSeeded(revision)
@@ -1957,7 +1971,24 @@ window.__ModuleLoader__.load({
       }
 
       const back = () => { setView({ kind: 'list' }) }
+      const importImages = async files => {
+        try {
+          if (!images) throw new Error('请等待图片加载完成')
+          if (images.length + files.length > 16) throw new Error('每条记忆最多 16 张图片')
+          const added = []
+          for (const file of files) {
+            if (!['image/png', 'image/jpeg', 'image/webp', 'image/gif'].includes(file.type) || file.size > 10 * 1048576) throw new Error('支持 PNG、JPEG、WebP、GIF，每张最多 10 MB')
+            const dataUrl = await new Promise((resolve, reject) => { const reader = new FileReader(); reader.onload = () => resolve(reader.result); reader.onerror = () => reject(new Error('图片读取失败')); reader.readAsDataURL(file) })
+            const decoded = new Image(); decoded.src = dataUrl
+            await decoded.decode()
+            added.push({ name: file.name || '粘贴的图片.png', mimeType: file.type, size: file.size, width: decoded.naturalWidth, height: decoded.naturalHeight, data: dataUrl.slice(dataUrl.indexOf(',') + 1) })
+          }
+          if ([...images, ...added].reduce((total, image) => total + image.size, 0) > 20 * 1048576) throw new Error('每条记忆的图片总大小不能超过 20 MB')
+          setImages(current => [...current, ...added]); setImageError(null)
+        } catch (error) { setImageError(error.message) }
+      }
       const commit = async () => {
+        if (!images) return
         // The system tag rides along so an older Host half — one that has not
         // been restarted since system tags were introduced — stores it too
         // instead of dropping a tag it does not yet manage itself.
@@ -1969,6 +2000,7 @@ window.__ModuleLoader__.load({
               kind,
               tags: [...tags, '人工输入'],
               scope,
+              images: images.map(image => image.id ? { id: image.id } : { name: image.name, data: image.data, mimeType: image.mimeType }),
             }), t('created'))
           : await mutate(() => call('entry.update', undefined, {
               id: entry.id,
@@ -1976,6 +2008,7 @@ window.__ModuleLoader__.load({
               content,
               kind,
               tags: [...tags, autoTagOf(entry)],
+              images: images.map(image => image.id ? { id: image.id } : { name: image.name, data: image.data, mimeType: image.mimeType }),
             }), t('saved'))
         if (ok) setEditing(false)
       }
@@ -1997,7 +2030,7 @@ window.__ModuleLoader__.load({
             `${t('title')} / ${creating ? t('newEntry') : (entry.groupName ?? entry.groupId)} / ${headerTitle}`),
           h('span', { className: 'dsmv-spacer' }),
           creating || editing
-            ? h(Button, { variant: 'primary', disabled: busy || content.trim() === '', onClick: () => { void commit() } }, t('save'))
+            ? h(Button, { variant: 'primary', disabled: busy || !images || (content.trim() === '' && !images.length), onClick: () => { void commit() } }, t('save'))
             : h(Button, { onClick: () => { setEditing(true) } }, t('edit')),
           creating || editing
             ? h(Button, { onClick: () => { if (creating) back(); else setEditing(false) } }, t('cancel'))
@@ -2109,6 +2142,7 @@ window.__ModuleLoader__.load({
                   value: content,
                   placeholder: t('content'),
                   onChange: (event) => { setContent(event.target.value) },
+                  onPaste: event => { const files = [...(event.clipboardData?.files ?? [])].filter(file => file.type.startsWith('image/')); if (files.length) { event.preventDefault(); void importImages(files) } },
                   style: {
                     width: '100%', minHeight: '220px', resize: 'vertical', font: 'inherit', fontSize: '13px',
                     lineHeight: '22px', padding: '10px 12px', color: 'inherit', borderRadius: 'var(--dsw-radius-md)',
@@ -2125,6 +2159,18 @@ window.__ModuleLoader__.load({
                   }, entry.content)
                 : h(MarkdownText, { text: entry.content, labels: markdownLabels }),
           ),
+          h('div', { className: 'dsmv-col', style: { marginTop: '18px', gap: '10px' }, onDragOver: event => event.preventDefault(), onDrop: event => { event.preventDefault(); if (creating || editing) void importImages([...event.dataTransfer.files]) } },
+            h('div', { className: 'dsmv-row' }, h('strong', null, `图片${images ? ` · ${images.length}` : ''}`), h('span', { className: 'dsmv-spacer' }),
+              creating || editing ? h(Button, { disabled: !images || busy, onClick: () => picker.current?.click() }, '添加图片') : null),
+            h('input', { ref: picker, type: 'file', multiple: true, accept: 'image/png,image/jpeg,image/webp,image/gif', style: { display: 'none' }, onChange: event => { const files = [...event.target.files]; event.target.value = ''; void importImages(files) } }),
+            imageError ? h('div', { className: 'dsmv-error' }, imageError) : null,
+            images === null ? h('span', { className: 'dsmv-cap' }, '正在加载图片…') : h('div', { style: { display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(160px,1fr))', gap: '12px' } }, images.map((image, index) => h('div', { key: image.id ?? `${index}:${image.name}`, style: { minWidth: 0 } },
+              h('button', { type: 'button', onClick: () => setPreviewImage(image), title: image.name, style: { display: 'block', width: '100%', border: 0, padding: 0, background: 'transparent', cursor: 'pointer' } }, h('img', { src: `data:${image.mimeType};base64,${image.data}`, alt: image.name, style: { width: '100%', height: '130px', objectFit: 'contain', background: 'var(--dsw-alias-bg-base)', borderRadius: '8px' } })),
+              h('div', { className: 'dsmv-row' }, h('span', { className: 'dsmv-cap', style: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 } }, image.name), creating || editing ? h(Button, { size: 'sm', onClick: () => setImages(current => current.filter((_image, at) => at !== index)) }, '移除') : null)))),
+            creating || editing ? h('span', { className: 'dsmv-cap' }, '可拖入图片或粘贴截图，保存记忆后保留。') : null),
+          previewImage ? h('dialog', { ref: previewDialog, onClose: () => setPreviewImage(null), style: { maxWidth: '92vw', maxHeight: '92vh', border: 'none', borderRadius: '12px', padding: '16px', background: 'var(--dsw-alias-bg-base)', color: 'inherit' } },
+            h('div', { className: 'dsmv-row', style: { marginBottom: '12px' } }, previewImage.name, h('span', { className: 'dsmv-spacer' }), h(Button, { onClick: () => previewDialog.current.close() }, '关闭')),
+            h('img', { src: `data:${previewImage.mimeType};base64,${previewImage.data}`, alt: previewImage.name, style: { display: 'block', maxWidth: '85vw', maxHeight: '75vh', objectFit: 'contain' } })) : null,
         ),
 
         creating ? null : h('div', { className: 'dsmv-card' },

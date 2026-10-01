@@ -32,11 +32,14 @@ export function openVault(options = {}) {
     callModel: options.callModel,
     resolveRoute: options.resolveRoute,
     logger: options.logger,
+    config: options.config,
+    updates: options.updates,
   })
   const deps = {
     store: vault.store,
     config: vault.config,
     notify: vault.notify,
+    updates: vault.updates,
   }
   // Only pass the curation orchestration through when the vault actually has
   // one: a build without a model hook must fail that one operation with the
@@ -76,7 +79,7 @@ export function openVault(options = {}) {
     /** Close the database so the process can exit with nothing pending. */
     close() {
       try {
-        vault.store.close()
+        vault.dispose()
       } catch (_error) {
         // Already closed is not a failure worth reporting at shutdown.
       }

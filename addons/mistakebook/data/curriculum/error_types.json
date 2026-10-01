@@ -1,0 +1,47 @@
+{
+  "version": "error-types-1.0.0",
+  "types": [
+    {
+      "id": "concept",
+      "name": "概念理解错误",
+      "weight": 1.0,
+      "description": "概念/规律本身理解偏差，素养根基缺失，不修复会持续繁殖",
+      "competencyAlignment": "观念类素养（数学抽象/物理观念/化学观念/生命观念/人地协调观等）"
+    },
+    {
+      "id": "principle",
+      "name": "原理规律应用错误",
+      "weight": 0.9,
+      "description": "懂概念但不会选对/用对定理公式",
+      "competencyAlignment": "逻辑推理/科学思维/综合思维"
+    },
+    {
+      "id": "transfer",
+      "name": "方法迁移错误",
+      "weight": 0.8,
+      "description": "新情境下不会套用已会方法，高考情境化命题的主要失分点",
+      "competencyAlignment": "数学建模/科学探究/历史解释/思维品质"
+    },
+    {
+      "id": "operation",
+      "name": "运算执行错误",
+      "weight": 0.55,
+      "description": "思路对但算错，程序性失误，练习可消除",
+      "competencyAlignment": "数学运算/科学探究（数据处理）"
+    },
+    {
+      "id": "reading",
+      "name": "审题信息提取错误",
+      "weight": 0.45,
+      "description": "漏看、误解题设条件或图表信息，跨学科习惯性问题",
+      "competencyAlignment": "语言建构与运用/语言能力/区域认知"
+    },
+    {
+      "id": "presentation",
+      "name": "表述规范失分",
+      "weight": 0.35,
+      "description": "会而不对、对而不全：步骤跳步、术语不规范、卷面失分",
+      "competencyAlignment": "语言表达类"
+    }
+  ]
+}

@@ -11,11 +11,12 @@
  * @module dsh-memory-vault/src/store
  */
 
-import { copyFileSync, existsSync, mkdirSync } from 'node:fs'
+import { existsSync, mkdirSync } from 'node:fs'
 import { dirname } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
-import { randomUUID } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { normalizePriority } from './policy.js'
+import { normalizeImage, IMAGE_MAX_COUNT, IMAGE_TOTAL_BYTES } from './images.js'
 
 /** The two assignments a group or an entry can carry. */
 export const SCOPES = ['conversation', 'knowledge']
@@ -24,7 +25,7 @@ export const SCOPES = ['conversation', 'knowledge']
 export const ENTRY_KINDS = ['summary', 'fact', 'preference', 'decision', 'task', 'note']
 
 /** Bumped when a migration below changes the on-disk layout. */
-export const SCHEMA_VERSION = 6
+export const SCHEMA_VERSION = 7
 
 /**
  * How deep sub-groups may nest.
@@ -110,6 +111,7 @@ const MIGRATIONS = [
       addColumnIfMissing(db, 'groups', 'parent_id', 'TEXT REFERENCES groups(id) ON DELETE SET NULL')
     },
   },
+  { version: 7, summary: '记忆图片附件', apply: db => db.exec(IMAGE_SCHEMA) },
 ]
 
 /**
@@ -126,6 +128,22 @@ function addColumnIfMissing(db, table, column, declaration) {
   if (!present) db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${declaration}`)
 }
 
+const IMAGE_SCHEMA = `
+CREATE TABLE IF NOT EXISTS images (
+  id TEXT PRIMARY KEY,
+  entry_id TEXT NOT NULL REFERENCES entries(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  mime_type TEXT NOT NULL,
+  width INTEGER NOT NULL,
+  height INTEGER NOT NULL,
+  size INTEGER NOT NULL,
+  sha256 TEXT NOT NULL,
+  data BLOB NOT NULL,
+  created_at INTEGER NOT NULL,
+  UNIQUE (entry_id, sha256)
+) STRICT;
+CREATE INDEX IF NOT EXISTS images_entry ON images(entry_id);
+`
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS meta (
   key   TEXT PRIMARY KEY,
@@ -221,7 +239,7 @@ CREATE TABLE IF NOT EXISTS summaries (
 ) STRICT;
 
 CREATE INDEX IF NOT EXISTS summaries_group ON summaries(group_id);
-`
+` + IMAGE_SCHEMA
 
 /**
  * Parse a stored JSON column, falling back to an empty array for rows written
@@ -365,6 +383,7 @@ function entryView(row) {
     assigned: row.assigned,
     title: row.title,
     content: row.content,
+    imageCount: Number(row.image_count ?? 0),
     kind: row.kind,
     source: row.source,
     autoTag: autoTagFor(String(row.source)),
@@ -461,11 +480,17 @@ export class MemoryStore {
     if (path === ':memory:') return null
     const target = `${path}.v${String(from)}.bak`
     try {
-      if (!existsSync(target)) copyFileSync(path, target)
+      if (!existsSync(target)) this.backupTo(target)
       return target
     } catch (error) {
       throw new Error(`升级前备份失败（${target}）：${error instanceof Error ? error.message : String(error)}`)
     }
+  }
+
+  /** Make a consistent standalone SQLite snapshot, including committed WAL rows. */
+  backupTo(path) {
+    this.#db.prepare('VACUUM INTO ?').run(path)
+    return path
   }
 
   /**
@@ -1052,14 +1077,15 @@ export class MemoryStore {
    * @param {string|null} [input.scope] - Explicit assignment; defaults to the group's.
    * @returns {Record<string, unknown>} Created entry.
    */
-  createEntry({ groupId, content, title = '', kind = 'note', source = 'manual', sessionId = null, tags = [], scope = null, priority = 0, base = false }) {
+  createEntry({ groupId, content, title = '', kind = 'note', source = 'manual', sessionId = null, tags = [], scope = null, priority = 0, base = false, images = [] }) {
     const text = String(content ?? '').trim()
-    if (text === '') throw new Error('memory entry content must not be empty')
+    if (text === '' && (!Array.isArray(images) || !images.length)) throw new Error('memory entry content must not be empty')
     const group = this.requireGroup(groupId)
     const assignment = scope ?? group.scope
     if (!SCOPES.includes(assignment)) throw new Error(`memory entry scope must be one of ${SCOPES.join(', ')}`)
     const now = Date.now()
     const id = `mem_${randomUUID()}`
+    return this.transaction(() => {
     this.#db.prepare(`
       INSERT INTO entries (id, group_id, scope, assigned, title, content, kind, source, session_id, tags, priority, base, created_at, updated_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -1070,7 +1096,9 @@ export class MemoryStore {
       normalizePriority(priority), base === true ? 1 : 0, now, now,
     )
     this.#db.prepare('UPDATE groups SET updated_at = ? WHERE id = ?').run(now, group.id)
+    if (images.length) this.replaceImages(id, images)
     return this.requireEntry(id)
+    })
   }
 
   /**
@@ -1095,7 +1123,7 @@ export class MemoryStore {
    */
   requireEntry(id) {
     const row = this.#db.prepare(`
-      SELECT e.*, g.name AS group_name FROM entries e
+      SELECT e.*, g.name AS group_name, (SELECT count(*) FROM images i WHERE i.entry_id = e.id) AS image_count FROM entries e
       LEFT JOIN groups g ON g.id = e.group_id WHERE e.id = ?
     `).get(id)
     if (row === undefined) throw new Error(`memory entry "${id}" does not exist`)
@@ -1109,7 +1137,7 @@ export class MemoryStore {
    */
   findEntry(id) {
     const row = this.#db.prepare(`
-      SELECT e.*, g.name AS group_name FROM entries e
+      SELECT e.*, g.name AS group_name, (SELECT count(*) FROM images i WHERE i.entry_id = e.id) AS image_count FROM entries e
       LEFT JOIN groups g ON g.id = e.group_id WHERE e.id = ?
     `).get(id)
     return row === undefined ? undefined : entryView(row)
@@ -1136,7 +1164,7 @@ export class MemoryStore {
     }
     if (patch.content !== undefined) {
       const text = String(patch.content).trim()
-      if (text === '') throw new Error('memory entry content must not be empty')
+      if (text === '' && !patch.allowEmpty && !entry.imageCount) throw new Error('memory entry content must not be empty')
       sets.push('content = ?')
       values.push(text)
     }
@@ -1230,6 +1258,7 @@ export class MemoryStore {
     /** @type {unknown[]} */
     const values = []
     if (filter.includeHidden !== true) clauses.push('e.hidden = 0')
+    if (filter.hidden === true) clauses.push('e.hidden = 1')
     if (filter.base !== undefined) {
       clauses.push('e.base = ?')
       values.push(filter.base === true ? 1 : 0)
@@ -1263,9 +1292,9 @@ export class MemoryStore {
       clauses.push('EXISTS (SELECT 1 FROM json_each(e.tags) WHERE lower(json_each.value) = lower(?))')
       values.push(String(tag))
     }    const where = clauses.length === 0 ? '' : `WHERE ${clauses.join(' AND ')}`
-    values.push(Math.max(1, Math.min(500, filter.limit ?? 50)), Math.max(0, filter.offset ?? 0))
+    values.push(Math.max(1, Math.min(501, filter.limit ?? 50)), Math.max(0, filter.offset ?? 0))
     const rows = this.#db.prepare(`
-      SELECT e.*, g.name AS group_name FROM entries e
+      SELECT e.*, g.name AS group_name, (SELECT count(*) FROM images i WHERE i.entry_id = e.id) AS image_count FROM entries e
       LEFT JOIN groups g ON g.id = e.group_id
       ${where}
       ORDER BY e.priority DESC, e.updated_at DESC LIMIT ? OFFSET ?
@@ -1373,13 +1402,14 @@ export class MemoryStore {
    * @param {number} [input.limit] - Maximum rows.
    * @returns {Record<string, unknown>[]} Entries ordered by score, then recency.
    */
-  searchEntries({ query, scope, groupId, groupIds, tag, tags, includeHidden, limit = 20, offset = 0 }) {
+  searchEntries({ query, scope, groupId, groupIds, tag, tags, includeHidden, hidden, limit = 20, offset = 0 }) {
     const terms = String(query ?? '').split(/\s+/).map(term => term.trim()).filter(term => term !== '')
     /** @type {string[]} */
     const clauses = []
     /** @type {unknown[]} */
     const clauseValues = []
     if (includeHidden !== true) clauses.push('e.hidden = 0')
+    if (hidden === true) clauses.push('e.hidden = 1')
     if (scope !== undefined) {
       clauses.push('e.scope = ?')
       clauseValues.push(scope)
@@ -1418,11 +1448,11 @@ export class MemoryStore {
     // Placeholders bind in SQL text order: the score expression sits in the
     // SELECT list, so its values precede the WHERE clauses, then the LIMIT.
     const rows = this.#db.prepare(`
-      SELECT e.*, g.name AS group_name, ${score} AS score FROM entries e
+      SELECT e.*, g.name AS group_name, (SELECT count(*) FROM images i WHERE i.entry_id = e.id) AS image_count, ${score} AS score FROM entries e
       LEFT JOIN groups g ON g.id = e.group_id
       ${where}
       ORDER BY score DESC, e.priority DESC, e.updated_at DESC LIMIT ? OFFSET ?
-    `).all(...scoreValues, ...clauseValues, Math.max(1, Math.min(200, limit)), Math.max(0, offset))
+    `).all(...scoreValues, ...clauseValues, Math.max(1, Math.min(501, limit)), Math.max(0, offset))
     return rows.map(entryView)
   }
 
@@ -1930,5 +1960,51 @@ export class MemoryStore {
    */
   raw(sql) {
     return this.#db.prepare(sql).all()
+  }
+
+  listImages(entryId) {
+    this.requireEntry(String(entryId))
+    return this.#db.prepare('SELECT id, entry_id AS entryId, name, mime_type AS mimeType, width, height, size, sha256, created_at AS createdAt FROM images WHERE entry_id = ? ORDER BY created_at, id').all(entryId)
+  }
+  readImage(id) {
+    const row = this.#db.prepare('SELECT data, entry_id FROM images WHERE id = ?').get(String(id))
+    if (!row) throw new Error('图片不存在')
+    const image = this.listImages(row.entry_id).find(item => item.id === id)
+    const bytes = Buffer.from(row.data)
+    if (bytes.length !== image.size || createHash('sha256').update(bytes).digest('hex') !== image.sha256) throw new Error('图片数据校验失败，请从备份恢复')
+    return { ...image, data: bytes.toString('base64') }
+  }
+  replaceImages(entryId, inputs) {
+    const entry = this.requireEntry(entryId)
+    if (!Array.isArray(inputs) || inputs.length > IMAGE_MAX_COUNT) throw new Error('每条记忆最多 16 张图片')
+    const existing = this.listImages(entryId)
+    const planned = [], hashes = new Set()
+    for (const input of inputs) {
+      let image
+      if (input?.id) {
+        image = existing.find(item => item.id === input.id)
+        if (!image) throw new Error('图片不属于当前记忆')
+      } else image = normalizeImage(input)
+      if (!hashes.has(image.sha256)) { hashes.add(image.sha256); planned.push(image) }
+    }
+    if (planned.reduce((total, image) => total + image.size, 0) > IMAGE_TOTAL_BYTES) throw new Error('每条记忆的图片总大小不能超过 20 MB')
+    if (!entry.content.trim() && !planned.length) throw new Error('记忆至少需要正文或一张图片')
+    return this.transaction(() => {
+      for (const image of existing) if (!hashes.has(image.sha256)) this.#db.prepare('DELETE FROM images WHERE id = ?').run(image.id)
+      for (const image of planned) {
+        if (image.id || existing.some(item => item.sha256 === image.sha256)) continue
+        this.#db.prepare('INSERT INTO images (id,entry_id,name,mime_type,width,height,size,sha256,data,created_at) VALUES (?,?,?,?,?,?,?,?,?,?)')
+          .run(`img_${randomUUID()}`, entryId, image.name, image.mimeType, image.width, image.height, image.size, image.sha256, image.bytes, Date.now())
+      }
+      this.#db.prepare('UPDATE entries SET updated_at = ? WHERE id = ?').run(Date.now(), entryId)
+      return this.listImages(entryId)
+    })
+  }
+  addImage(entryId, input) { return this.replaceImages(entryId, [...this.listImages(entryId).map(image => ({ id: image.id })), input]) }
+  deleteImage(id) {
+    const image = this.readImage(String(id))
+    this.replaceImages(image.entryId, this.listImages(image.entryId).filter(item => item.id !== id).map(item => ({ id: item.id })))
+    const { data, ...metadata } = image
+    return metadata
   }
 }
