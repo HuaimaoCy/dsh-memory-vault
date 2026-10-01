@@ -1,6 +1,6 @@
 {
   "name": "dsh-memory-vault-desktop",
-  "version": "0.6.9",
+  "version": "0.7.0",
   "private": true,
   "description": "Desktop window for the DSH memory vault, built on the same host-free core as the plugin, the CLI and the RPC service.",
   "type": "module",
@@ -38,6 +38,6 @@
       "allowToChangeInstallationDirectory": true,
       "shortcutName": "Alaya"
     },
-    "executableName": "Memory Vault 笔记本"
+    "executableName": "Alaya"
   }
 }

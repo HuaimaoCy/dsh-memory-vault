@@ -483,5 +483,8 @@ mountMistakebook({ beforeEnter: async () => {
 } })
 void guard(async () => {
   await runAlayaStartup(load)
-  say('Alaya 已打开')
+}).then(() => {
+  // Open where the user left off; the notebook is this app's primary face.
+  if ((localStorage.getItem('alaya.mode') ?? 'notebook') === 'notebook') document.getElementById('mode-switch').click()
+  else say('Alaya 已打开')
 })

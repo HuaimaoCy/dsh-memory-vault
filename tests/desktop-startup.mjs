@@ -29,8 +29,11 @@ export async function run(window,bridge) {
   }
   await until("document.querySelector('#alaya-startup')===null")
   assert.ok(await js('performance.now()')-observed>1700)
+  // The notebook is the primary face: a fresh profile opens in it after the intro.
+  await until("document.body.dataset.mode==='mistakebook'")
   assert.equal(await js("document.querySelector('.app-shell').inert"),false)
-  assert.equal(await js("getComputedStyle(document.querySelector('.app-shell')).visibility"),'visible')
+  assert.equal(await js("document.querySelector('.app-shell').hidden"),true)
+  assert.equal(await js("document.querySelector('.mb-shell').hidden"),false)
   assert.deepEqual(window.getBounds(),windowBounds);assert.equal(window.isFullScreen(),wasFullscreen)
 
   const begin=source=>js(`(()=>{window.startupDone=false;import('./loading.js').then(({runAlayaStartup})=>runAlayaStartup(${source})).then(result=>{window.startupResult=result;window.startupDone=true},error=>{window.startupResult=error.message;window.startupDone=true})})()`)

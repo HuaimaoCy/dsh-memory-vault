@@ -27,7 +27,7 @@ export async function run(window,bridge) {
     assert.equal(await js("document.querySelector('.alaya-startup')===null"),true)
     const prefs=await js(`window.vault.settings({baseUrl:'http://127.0.0.1:${server.address().port}',model:'fixture',apiKey:'fixture-key'})`);assert.ok(prefs.ok)
     assert.ok((await api('configure',{endpoint:`http://127.0.0.1:${server.address().port}/layout_parsing`,apiKey:'fixture-ocr'})).ok)
-    await click('#mode-switch');await until("document.body.dataset.mode==='mistakebook'");await idle()
+    await until("document.body.dataset.mode==='mistakebook'");await idle()
     const note=(await api('save',{type:'note',title:'守恒关系',stem:'说明能量守恒成立的条件。'})).result
     await click('[data-mb-view=all]');await idle();await click(`[data-question-id="${note.id}"]`);await idle()
     await click('#mb-ai-solve');await until("document.querySelector('#mb-ai-cancel')!==null")
@@ -41,7 +41,8 @@ export async function run(window,bridge) {
     assert.match(await js("document.querySelector('#mb-status').textContent"),/401/)
     assert.equal(await js("document.querySelector('.alaya-loader:not([hidden])')===null"),true)
     status=200;delay=7000
-    await click('#mb-word-import');await idle()
+    await click('#mb-import');await until("document.querySelector('[data-import-tab=vocabulary]')!==null")
+    await click('[data-import-tab=vocabulary]');await until("!document.querySelector('#mb-word-photo-pane').hidden");await idle()
     const image='iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aD1sAAAAASUVORK5CYII='
     await js(`(()=>{const d=new DataTransfer();d.items.add(new File([Uint8Array.from(atob('${image}'),c=>c.charCodeAt(0))],'test.png',{type:'image/png'}));const p=document.querySelector('#mb-word-file');p.files=d.files;p.dispatchEvent(new Event('change',{bubbles:true}))})()`);await idle()
     await click('#mb-word-ocr-start');await until("!document.querySelector('#mb-word-photo-pane .alaya-loader').hidden")

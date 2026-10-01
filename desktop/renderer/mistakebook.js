@@ -78,12 +78,12 @@ export function mountMistakebook({ beforeEnter }) {
     state.data = await call('list', { view: state.view, type: state.type, subjectID: state.subjectID, nodeID: state.nodeID, query: state.query, order: state.order })
     renderSide(); renderList(); renderDetail()
   }
-  const switchButton = button('', async () => {
+  const switchButton = button([icon('vault'), '记忆库'], async () => {
     if (document.querySelector('dialog[open]') || !await discard()) return
+    localStorage.setItem('alaya.mode', 'memory')
     state.draft = null; state.dirty = false; shell.hidden = true; memory.hidden = false; document.body.dataset.mode = 'memory'
     document.getElementById('mode-switch').focus()
   }, false, { class: 'mode-switch', id: 'mb-mode-switch', title: '切换到记忆库', 'aria-label': '切换到记忆库', 'aria-pressed': 'true' })
-  switchButton.append(icon('vault'))
   const search = h('input', { type: 'search', class: 'search', id: 'mb-query', placeholder: '搜索笔记、模型与单词', 'aria-label': '搜索笔记' })
   let searchTimer
   search.addEventListener('input', () => {
@@ -107,20 +107,26 @@ export function mountMistakebook({ beforeEnter }) {
     const result = await call('import', value); state.draft = null; state.dirty = false; await load(); notify(`导入 ${result.created} 道题，跳过 ${result.skipped} 道重复题${result.unmapped ? `；${result.unmapped} 道旧知识点需重新分类` : ''}${result.missingImages ? `；${result.missingImages} 道需补充旧版原图` : ''}`)
   }) })
   const order = h('select', { id: 'mb-sort', class: 'select', 'aria-label': '错题排序', onChange: event => void guard(async () => { state.order = event.target.value; await load() }) }, h('option', { value: 'priority', text: '复习优先级' }), h('option', { value: 'updated', text: '最近更新' }))
+  const moreMenu = h('details', { class: 'mb-more', id: 'mb-more' },
+    h('summary', { class: 'btn soft', 'aria-label': '导入与导出' }, '导入 / 导出'),
+    h('div', { class: 'mb-more-menu' },
+      button('导出笔记本 JSON', async () => { moreMenu.removeAttribute('open'); if (await call('export')) notify('笔记本已导出，包含图片') }, false, { id: 'mb-export' }),
+      button('导入旧版错题 JSON', () => { moreMenu.removeAttribute('open'); jsonPicker.click() }, false, { id: 'mb-legacy-import' })))
+  document.addEventListener('click', event => { if (moreMenu.open && !moreMenu.contains(event.target)) moreMenu.removeAttribute('open') })
   shell.append(h('aside', { class: 'mb-side' },
     h('div', { class: 'brand' }, h('div', { class: 'mb-book-mark' }, icon('book')), h('div', {}, h('div', { class: 'brand-name', text: '笔记本' }), h('div', { class: 'brand-caption', text: 'ALAYA NOTEBOOK' }))),
-    h('div', { class: 'mb-side-scroll' }, h('div', { class: 'side-head', text: '我的学习' }), sideViews, h('div', { class: 'side-head mb-subject-heading', text: '笔记类型' }), categories, h('div', { class: 'side-head mb-subject-heading', text: '按学科整理' }), subjects),
+    h('div', { class: 'mb-side-scroll' }, h('div', { class: 'side-head', text: '我的学习' }), sideViews, h('details', { class: 'mb-side-group', id: 'mb-types-wrap', open: true }, h('summary', { text: '笔记类型' }), categories), h('details', { class: 'mb-side-group', id: 'mb-subjects-wrap' }, h('summary', { text: '按学科整理' }), subjects)),
     h('div', { class: 'mb-side-bottom' }, h('div', { class: 'mb-local' }, h('span', { class: 'library-dot' }), h('span', { text: '独立保存在本机' })),
       button([icon('settings'), '笔记本设置'], openSettings, false, { class: 'nav', id: 'mb-settings' }))),
     h('div', { class: 'mb-workspace' }, h('header', { class: 'mb-bar' }, h('div', { class: 'breadcrumb' }, icon('book'), h('span', { text: '学习空间' })),
-      h('div', { class: 'toolbar-actions' }, h('label', { class: 'search-wrap' }, icon('search'), search), button('单词检测', openQuiz, false, { id: 'mb-quiz' }), button('识别录入', openImport, false, { id: 'mb-import' }), button([icon('plus'), '新建笔记'], openCreate, true, { id: 'mb-new' }), switchButton)),
+      h('div', { class: 'toolbar-actions' }, h('label', { class: 'search-wrap' }, icon('search'), search), button('单词检测', openQuiz, false, { id: 'mb-quiz' }), button('录入', () => openImport(), false, { id: 'mb-import', title: '识别或粘贴，导入错题、笔记与词汇' }), button([icon('plus'), '新建笔记'], openCreate, true, { id: 'mb-new' }), switchButton)),
       h('div', { class: 'mb-body' }, h('main', { class: 'mb-main' }, h('div', { class: 'mb-page-heading' }, h('div', {}, h('div', { class: 'eyebrow', text: 'BUILD YOUR OWN UNDERSTANDING' }), heading, subtitle), h('div', { class: 'mb-total', id: 'mb-total' })),
-        h('div', { class: 'mb-summary', id: 'mb-summary' }), h('div', { class: 'mb-board' }, order, h('span', { class: 'spacer' }), button('词汇批量录入', openVocabularyImport, false, { class: 'btn ghost', id: 'mb-word-import' }), button('导入 JSON', () => jsonPicker.click(), false, { class: 'btn ghost', id: 'mb-legacy-import' }), button('导出', async () => { if (await call('export')) notify('笔记本已导出，包含图片') }, false, { class: 'btn ghost' })), list), detail),
-      h('footer', { class: 'mb-foot' }, h('span', { text: '笔记本 · 本地保存' }), h('span', { class: 'spacer' }), h('span', { text: '点击右上角图标切换模式' }))), jsonPicker, h('div', { id: 'mb-status', class: 'mb-status', role: 'status', 'aria-live': 'polite' }))
+        h('div', { class: 'mb-board' }, order, h('span', { class: 'spacer' }), moreMenu), list), detail),
+      h('footer', { class: 'mb-foot' }, h('span', { text: '笔记本 · 本地保存' }), h('span', { class: 'spacer' }))), jsonPicker, h('div', { id: 'mb-status', class: 'mb-status', role: 'status', 'aria-live': 'polite' }))
   document.body.append(shell)
   document.getElementById('mode-switch').addEventListener('click', () => void guard(async () => {
     if (!await beforeEnter()) return
-    await load(); document.getElementById('status').classList.remove('show'); memory.hidden = true; shell.hidden = false; document.body.dataset.mode = 'mistakebook'; search.focus()
+    await load(); localStorage.setItem('alaya.mode', 'notebook'); document.getElementById('status').classList.remove('show'); memory.hidden = true; shell.hidden = false; document.body.dataset.mode = 'mistakebook'; search.focus()
   }))
   function renderSide() {
     const stats = state.data.stats
@@ -130,14 +136,14 @@ export function mountMistakebook({ beforeEnter }) {
     if (state.subjectID) {
       const nodes = state.data.taxonomy.nodes.filter(node => node.subjectID === state.subjectID && node.parentID === state.subjectID)
       subjects.append(h('div', { class: 'mb-topics' }, nodes.map(node => button(node.name, () => changeView('all', state.subjectID, node.id), false, { class: `nav${state.nodeID === node.id ? ' on' : ''}` }))))
+      document.getElementById('mb-subjects-wrap').open = true
     }
   }
   function renderList() {
-    const dictionary = names(), stats = state.data.stats, rows = state.data.records
+    const dictionary = names(), rows = state.data.records
     heading.textContent = NOTE_TYPES[state.type]?.label || dictionary.get(state.nodeID) || dictionary.get(state.subjectID) || ({ all: '全部笔记', due: '今天，复习一点', mastered: '已经掌握', archived: '归档笔记', trash: '回收站' })[state.view]
     subtitle.textContent = NOTE_TYPES[state.type]?.caption || (state.view === 'due' ? '先独立回忆，再展开答案与笔记核对。' : '记录问题，建立模型，积累自己的解题方法。')
     document.getElementById('mb-total').replaceChildren(h('strong', { text: rows.length }), h('span', { text: '篇笔记' }))
-    document.getElementById('mb-summary').replaceChildren(...[['待复习', stats.due, '今天迈出一小步', 'due'], ['已掌握', stats.mastered, '让进步留得住', 'mastered'], ['笔记总数', stats.all, '一点一滴，建立理解', 'all']].map(([title, count, caption, view]) => button([h('span', { class: 'mb-summary-label', text: title }), h('strong', { text: count }), h('span', { class: 'cap', text: caption })], () => changeView(view), false, { class: 'mb-summary-card' })))
     list.replaceChildren()
     if (!rows.length) list.append(h('div', { class: 'mb-empty' }, h('div', { class: 'mb-empty-symbol' }, icon(NOTE_TYPES[state.type]?.icon||'book')), h('h2', { text: state.query ? '没有找到相关笔记' : state.view === 'due' ? '今天的复习已完成' : '从一篇笔记开始' }), h('p', { text: '整理错题、建立模型，或记下一个值得积累的单词。' }), button('新建笔记', openCreate, true)))
     for (const row of rows) {
@@ -207,7 +213,16 @@ export function mountMistakebook({ beforeEnter }) {
         draft.classificationSuggested ? h('p', { class: 'cap', text: '知识点由关键词建议，请确认后保存。' }) : null,
         draft.legacyNodeID ? h('p', { class: 'cap', text: `旧知识点「${draft.legacyNodeID}」需重新选择，原标识已保留。` }) : null,
         draft.type==='mistake'?field('我的作答', control('studentWork')):null, draft.type==='mistake'?field('参考答案', control('referenceAnswer')):null, draft.type==='mistake'?h('div', { class: 'mb-fields-row' }, field('错因类型', errorType), field('考试目标', target)):null, draft.type==='mistake'?field('错因与复盘', control('cause')):null)
-      if (STRUCTURED_FIELDS[draft.type]) form.append(h('div',{class:'mb-structured-fields'},STRUCTURED_FIELDS[draft.type].map(([key,label])=>field(label,control(`${draft.type}.${key}`,draft.type==='vocabulary'&&['word','phonetic','partOfSpeech'].includes(key)?1:['derivation','steps','examples'].includes(key)?5:3)))))
+      if (STRUCTURED_FIELDS[draft.type]) {
+        const renderField = ([key, label]) => field(label, control(`${draft.type}.${key}`, draft.type === 'vocabulary' && ['word', 'phonetic', 'partOfSpeech'].includes(key) ? 1 : ['derivation', 'steps', 'examples'].includes(key) ? 5 : 3))
+        const filled = [], empty = []
+        for (const entry of STRUCTURED_FIELDS[draft.type]) (String(draft[draft.type]?.[entry[0]] ?? '').trim() ? filled : empty).push(entry)
+        if (!draft.id || !empty.length) form.append(h('div', { class: 'mb-structured-fields' }, [...filled, ...empty].map(renderField)))
+        else {
+          if (filled.length) form.append(h('div', { class: 'mb-structured-fields' }, filled.map(renderField)))
+          form.append(h('details', { class: 'mb-structured-fields mb-structured-extra' }, h('summary', {}, `展开另外 ${empty.length} 个未填写字段`), empty.map(renderField)))
+        }
+      }
       if(draft.type==='physics') {
         const select=h('select',{class:'select',id:'mb-simulation-id',onChange:event=>{draft.simulationId=event.target.value;dirty()}},h('option',{value:'',text:'选择对应的物理仿真'}),SIMULATIONS.map(item=>h('option',{value:item.id,text:item.name,selected:draft.simulationId===item.id?'selected':undefined})))
         form.append(h('div',{class:'mb-simulation-panel'},field('交互仿真 · PhET',select),h('p',{class:'cap',text:'在独立窗口调整参数、观察模型，将结论记入笔记。需要联网。'}),button('打开物理仿真',async()=>{if(!draft.simulationId)throw new Error('请先选择物理仿真');notify('正在打开物理仿真…');await call('simulation.open',{id:draft.simulationId});notify('仿真已打开，可调整参数观察')},false,{id:'mb-simulation-open'})))
@@ -361,31 +376,6 @@ export function mountMistakebook({ beforeEnter }) {
     pane.controller = controller
     return pane
   }
-  async function openVocabularyImport(tab = 'photo') {
-    if (!await discard()) return
-    const text = h('textarea', { class: 'area', id: 'mb-word-import-text', rows: 10, placeholder: '一行一个词条：单词 | 中文释义 | 例句\n\nabandon | 放弃 | Never abandon hope.\nconserve | 保存；保护 | We should conserve energy.' })
-    const manualPane = h('div', { class: 'mb-capture' }, h('p', { class: 'cap', text: '与拍照识别使用同一解析：支持「单词 中文释义」「1. 单词 释义」「√2. 单词 释义」「belt n.带」以及「单词 | 释义 | 例句」（竖线或制表符）。同一个词会跳过。' }), text, button('导入词汇', async () => {
-      const entries = extractWords(text.value)
-      if (!entries.length) throw new Error('未识别到词条，请核对格式：单词在前，中文释义在后')
-      const result = await call('import', { records: entries.map(row => ({ type: 'vocabulary', title: row.word, vocabulary: { word: row.word, phonetic: row.phonetic, meaning: row.meaning, examples: row.examples } })) })
-      state.draft = null; state.dirty = false; state.type = 'vocabulary'; state.view = 'all'; state.subjectID = ''; state.nodeID = ''; await load(); node.close(); notify(`积累 ${result.created} 个词条，跳过 ${result.skipped} 个重复词`)
-    }, true, { id: 'mb-word-import-save' }))
-    const photoPane = wordPhotoPane()
-    const panes = { manual: manualPane, photo: photoPane }
-    const tabs = h('div', { class: 'mb-tabs', role: 'tablist', 'aria-label': '词汇录入方式' }, ...[['photo', '拍照识别'], ['manual', '手动粘贴']].map(([key, label]) => button(label, () => showTab(key), false, { class: 'mb-tab', role: 'tab', 'data-word-tab': key })))
-    const showTab = key => { for (const [name, pane] of Object.entries(panes)) pane.hidden = name !== key; for (const tab of tabs.querySelectorAll('.mb-tab')) { tab.classList.toggle('on', tab.dataset.wordTab === key); tab.setAttribute('aria-selected', String(tab.dataset.wordTab === key)) } }
-    showTab(tab)
-    const node = dialog('积累英语词汇', h('div', { class: 'mb-word-import' }, tabs, manualPane, photoPane), true)
-    const closeButton = node.querySelector('[aria-label="关闭对话框"]')
-    const close = async () => {
-      if (photoPane.controller.busy()) { photoPane.controller.cancel(); return }
-      if (photoPane.controller.hasWork() && !await confirm('识别出的词条尚未导入，放弃并关闭？')) return
-      node.close()
-    }
-    closeButton.replaceWith(h('button', { type: 'button', class: 'btn ghost', text: '关闭', 'aria-label': '关闭对话框', onClick: () => void close() }))
-    node.addEventListener('cancel', event => { event.preventDefault(); void close() })
-    if (tab === 'manual') text.focus()
-  }
   async function openQuiz() {
     const loading=createAlayaLoader({compact:true,hidden:true,label:'AI 正在生成检测题'})
     if(!await discard())return
@@ -446,7 +436,7 @@ export function mountMistakebook({ beforeEnter }) {
         await call('configure', { endpoint: endpoint.value, apiKey: key.value, clearKey: clear.checked }); key.value = ''; modelKey.value = ''; node.close(); notify('设置已安全保存')
       }, true, { id: 'mb-config-save' }), h('h3', { text: '外观' }),button('预览 Alaya 加载动画',showLoadingPreview,false,{id:'mb-loading-preview'}), h('h3', { text: '本地数据' }), h('p', { class: 'mb-data-path', text: config.path }), button('备份笔记本', async () => { if (await call('backup')) notify('笔记本已备份，包含原图') }), h('p', { class: 'cap', text: '笔记本使用独立数据库，不进入 Codex / DSH 的记忆上下文。' })))
   }
-  async function openImport() {
+  async function openImport(initial = 'mistake') {
     if (!await discard()) return
     const draft = { file: null, questions: [], running: false, modified: false }
     const notes = { files: [], running: false, imported: false, type: 'note' }
@@ -548,24 +538,39 @@ export function mountMistakebook({ beforeEnter }) {
       for (const file of incoming) notes.files.push({ file: await filePayload(file, true), name: file.name, status: 'pending', error: '', text: '', title: null, selected: true })
       renderNoteQueue()
     }
-    const noteSource = h('div', { class: 'mb-import-tools', hidden: true }, notePicker, button('选择照片 / PDF', () => notePicker.click()), noteQueue, h('div', { class: 'row' }, noteRecognize, noteCancel), noteProgress, field('导入学科', noteSubject))
-    const noteContent = h('div', { class: 'mb-import-content-inner', hidden: true }, h('span', { class: 'label', text: '识别结果 · 每张一篇，可校对后导入' }), notePreview, h('div', { class: 'row' }, h('span', { class: 'spacer' }), noteImport))
+    const noteSource = h('div', { class: 'mb-import-tools' }, notePicker, button('选择照片 / PDF', () => notePicker.click()), noteQueue, h('div', { class: 'row' }, noteRecognize, noteCancel), noteProgress, field('导入学科', noteSubject))
+    const noteContent = h('div', { class: 'mb-import-content-inner' }, h('span', { class: 'label', text: '识别结果 · 每张一篇，可校对后导入' }), notePreview, h('div', { class: 'row' }, h('span', { class: 'spacer' }), noteImport))
     noteSource.addEventListener('dragover', event => event.preventDefault())
     noteSource.addEventListener('drop', event => { event.preventDefault(); if (!notes.running) void guard(() => addNoteFiles(event.dataTransfer.files)) })
-    const typeSelect = h('select', { class: 'select', id: 'mb-import-type', onChange: event => {
-      const value = event.target.value
-      if (value === 'vocabulary') { node.close(); void openVocabularyImport('photo'); return }
-      notes.type = value === 'mistake' ? 'note' : value
-      const mistake = value === 'mistake'
-      mistakeSource.hidden = mistakeContent.hidden = !mistake
-      noteSource.hidden = noteContent.hidden = mistake
-      if (!mistake) noteProgress.textContent = `每一张图片识别为一篇${NOTE_TYPES[notes.type].label}并保留原图；PDF 只导入识别文字。`
-    } }, h('option', { value: 'mistake', text: '错题 · 拆题导入' }), h('option', { value: 'note', text: '普通笔记 · 每张一篇' }), h('option', { value: 'physics', text: '物理模型 · 每张一篇' }), h('option', { value: 'method', text: '解题方法 · 每张一篇' }), h('option', { value: 'vocabulary', text: '英语词汇 · 批量识别词条' }))
-    const node = dialog('识别录入', h('div', { class: 'mb-import-layout' }, h('div', { class: 'mb-import-source' }, field('导入为', typeSelect), loading.element, mistakeSource, noteSource), h('div', { class: 'mb-import-content' }, mistakeContent, noteContent)), true)
+    const noteTypeSeg = h('div', { class: 'mb-seg', role: 'group', 'aria-label': '保存为笔记类型' }, ['note', 'physics', 'method'].map(key => button(NOTE_TYPES[key].label, () => {
+      notes.type = key
+      for (const item of noteTypeSeg.querySelectorAll('.mb-seg-item')) { item.classList.toggle('on', item.dataset.noteType === key); item.setAttribute('aria-pressed', String(item.dataset.noteType === key)) }
+      noteProgress.textContent = `每一张图片识别为一篇${NOTE_TYPES[notes.type].label}并保留原图；PDF 只导入识别文字。`
+    }, false, { class: `mb-seg-item${notes.type === key ? ' on' : ''}`, 'data-note-type': key, 'aria-pressed': String(notes.type === key) })))
+    noteSource.prepend(field('保存为类型', noteTypeSeg))
+    const photoPane = wordPhotoPane()
+    const manualText = h('textarea', { class: 'area', id: 'mb-word-import-text', rows: 6, placeholder: '一行一个词条：单词 | 中文释义 | 例句\n\nabandon | 放弃 | Never abandon hope.\nconserve | 保存；保护 | We should conserve energy.' })
+    const manualPane = h('div', { class: 'mb-capture' }, h('p', { class: 'cap', text: '与拍照识别使用同一解析：支持「单词 中文释义」「1. 单词 释义」「√2. 单词 释义」「belt n.带」以及「单词 | 释义 | 例句」（竖线或制表符）。同一个词会跳过。' }), manualText, h('div', { class: 'row' }, h('span', { class: 'spacer' }), button('导入词汇', async () => {
+      const entries = extractWords(manualText.value)
+      if (!entries.length) throw new Error('未识别到词条，请核对格式：单词在前，中文释义在后')
+      const result = await call('import', { records: entries.map(row => ({ type: 'vocabulary', title: row.word, vocabulary: { word: row.word, phonetic: row.phonetic, meaning: row.meaning, examples: row.examples } })) })
+      state.draft = null; state.dirty = false; state.type = 'vocabulary'; state.view = 'all'; state.subjectID = ''; state.nodeID = ''; await load(); node.close(); notify(`积累 ${result.created} 个词条，跳过 ${result.skipped} 个重复词`)
+    }, true, { id: 'mb-word-import-save' })))
+    const mistakePane = h('div', { class: 'mb-import-layout' }, h('div', { class: 'mb-import-source' }, mistakeSource), h('div', { class: 'mb-import-content' }, mistakeContent))
+    const notePane = h('div', { class: 'mb-import-layout' }, h('div', { class: 'mb-import-source' }, noteSource), h('div', { class: 'mb-import-content' }, noteContent))
+    const vocabPane = h('div', { class: 'mb-import-vocab' },
+      h('div', { class: 'mb-import-section' }, h('h3', { text: '拍照 / 扫描积累本' }), photoPane),
+      h('div', { class: 'mb-import-section' }, h('h3', { text: '手动粘贴词条' }), manualPane))
+    const panes = { mistake: mistakePane, note: notePane, vocabulary: vocabPane }
+    const tabs = h('div', { class: 'mb-tabs mb-import-tabs', role: 'tablist', 'aria-label': '录入类型' }, ...[['mistake', '错题 · 拆题'], ['note', '整页笔记'], ['vocabulary', '英语词汇']].map(([key, label]) => button(label, () => showTab(key), false, { class: 'mb-tab', role: 'tab', 'data-import-tab': key })))
+    const showTab = key => { for (const [name, pane] of Object.entries(panes)) pane.hidden = name !== key; for (const tab of tabs.querySelectorAll('.mb-tab')) { tab.classList.toggle('on', tab.dataset.importTab === key); tab.setAttribute('aria-selected', String(tab.dataset.importTab === key)) } }
+    showTab(initial)
+    const node = dialog('录入笔记', h('div', { class: 'mb-import-dialog' }, tabs, loading.element, mistakePane, notePane, vocabPane), true)
     const closeButton = node.querySelector('[aria-label="关闭对话框"]')
     const close = async () => {
       if (draft.running || notes.running) await call('cancelOCR')
-      const pendingWork = draft.modified || (!notes.imported && notes.files.some(item => item.status === 'done'))
+      if (photoPane.controller.busy()) { photoPane.controller.cancel(); return }
+      const pendingWork = draft.modified || (!notes.imported && notes.files.some(item => item.status === 'done')) || photoPane.controller.hasWork()
       if (pendingWork && !await confirm('当前录入内容尚未导入，放弃并关闭？')) return
       node.close()
     }
@@ -575,7 +580,7 @@ export function mountMistakebook({ beforeEnter }) {
     preview.addEventListener('drop', event => { event.preventDefault(); void guard(() => receive(event.dataTransfer.files[0])) })
     preview.tabIndex = 0
     preview.addEventListener('paste', event => { if (event.clipboardData.files.length) { event.preventDefault(); void guard(() => receive(event.clipboardData.files[0])) } })
-    text.focus()
+    if (initial === 'mistake') text.focus()
   }
   document.addEventListener('keydown', event => {
     if (document.body.dataset.mode !== 'mistakebook' || document.querySelector('dialog[open]')) return

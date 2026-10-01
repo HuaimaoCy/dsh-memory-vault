@@ -8,6 +8,9 @@ export async function run(window, bridge) {
   const fill = (selector, value, type = 'input') => js(`(() => { const node = document.querySelector(${JSON.stringify(selector)}); node.${typeof value === 'boolean' ? 'checked' : 'value'} = ${JSON.stringify(value)}; node.dispatchEvent(new Event(${JSON.stringify(type)}, { bubbles: true })); })()`)
   await until("document.querySelectorAll('#views button').length === 4")
     await until("document.querySelector('#alaya-startup')===null")
+  // Fresh profiles open in the notebook; this suite drives the memory board.
+  await until("document.body.dataset.mode==='mistakebook'")
+  await click('#mb-mode-switch'); await until("document.body.dataset.mode==='memory'")
   await click('#manage-groups')
   await until("document.querySelector('#new-group-name')")
   await fill('#new-group-name', '界面测试组')

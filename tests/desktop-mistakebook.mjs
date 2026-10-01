@@ -36,7 +36,7 @@ export async function run(window, bridge) {
     await until("document.querySelectorAll('#views button').length===4")
     await until("document.querySelector('#alaya-startup')===null")
     assert.equal(await js("document.querySelector('#mode-switch').getAttribute('aria-label')"),'切换到笔记本')
-    await click('#mode-switch');await until("document.body.dataset.mode==='mistakebook'");await idle()
+    await until("document.body.dataset.mode==='mistakebook'");await idle()
     await click('#mb-new');await idle();await click('[data-create-type=mistake]');await idle()
     await fill('[data-mb-field=stem]','已知函数 f(x)=x²−2x，求它的最小值。')
     await fill('[data-mb-field=studentWork]','令 x=0，得到最小值 0。')

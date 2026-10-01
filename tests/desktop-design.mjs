@@ -28,6 +28,8 @@ export async function run(window, bridge) {
   }
   await until("document.querySelectorAll('#views button').length === 4")
     await until("document.querySelector('#alaya-startup')===null")
+  await until("document.body.dataset.mode==='mistakebook'")
+  await click('#mb-mode-switch'); await until("document.body.dataset.mode==='memory'")
   await shot('empty')
   await click('.empty .btn')
   await until("document.querySelector('#drawer [data-field=title]')")

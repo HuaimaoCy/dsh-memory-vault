@@ -4,6 +4,11 @@ import { once } from 'node:events'
 import { createHash } from 'node:crypto'
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { VERSION } from '../src/version.js'
+
+// The fixture always advertises a version newer than the running app.
+const [major, minor, patch] = VERSION.split('.').map(Number)
+const nextVersion = `${major}.${minor}.${patch + 1}`
 
 export async function run(window) {
   const bytes = Buffer.alloc(32768, 17)
@@ -14,7 +19,7 @@ export async function run(window) {
       const timer = setTimeout(() => res.end(bytes.subarray(1024)), 1000)
       res.on('close', () => clearTimeout(timer)); return
     }
-    if (req.url === '/latest.json') return res.end(JSON.stringify({ schemaVersion: 1, product: 'memory-vault', channel: 'stable', version: '0.6.4', notes: '更新提示与下载进度\n保留你的记忆和设置。', releaseUrl: `${base}/release`, assets: { 'win32-x64': { url: `${base}/installer.exe`, size: bytes.length, sha256: createHash('sha256').update(bytes).digest('hex') } } }))
+    if (req.url === '/latest.json') return res.end(JSON.stringify({ schemaVersion: 1, product: 'memory-vault', channel: 'stable', version: nextVersion, notes: '更新提示与下载进度\n保留你的记忆和设置。', releaseUrl: `${base}/release`, assets: { 'win32-x64': { url: `${base}/installer.exe`, size: bytes.length, sha256: createHash('sha256').update(bytes).digest('hex') } } }))
     res.writeHead(404); res.end()
   })
   server.listen(0, '127.0.0.1'); await once(server, 'listening')
@@ -40,6 +45,8 @@ export async function run(window) {
   try {
     await until("document.querySelectorAll('#views button').length === 4")
     await until("document.querySelector('#alaya-startup')===null")
+    await until("document.body.dataset.mode==='mistakebook'")
+    await click('#mb-mode-switch'); await until("document.body.dataset.mode==='memory'")
     await js(`window.vault.updates('configure', {feedUrl:${JSON.stringify(`${base}/latest.json`)},autoCheck:false})`)
     await click('#new')
     await js("const title=document.querySelector('#drawer [data-field=title]'); title.value='下载期间保留的草稿';title.dispatchEvent(new Event('input',{bubbles:true}))")
@@ -65,7 +72,7 @@ export async function run(window) {
     await js("document.querySelector('dialog').close()")
     await js("[...document.querySelectorAll('#update-banner button')].find(node=>node.textContent==='稍后').click()")
     await until("document.querySelector('#update-banner').classList.contains('hidden')")
-    assert.equal((await js("window.vault.updates('status')")).result.settings.dismissedVersion, '0.6.4')
+    assert.equal((await js("window.vault.updates('status')")).result.settings.dismissedVersion, nextVersion)
     console.log('Desktop updates: push banner, update tab, cancellation, verified download, install guard, preserved draft/settings and dismiss passed')
   } finally { server.closeAllConnections(); await new Promise(resolve => server.close(resolve)) }
 }
