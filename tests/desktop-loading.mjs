@@ -70,8 +70,8 @@ export async function run(window,bridge) {
       const frames=arg('--frames-directory')
       if(frames){
         mkdirSync(frames,{recursive:true})
-        await evaluate("(()=>{const s=document.createElement('style');s.textContent='header,.controls{display:none}main{width:100%;max-width:none;min-height:100vh;border:0;border-radius:0;padding:32px 48px;background:#fafbf8}.alaya-stage{height:360px}.alaya-loading-copy{text-align:center;padding-top:22px}';document.head.append(s)})()")
-        await preview.setSize(760,520)
+        await evaluate("(()=>{const s=document.createElement('style');s.textContent='.controls{display:none}';document.head.append(s)})()")
+        await preview.setSize(960,540)
         for(let i=0;i<150;i++){await seek(i*1000/30);await capture(preview,join(frames,`${String(i).padStart(4,'0')}.png`))}
       }
       preview.webContents.debugger.attach('1.3')

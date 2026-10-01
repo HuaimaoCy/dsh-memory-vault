@@ -1,6 +1,6 @@
 # Alaya · 记忆库
 
-此工作树为 **笔记本外挂独立分支 `feat/notebook-mode`**。启动 `Alaya`，点击右上角菱形图标切换模式。0.6.8 支持错题、物理模型、解题方法、英语词汇与普通笔记，含 AI 解答、词汇检测及 PhET 中文仿真。安装与操作见 [笔记本说明](docs/notebook.zh.md)。`main` 不包含此外挂。
+此工作树为 **笔记本外挂独立分支 `feat/notebook-mode`**。启动 `Alaya`，点击右上角菱形图标切换模式。0.6.9 支持错题、物理模型、解题方法、英语词汇与普通笔记，含 AI 解答、词汇检测及 PhET 中文仿真。安装与操作见 [笔记本说明](docs/notebook.zh.md)。`main` 不包含此外挂。
 
 [English](README.md) | 中文
 
