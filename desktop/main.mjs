@@ -203,11 +203,12 @@ function registerDesktop() {
 }
 async function openWindow() {
   window = new BrowserWindow({
-    width: 1440, height: 940, minWidth: 1040, minHeight: 650, backgroundColor: '#f7f8fa', title: 'Alaya · 记忆与笔记',
-    autoHideMenuBar: true, show: !selftest,
+    width: 1440, height: 940, minWidth: 1040, minHeight: 650, backgroundColor: '#fbfaf7', title: 'Alaya · 记忆与笔记',
+    autoHideMenuBar: true, show: false,
     icon: join(here, 'assets', 'memory-vault.png'),
     webPreferences: { preload: join(here, 'preload.cjs'), contextIsolation: true, nodeIntegration: false, sandbox: true, spellcheck: false, offscreen: selftest, backgroundThrottling: !selftest },
   })
+  if (!selftest) window.once('ready-to-show', () => window.show())
   window.webContents.setWindowOpenHandler(({ url }) => { if (/^https?:\/\//.test(url)) void shell.openExternal(url); return { action: 'deny' } })
   window.webContents.on('will-navigate', event => event.preventDefault())
   window.webContents.session.setPermissionRequestHandler((_contents, _permission, callback) => callback(false))

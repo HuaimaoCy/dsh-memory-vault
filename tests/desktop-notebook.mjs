@@ -35,6 +35,7 @@ export async function run(window,bridge) {
   const create=async type=>{await click('#mb-new');await idle();await click(`[data-create-type=${type}]`);await idle()}
   try {
     await until("document.querySelectorAll('#views button').length===4")
+    await until("document.querySelector('#alaya-startup')===null")
     await click('#mode-switch');await until("document.body.dataset.mode==='mistakebook'");await idle()
     await click('#mb-settings');await idle();await fill('#mb-model-url',`http://127.0.0.1:${server.address().port}`);await fill('#mb-model-name','fixture-model')
     await js("document.querySelectorAll('.mb-settings-form input[type=password]')[1].value='notebook-fixture-secret'")

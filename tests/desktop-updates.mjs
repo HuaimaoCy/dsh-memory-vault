@@ -39,6 +39,7 @@ export async function run(window) {
   }
   try {
     await until("document.querySelectorAll('#views button').length === 4")
+    await until("document.querySelector('#alaya-startup')===null")
     await js(`window.vault.updates('configure', {feedUrl:${JSON.stringify(`${base}/latest.json`)},autoCheck:false})`)
     await click('#new')
     await js("const title=document.querySelector('#drawer [data-field=title]'); title.value='下载期间保留的草稿';title.dispatchEvent(new Event('input',{bubbles:true}))")

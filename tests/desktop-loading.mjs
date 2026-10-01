@@ -21,6 +21,7 @@ export async function run(window,bridge) {
   let preview
   try {
     await until("document.querySelectorAll('#views button').length===4")
+    await until("document.querySelector('.alaya-startup')===null")
     assert.equal(await js("document.querySelector('.app-shell .brand-name').textContent"),'Alaya')
     assert.match(await js('document.title'),/Alaya/)
     assert.equal(await js("document.querySelector('.alaya-startup')===null"),true)

@@ -10,21 +10,20 @@
 .alaya-paper { position:absolute; inset:0; background:var(--alaya-paper); animation:alaya-paper 2400ms var(--ease-in-out) both; }
 .alaya-wordmark { position:absolute; left:50%; top:50%; width:180px; transform:translate(-50%,-50%); text-align:left; animation:alaya-wordmark 2400ms linear both; }
 .alaya-wordmark strong { display:block; font:750 52px/.94 Arial,"Segoe UI",sans-serif; letter-spacing:-.065em; color:var(--alaya-ink); }
-.alaya-submark { display:block; margin-top:7px; font:9px/1.2 "Segoe UI",Arial,sans-serif; letter-spacing:1.2px; color:#636d65; white-space:nowrap; }
 .alaya-rule { display:block; height:2px; background:var(--alaya-ink); transform-origin:left center; animation:alaya-rule 2400ms var(--ease-out) both; }
 .alaya-rule.top { margin-bottom:9px; }.alaya-rule.bottom { margin-top:8px; height:1px; }
 .alaya-track { position:absolute; bottom:32px; left:50%; width:180px; height:1px; overflow:hidden; transform:translateX(-50%); background:#daddd6; animation:alaya-wordmark 2400ms linear both; }
 .alaya-track i { display:block; width:60px; height:1px; background:#65746a; animation:alaya-wait 2400ms linear infinite; }
-.alaya-registration { position:absolute; left:18px; bottom:14px; font:9px/1.2 "Segoe UI",sans-serif; letter-spacing:2px; color:#7a847b; animation:alaya-wordmark 2400ms linear both; }
-.alaya-loading-copy { padding:17px 4px 0; }.alaya-loading-label { margin:0; font-size:13px; font-weight:550; line-height:1.8; }.alaya-loading-detail { margin:5px 0 0; font-size:11px; line-height:1.8; color:#90988c; }
+.alaya-loading-copy { padding:17px 4px 0; }.alaya-loading-label { margin:0; font-size:13px; font-weight:550; line-height:1.8; }
 .alaya-loader.compact { display:flex; align-items:center; gap:13px; margin:12px 0; }
 .alaya-loader.compact .alaya-stage { flex:0 0 96px; width:96px; height:72px; border-radius:5px; }
 .alaya-loader.compact .alaya-frame { width:25px; height:25px; border-width:1px; }.alaya-loader.compact .alaya-frame.inner { width:18px; height:18px; }.alaya-loader.compact .alaya-frame.spine { width:25px; height:9px; }.alaya-loader.compact .alaya-seed { font-size:7px; }
-.alaya-loader.compact .alaya-wordmark { width:68px; top:43%; }.alaya-loader.compact .alaya-wordmark strong { font-size:22px; }.alaya-loader.compact .alaya-submark,.alaya-loader.compact .alaya-registration { display:none; }.alaya-loader.compact .alaya-rule { height:1px; margin:4px 0; }
+.alaya-loader.compact .alaya-wordmark { width:68px; top:43%; }.alaya-loader.compact .alaya-wordmark strong { font-size:22px; }.alaya-loader.compact .alaya-rule { height:1px; margin:4px 0; }
 .alaya-loader.compact .alaya-track { width:68px; bottom:13px; }.alaya-loader.compact .alaya-track i { width:23px; }.alaya-loader.compact .alaya-loading-copy { padding:0; }.alaya-loader.compact .alaya-loading-label { font-size:12px; }
 .alaya-preview { width:min(600px,92vw); padding:0; border:1px solid #dfe4d9; border-radius:14px; color:#344038; background:#fff; box-shadow:0 24px 70px #17251c30; }
 .alaya-preview::backdrop { background:#26332a48; backdrop-filter:blur(4px); }.alaya-preview-head { display:flex; align-items:center; justify-content:space-between; gap:16px; padding:20px 24px; border-bottom:1px solid #edf0e7; }.alaya-preview-head strong { font-size:16px; font-weight:600; }.alaya-preview-body { padding:24px; }.alaya-preview-controls { display:flex; gap:10px; justify-content:flex-end; padding:0 24px 24px; }.alaya-preview button:focus-visible { outline:2px solid #78947e; outline-offset:3px; }
 .alaya-startup { position:fixed; inset:0; z-index:100; display:grid; place-items:center; padding:28px; background:#fbfaf7; }.alaya-startup .alaya-loader { max-width:550px; }.alaya-startup .alaya-stage { height:300px; }
+.alaya-booting .app-shell { visibility:hidden; }
 @keyframes alaya-frame-outer {
   0% { opacity:0; transform:translate(-50%,-50%) rotate(0deg) scale(.5); }
   10% { opacity:1; transform:translate(-50%,-50%) rotate(45deg) scale(.7); }

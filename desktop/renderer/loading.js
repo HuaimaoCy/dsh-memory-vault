@@ -1,5 +1,5 @@
 // An original Alaya wordmark and geometric sequence. No video or game assets.
-export function createAlayaLoader({ label = '正在载入', detail = '你的内容正在准备中', compact = false, hidden = false } = {}) {
+export function createAlayaLoader({ label = '正在载入', compact = false, hidden = false } = {}) {
   const element = document.createElement('section')
   element.className = `alaya-loader${compact ? ' compact' : ''}`
   element.hidden = hidden
@@ -9,20 +9,45 @@ export function createAlayaLoader({ label = '正在载入', detail = '你的内�
   element.innerHTML = `<div class="alaya-stage" aria-hidden="true">
     <div class="alaya-origin"><i class="alaya-frame outer"></i><i class="alaya-frame inner"></i><i class="alaya-frame spine"></i><span class="alaya-seed">ALAYA</span></div>
     <div class="alaya-paper"></div>
-    <div class="alaya-wordmark"><i class="alaya-rule top"></i><strong>ALAYA</strong><span class="alaya-submark">MEMORY &amp; KNOWLEDGE</span><i class="alaya-rule bottom"></i></div>
+    <div class="alaya-wordmark"><i class="alaya-rule top"></i><strong>ALAYA</strong><i class="alaya-rule bottom"></i></div>
     <div class="alaya-track"><i></i></div>
-    <span class="alaya-registration">A / 01</span>
-  </div><div class="alaya-loading-copy"><p class="alaya-loading-label"></p><p class="alaya-loading-detail"></p></div>`
-  const setLabel = (text, description = detail) => {
+  </div><div class="alaya-loading-copy"><p class="alaya-loading-label"></p></div>`
+  const setLabel = text => {
     element.querySelector('.alaya-loading-label').textContent = text
-    element.querySelector('.alaya-loading-detail').textContent = description
   }
   setLabel(label)
   return {
     element, setLabel,
-    show(text = label, description = detail) { setLabel(text, description); element.hidden = false; element.setAttribute('aria-busy', 'true') },
+    show(text = label) { setLabel(text); element.hidden = false; element.setAttribute('aria-busy', 'true') },
     hide() { element.hidden = true; element.setAttribute('aria-busy', 'false') },
     destroy() { element.remove() },
+  }
+}
+
+export async function runAlayaStartup(load) {
+  const startup = document.getElementById('alaya-startup') ?? document.createElement('div')
+  startup.id = 'alaya-startup'; startup.className = 'alaya-startup'
+  const shell = document.querySelector('.app-shell')
+  document.body.classList.add('alaya-booting'); shell.inert = true
+  const loader = createAlayaLoader({ label: '正在打开你的记忆库' })
+  startup.replaceChildren(loader.element)
+  if (!startup.isConnected) document.body.append(startup)
+  // Use the component's finite CSS timeline; the waiting line is infinite.
+  const mark = startup.querySelector('.alaya-wordmark')
+  const style = getComputedStyle(mark)
+  const animations = mark.getAnimations()
+  const duration = Math.max(...style.animationDuration.split(',').map(value => parseFloat(value) * (value.trim().endsWith('ms') ? 1 : 1000)), 0)
+  let timer
+  const limit = new Promise(resolve => { timer = setTimeout(resolve, animations.length ? duration + 200 : 200) })
+  const intro = animations.length ? Promise.race([Promise.allSettled(animations.map(animation => animation.finished)), limit]) : limit
+  try {
+    // Loading runs concurrently. Neither a fast load nor an error cuts off the intro.
+    const [result] = await Promise.allSettled([Promise.resolve().then(load), intro])
+    if (result.status === 'rejected') throw result.reason
+    return result.value
+  } finally {
+    clearTimeout(timer); loader.destroy(); startup.remove()
+    document.body.classList.remove('alaya-booting'); shell.inert = false
   }
 }
 
@@ -39,7 +64,7 @@ export function showLoadingPreview() {
   let loader
   const restart = () => {
     loader?.destroy()
-    loader = createAlayaLoader({ label: '正在整理你的知识', detail: '预览动画，实际任务结束后会立即退出' })
+    loader = createAlayaLoader({ label: '正在整理你的知识' })
     stage.replaceChildren(loader.element)
   }
   const controls = document.createElement('div'); controls.className = 'alaya-preview-controls'

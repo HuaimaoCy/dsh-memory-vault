@@ -27,6 +27,7 @@ export async function run(window, bridge) {
     assert.equal(result.overflow, false); assert.equal(result.mainOverflow, false); assert.equal(result.saveVisible, true); assert.equal(result.cards, true)
   }
   await until("document.querySelectorAll('#views button').length === 4")
+    await until("document.querySelector('#alaya-startup')===null")
   await shot('empty')
   await click('.empty .btn')
   await until("document.querySelector('#drawer [data-field=title]')")

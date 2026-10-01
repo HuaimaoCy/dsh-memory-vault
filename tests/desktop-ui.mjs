@@ -7,6 +7,7 @@ export async function run(window, bridge) {
   const click = selector => js(`document.querySelector(${JSON.stringify(selector)}).click()`)
   const fill = (selector, value, type = 'input') => js(`(() => { const node = document.querySelector(${JSON.stringify(selector)}); node.${typeof value === 'boolean' ? 'checked' : 'value'} = ${JSON.stringify(value)}; node.dispatchEvent(new Event(${JSON.stringify(type)}, { bubbles: true })); })()`)
   await until("document.querySelectorAll('#views button').length === 4")
+    await until("document.querySelector('#alaya-startup')===null")
   await click('#manage-groups')
   await until("document.querySelector('#new-group-name')")
   await fill('#new-group-name', '界面测试组')

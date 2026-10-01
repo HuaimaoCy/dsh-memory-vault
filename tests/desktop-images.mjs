@@ -18,6 +18,7 @@ export async function run(window, bridge) {
     if (folder) writeFileSync(join(folder, `${name}.png`), (await window.webContents.capturePage()).toPNG())
   }
   await until("document.querySelectorAll('#views button').length === 4")
+    await until("document.querySelector('#alaya-startup')===null")
   const makeFile = await js(`(() => {
     const canvas=document.createElement('canvas');canvas.width=720;canvas.height=420;const ctx=canvas.getContext('2d');
     ctx.fillStyle='#f0ede6';ctx.fillRect(0,0,720,420);ctx.fillStyle='#d5b996';ctx.beginPath();ctx.arc(550,105,45,0,Math.PI*2);ctx.fill();

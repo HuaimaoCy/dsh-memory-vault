@@ -244,7 +244,7 @@ export function mountMistakebook({ beforeEnter }) {
   async function solveAI() {
     if(!state.draft) return
     if(state.dirty||!state.draft.id) await save()
-    const loading=createAlayaLoader({label:'AI 正在整理这篇笔记',detail:'生成解答、推导或词条，先保存为可核对的草稿。'})
+    const loading=createAlayaLoader({label:'AI 正在整理这篇笔记'})
     const node=dialog('Alaya · AI 学习助手',h('div',{class:'mb-ai-progress'},loading.element))
     const cancel=h('button',{type:'button',class:'btn ghost',text:'取消生成',id:'mb-ai-cancel',onClick:()=>void call('cancelAI')})
     node.querySelector('[aria-label="关闭对话框"]').replaceWith(cancel)
@@ -256,7 +256,7 @@ export function mountMistakebook({ beforeEnter }) {
   function wordPhotoPane() {
     const files = [], controller = { busy: () => running || extracting, cancel: () => void call(extracting ? 'cancelAI' : 'cancelOCR'), hasWork: () => files.some(item => item.status === 'done') }
     let rows = [], edits = new Map(), existing = new Set(), running = false, extracting = false
-    const loading=createAlayaLoader({compact:true,hidden:true,label:'正在识别积累本',detail:'识别结果可校对，再导入词条。'})
+    const loading=createAlayaLoader({compact:true,hidden:true,label:'正在识别积累本'})
     const queue = h('div', { class: 'mb-capture-queue', id: 'mb-word-queue' })
     const progress = h('p', { class: 'cap', id: 'mb-word-progress', text: '一次可加入多页积累本照片（PNG / JPEG）或 PDF 扫描件，逐张自动识别后提取英语词条。' })
     const preview = h('div', { class: 'mb-word-preview', id: 'mb-word-preview', hidden: true })
@@ -387,7 +387,7 @@ export function mountMistakebook({ beforeEnter }) {
     if (tab === 'manual') text.focus()
   }
   async function openQuiz() {
-    const loading=createAlayaLoader({compact:true,hidden:true,label:'AI 正在生成检测题',detail:'根据积累的词条生成例句填空。'})
+    const loading=createAlayaLoader({compact:true,hidden:true,label:'AI 正在生成检测题'})
     if(!await discard())return
     state.draft=null;state.dirty=false;await load()
     const mode=h('select',{class:'select',id:'mb-quiz-mode'},h('option',{value:'spelling',text:'看中文，写英语 · 本地检测'}),h('option',{value:'cloze',text:'AI 例句填空 · 需要模型'})),count=h('input',{class:'input',type:'number',min:1,max:20,value:10,id:'mb-quiz-count'}),body=h('div',{class:'mb-quiz-body'})
@@ -450,7 +450,7 @@ export function mountMistakebook({ beforeEnter }) {
     if (!await discard()) return
     const draft = { file: null, questions: [], running: false, modified: false }
     const notes = { files: [], running: false, imported: false, type: 'note' }
-    const loading=createAlayaLoader({compact:true,hidden:true,label:'正在识别文字',detail:'完成后可校对文字，原图会保留。'})
+    const loading=createAlayaLoader({compact:true,hidden:true,label:'正在识别文字'})
     const text = h('textarea', { class: 'area mb-ocr-text', id: 'mb-import-text', placeholder: '粘贴题目或笔记文字，或选择图片 / PDF 后识别。\n\n1. 第一题\n2. 第二题', onInput: () => { draft.modified = true; draft.questions = []; results.replaceChildren() } })
     const results = h('div', { class: 'mb-segment-results', id: 'mb-segments' }), preview = h('div', { class: 'mb-source-preview', id: 'mb-ocr-preview' }, icon('book'), h('p', { text: '保留原题，校对文字' }))
     const filename = h('p', { class: 'cap', text: 'PNG / JPEG ≤ 10 MB，PDF ≤ 50 MB' }), keep = h('input', { type: 'checkbox', checked: true, id: 'mb-keep-source' })
