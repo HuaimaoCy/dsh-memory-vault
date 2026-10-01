@@ -252,8 +252,8 @@ export function mountMistakebook({ beforeEnter }) {
     finally{node.close()}
   }
   function wordPhotoPane() {
-    const files = [], controller = { busy: () => running || refining, cancel: () => void call('cancelOCR'), hasWork: () => files.some(item => item.status === 'done') }
-    let rows = [], edits = new Map(), existing = new Set(), running = false, refining = false
+    const files = [], controller = { busy: () => running || extracting, cancel: () => void call('cancelOCR'), hasWork: () => files.some(item => item.status === 'done') }
+    let rows = [], edits = new Map(), existing = new Set(), running = false, extracting = false
     const queue = h('div', { class: 'mb-capture-queue', id: 'mb-word-queue' })
     const progress = h('p', { class: 'cap', id: 'mb-word-progress', text: '一次可加入多页积累本照片（PNG / JPEG）或 PDF 扫描件，逐张自动识别后提取英语词条。' })
     const preview = h('div', { class: 'mb-word-preview', id: 'mb-word-preview', hidden: true })
@@ -278,47 +278,51 @@ export function mountMistakebook({ beforeEnter }) {
       state.draft = null; state.dirty = false; state.type = 'vocabulary'; state.view = 'all'; state.subjectID = ''; state.nodeID = ''
       await load(); pane.closest('dialog')?.close(); notify(`积累 ${result.created} 个词条，跳过 ${result.skipped} 个重复词`)
     }, true, { id: 'mb-word-import-photo-save', disabled: true })
-    const refineCancel = h('button', { type: 'button', class: 'btn ghost', text: '取消整理', hidden: true, id: 'mb-word-refine-cancel', onClick: () => void call('cancelAI') })
-    const refineButton = button('AI 整理释义', async () => {
-      const pending = rows.filter(row => row.selected && !row.duplicate && row.word.trim())
-      if (!pending.length) throw new Error('请先选择要整理的词条')
-      if (!await confirm('将向已配置的 AI 服务发送识别出的词条草稿，用于补全和校对中文释义。继续？')) return
-      refining = true; refineButton.disabled = true; refineCancel.hidden = false; notify('AI 正在整理释义…')
+    const extractCancel = h('button', { type: 'button', class: 'btn ghost', text: '取消整理', hidden: true, id: 'mb-word-extract-cancel', onClick: () => void call('cancelAI') })
+    const extractButton = button('AI 识别整理', async () => {
+      const text = files.filter(item => item.status === 'done').map(item => item.text).join('\n')
+      if (!text.trim()) throw new Error('请先完成拍照识别，再用 AI 整理')
+      if (!await confirm('AI 识别整理会把整页识别原文交给已配置的模型重新提取，更适合表格、勾选或潦草的手写页；本地提取的行可以手动改。继续？')) return
+      extracting = true; extractButton.disabled = true; extractCancel.hidden = false; notify('AI 正在从识别原文提取词条…')
       try {
-        const refined = await call('words.refine', { entries: pending.map(row => ({ word: row.word, phonetic: row.phonetic, meaning: row.meaning, examples: row.examples })) })
-        for (const item of refined) { const row = pending.find(row => normalizeWord(row.word) === normalizeWord(item.word)); if (row) Object.assign(row, item) }
-        renderPreview(); notify('AI 已整理释义，请核对后再导入')
-      } catch (error) { throw new Error(/abort|cancel/i.test(error.message) ? 'AI 整理已取消，识别结果保留' : error.message) }
-      finally { refining = false; refineButton.disabled = false; refineCancel.hidden = true }
-    }, false, { id: 'mb-word-refine', hidden: true })
-    void call('settings').then(config => { refineButton.hidden = !config.modelConfigured }).catch(() => {})
+        const entries = await call('words.extract', { text })
+        existing = await existingVocabularyWords()
+        applyEntries(entries, false)
+        notify(`AI 提取到 ${entries.length} 个词条，请核对后导入`)
+      } catch (error) { throw new Error(/abort|cancel/i.test(error.message) ? 'AI 识别已取消，本地提取结果保留' : error.message) }
+      finally { extracting = false; extractButton.disabled = false; extractCancel.hidden = true }
+    }, false, { id: 'mb-word-extract', hidden: true })
+    void call('settings').then(config => { extractButton.hidden = !config.modelConfigured }).catch(() => {})
     const renderPreview = () => {
       const duplicates = rows.filter(row => row.duplicate).length
       preview.hidden = summary.hidden = !rows.length
-      summary.textContent = rows.length ? `共识别 ${rows.length} 个词条${duplicates ? `，其中 ${duplicates} 个已存在（灰色不可选）` : ''}；可以直接修改后再导入。` : ''
+      summary.textContent = rows.length ? `共 ${rows.length} 个词条${duplicates ? `，其中 ${duplicates} 个已存在（灰色不可选）` : ''}；可以修改或删除后再导入。` : ''
       importButton.disabled = !rows.some(row => row.selected && !row.duplicate && row.word.trim())
       preview.replaceChildren(h('div', { class: 'mb-word-row mb-word-head' },
         h('input', { type: 'checkbox', checked: rows.some(row => !row.duplicate) && rows.filter(row => !row.duplicate).every(row => row.selected), onChange: event => { for (const row of rows) if (!row.duplicate) row.selected = event.target.checked; renderPreview() } }),
-        h('span', { text: '单词' }), h('span', { text: '音标' }), h('span', { text: '中文释义' }), h('span', { text: '例句' })),
+        h('span', { text: '单词' }), h('span', { text: '音标' }), h('span', { text: '中文释义' }), h('span', { text: '例句' }), h('span')),
         ...rows.map(row => {
           const input = (key, placeholder) => h('input', { class: 'input', value: row[key] ?? '', placeholder, onInput: event => { row[key] = event.target.value; importButton.disabled = !rows.some(item => item.selected && !item.duplicate && item.word.trim()) } })
           return h('div', { class: `mb-word-row${row.duplicate ? ' duplicate' : ''}`, 'data-word-row': normalizeWord(row.word) },
             h('input', { type: 'checkbox', checked: row.selected && !row.duplicate, disabled: row.duplicate ? true : undefined, title: row.duplicate ? '词库中已存在，导入时会跳过' : '', onChange: event => { row.selected = event.target.checked } }),
-            input('word', '单词或短语'), input('phonetic', '音标'), input('meaning', '中文释义'), input('examples', '例句'))
+            input('word', '单词或短语'), input('phonetic', '音标'), input('meaning', '中文释义'), input('examples', '例句'),
+            button('删除', () => { rows.splice(rows.indexOf(row), 1); renderPreview() }, false, { class: 'btn ghost danger', 'aria-label': `删除 ${row.word}` }))
         }))
+    }
+    const applyEntries = (entries, keepEdits = true) => {
+      const previous = new Map(rows.map(row => [normalizeWord(row.word), row]))
+      if (keepEdits) edits = new Map([...edits, ...previous])
+      rows = entries.map(entry => {
+        const prior = keepEdits ? edits.get(normalizeWord(entry.word)) : previous.get(normalizeWord(entry.word))
+        const merged = prior ? { ...entry, selected: prior.selected } : { ...entry, selected: true }
+        return { ...merged, duplicate: existing.has(normalizeWord(merged.word)) }
+      })
+      renderPreview()
     }
     const rebuild = async () => {
       existing = await existingVocabularyWords()
       const text = files.filter(item => item.status === 'done').map(item => item.text).join('\n')
-      const previous = new Map(rows.map(row => [normalizeWord(row.word), row]))
-      edits = new Map([...edits, ...previous])
-      const entries = text.trim() ? extractWords(text) : []
-      rows = entries.map(entry => {
-        const prior = edits.get(normalizeWord(entry.word))
-        const merged = prior ? { ...entry, word: prior.word, phonetic: prior.phonetic, meaning: prior.meaning, examples: prior.examples, selected: prior.selected } : { ...entry, selected: true }
-        return { ...merged, duplicate: existing.has(normalizeWord(merged.word)) }
-      })
-      renderPreview()
+      applyEntries(text.trim() ? extractWords(text) : [])
     }
     const cancelButton = h('button', { type: 'button', class: 'btn ghost', text: '取消识别', hidden: true, id: 'mb-word-ocr-cancel', onClick: () => void call('cancelOCR') })
     const recognizeButton = button('识别单词', async () => {
@@ -344,7 +348,7 @@ export function mountMistakebook({ beforeEnter }) {
     }, true, { id: 'mb-word-ocr-start' })
     const picker = h('input', { type: 'file', accept: 'image/png,image/jpeg,application/pdf', multiple: true, hidden: true, id: 'mb-word-file', onChange: event => { const picked = Array.from(event.target.files); event.target.value = ''; void guard(() => addFiles(picked)) } })
     const choose = button('选择照片 / PDF', () => picker.click(), false, { class: 'btn ghost' })
-    const pane = h('div', { class: 'mb-capture', id: 'mb-word-photo-pane' }, picker, h('div', { class: 'row' }, choose, h('span', { class: 'spacer' }), recognizeButton, cancelButton), queue, progress, summary, preview, h('div', { class: 'row mb-capture-actions' }, refineButton, refineCancel, h('span', { class: 'spacer' }), importButton))
+    const pane = h('div', { class: 'mb-capture', id: 'mb-word-photo-pane' }, picker, h('div', { class: 'row' }, choose, h('span', { class: 'spacer' }), recognizeButton, cancelButton), queue, progress, summary, preview, h('div', { class: 'row mb-capture-actions' }, extractButton, extractCancel, h('span', { class: 'spacer' }), importButton))
     pane.addEventListener('dragover', event => event.preventDefault())
     pane.addEventListener('drop', event => { event.preventDefault(); void guard(() => addFiles(event.dataTransfer.files)) })
     pane.addEventListener('paste', event => { if (event.clipboardData?.files.length) { event.preventDefault(); void guard(() => addFiles(event.clipboardData.files)) } })
@@ -354,10 +358,11 @@ export function mountMistakebook({ beforeEnter }) {
   async function openVocabularyImport(tab = 'photo') {
     if (!await discard()) return
     const text = h('textarea', { class: 'area', id: 'mb-word-import-text', rows: 10, placeholder: '一行一个词条：单词 | 中文释义 | 例句\n\nabandon | 放弃 | Never abandon hope.\nconserve | 保存；保护 | We should conserve energy.' })
-    const manualPane = h('div', { class: 'mb-capture' }, h('p', { class: 'cap', text: '支持竖线或制表符分隔。同一个词会跳过，释义可稍后手动填写或用 AI 补全。' }), text, button('导入词汇', async () => {
-      const records = text.value.split(/\r?\n/).map(line => line.trim()).filter(Boolean).map(line => { const [word, meaning = '', ...rest] = line.split(/[|\t]/).map(value => value.trim()); return { type: 'vocabulary', title: word, vocabulary: { word, meaning, examples: rest.join(' | ') } } })
-      if (!records.length) throw new Error('请先填写英语词汇')
-      const result = await call('import', { records }); state.draft = null; state.dirty = false; state.type = 'vocabulary'; state.view = 'all'; state.subjectID = ''; state.nodeID = ''; await load(); node.close(); notify(`积累 ${result.created} 个词条，跳过 ${result.skipped} 个重复词`)
+    const manualPane = h('div', { class: 'mb-capture' }, h('p', { class: 'cap', text: '与拍照识别使用同一解析：支持「单词 中文释义」「1. 单词 释义」「√2. 单词 释义」「belt n.带」以及「单词 | 释义 | 例句」（竖线或制表符）。同一个词会跳过。' }), text, button('导入词汇', async () => {
+      const entries = extractWords(text.value)
+      if (!entries.length) throw new Error('未识别到词条，请核对格式：单词在前，中文释义在后')
+      const result = await call('import', { records: entries.map(row => ({ type: 'vocabulary', title: row.word, vocabulary: { word: row.word, phonetic: row.phonetic, meaning: row.meaning, examples: row.examples } })) })
+      state.draft = null; state.dirty = false; state.type = 'vocabulary'; state.view = 'all'; state.subjectID = ''; state.nodeID = ''; await load(); node.close(); notify(`积累 ${result.created} 个词条，跳过 ${result.skipped} 个重复词`)
     }, true, { id: 'mb-word-import-save' }))
     const photoPane = wordPhotoPane()
     const panes = { manual: manualPane, photo: photoPane }

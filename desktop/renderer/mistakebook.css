@@ -123,8 +123,9 @@ body[data-mode="mistakebook"] > #status { display:none; }
 .mb-capture-item.failed { border-color:#efd3c5; }.mb-capture-item.failed .mb-capture-state { color:#aa6146; }
 .mb-capture-actions { border-top:1px dashed #e6e9de; padding-top:15px; }
 .mb-word-preview { display:flex; flex-direction:column; gap:7px; max-height:300px; overflow:auto; border:1px solid #e8ebdf; border-radius:10px; padding:12px; background:#fff; }
-.mb-word-row { display:grid; grid-template-columns:auto 1.1fr .85fr 1.4fr 1.4fr; gap:8px; align-items:center; }
+.mb-word-row { display:grid; grid-template-columns:auto 1.1fr .85fr 1.4fr 1.4fr auto; gap:8px; align-items:center; }
 .mb-word-row .input { padding:6px 9px; font-size:12px; }
+.mb-word-row .btn { padding:2px 7px; min-height:24px; font-size:10px; }
 .mb-word-head { position:sticky; top:-12px; background:#fff; padding-bottom:7px; border-bottom:1px solid #eeeee7; font-size:10px; color:#969e90; }
 .mb-word-row.duplicate { opacity:.55; }
 .mb-word-row.duplicate::after { content:'已存在'; grid-column:1/-1; margin-top:-3px; font-size:9px; color:#a58b6a; }

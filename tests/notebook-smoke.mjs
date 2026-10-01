@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import { createServer } from 'node:http'
 import { MistakebookStore, taxonomy, evaluate } from '../addons/mistakebook/store.mjs'
-import { solve, createCloze, refineWords } from '../addons/mistakebook/services.mjs'
+import { solve, createCloze, extractWordsWithAI } from '../addons/mistakebook/services.mjs'
 import { extractWords } from '../addons/mistakebook/words.mjs'
 import { SIMULATIONS, simulationURL } from '../addons/mistakebook/simulations.mjs'
 import { createModelAdapter } from '../src/model.js'
@@ -75,15 +75,23 @@ try {
   assert.equal(page[2].meaning,'放弃');assert.equal(page[2].examples,'Never give up hope.')
   assert.equal(page[3].meaning,'假设')
   assert.equal(extractWords('这页只有中文\n没有词条').length,0)
+  const tablePage='<table border="1"><tr><td colspan="2">第四周</td></tr><tr><td>1. pull over靠边停车</td><td>22. belt n.带、辟</td></tr><tr><td>√2. emergency (n.)紧急情况</td><td>25. panic (n.)恐慌、in panic\npanicked (v.一ed)</td></tr><tr><td>3. get the hang of掌握</td><td>40. part-time job.兼职</td></tr><tr><td>x1. terrified (adj.)害怕</td><td>5. attempt to=try to试图</td></tr></table>'
+  const tableWords=extractWords(tablePage)
+  assert.deepEqual(tableWords.map(row=>row.word),['pull over','belt','emergency','panic','panicked','get the hang of','part-time job','terrified','attempt to'])
+  assert.equal(tableWords[0].meaning,'靠边停车');assert.equal(tableWords[1].meaning,'n.带、辟');assert.equal(tableWords[6].meaning,'兼职');assert.equal(tableWords[8].meaning,'try to试图')
+  const markdownWords=extractWords('| 单词 | 释义 |\n| --- | --- |\n| slide | 滑下 |')
+  assert.deepEqual(markdownWords.map(row=>row.word),['slide'])
   try{extractWords(Array.from({length:1001},(_,index)=>`w${index.toString(2).replaceAll('0','b').replaceAll('1','c')} 释义`).join('\n'));throw new Error('should cap')}catch(error){assert.match(error.message,/1000/)}
-  const draftWords=extractWords('resilient\nassumption 假设')
-  response.choices[0].message.content=JSON.stringify({entries:draftWords.map(row=>({word:row.word,phonetic:'',meaning:row.meaning?`已校对：${row.meaning}`:'AI 补全释义',examples:''}))})
-  const refined=await refineWords(draftWords,adapter)
-  assert.equal(refined[0].meaning,'AI 补全释义');assert.equal(refined[1].meaning,'已校对：假设')
-  response.choices[0].message.content=JSON.stringify({entries:[...draftWords].reverse().map(row=>({word:row.word,phonetic:'',meaning:'x',examples:''}))})
-  await assert.rejects(()=>refineWords(draftWords,adapter),/原词|顺序/)
-  await assert.rejects(()=>refineWords(draftWords,{resolveRoute:()=>undefined}),/配置/)
-  await assert.rejects(()=>refineWords(Array.from({length:501},()=>({word:'x'})),adapter),/500/)
+  response.choices[0].message.content=JSON.stringify({entries:[{word:'pull over',phonetic:'',meaning:'（把车）开到路边',examples:''},{word:'emergency',phonetic:'',meaning:'紧急情况',examples:''},{word:'pull  over',phonetic:'',meaning:'重复',examples:''}]})
+  const aiWords=await extractWordsWithAI(tablePage,adapter)
+  assert.equal(aiWords.length,2);assert.equal(aiWords[0].meaning,'（把车）开到路边')
+  assert.ok(request.body.messages[1].content.includes('<table'))
+  response.choices[0].message.content=JSON.stringify({entries:[{word:'pull over',meaning:'x'},{word:'紧急情况',meaning:'y'}]})
+  await assert.rejects(()=>extractWordsWithAI(tablePage,adapter),/词形/)
+  response.choices[0].message.content='not JSON'
+  await assert.rejects(()=>extractWordsWithAI(tablePage,adapter),/结构化|格式/)
+  await assert.rejects(()=>extractWordsWithAI(tablePage,{resolveRoute:()=>undefined}),/配置/)
+  await assert.rejects(()=>extractWordsWithAI('词'.repeat(200001),adapter),/过多/)
   assert.throws(()=>simulationURL('unknown'),/仿真/);assert.equal(SIMULATIONS.length,4);for(const item of SIMULATIONS)assert.match(simulationURL(item.id),/^https:\/\/phet.colorado.edu\/sims\/html\//)
   const legacy=store.read(mistake.id);store.close()
   const db=new DatabaseSync(path);const old={...legacy};for(const field of ['type','title','physics','method','vocabulary','simulationId','aiResult','contentHash','aiStale','images','value'])delete old[field]
@@ -91,5 +99,5 @@ try {
   store=new MistakebookStore(path);assert.ok(existsSync(store.migrationBackup));const migrated=store.read(old.id)
   assert.equal(migrated.type,'mistake');assert.equal(migrated.updatedAt,old.updatedAt);assert.equal(migrated.createdAt,old.createdAt);assert.equal(migrated.revision,old.revision);assert.equal(migrated.images[0].data,image.data)
   const before=store.records().length, restored=new MistakebookStore(join(folder,'restored.sqlite'));try{restored.import(store.export());assert.equal(restored.records().length,before)}finally{restored.close()}
-  console.log('Notebook: five types, structure/search, v1 backup/migration, vision API, AI validation/cancel/provenance, manual preservation, word capture from OCR pages with dedupe/limits, AI word refinement, word dedup, private quizzes/scoring/review/stale/deleted entries, cloze and simulation allowlist passed')
+  console.log('Notebook: five types, structure/search, v1 backup/migration, vision API, AI validation/cancel/provenance, manual preservation, word capture from OCR pages and HTML tables with dedupe/limits, AI page-level word extraction, word dedup, private quizzes/scoring/review/stale/deleted entries, cloze and simulation allowlist passed')
 } finally {store.close();server.close();server.closeAllConnections();rmSync(folder,{recursive:true,force:true})}
