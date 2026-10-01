@@ -40,7 +40,7 @@ try {
   const otherPath = join(dir, 'other.sqlite')
   const other = new DatabaseSync(otherPath)
   other.exec('CREATE TABLE unrelated (id INTEGER)'); other.close()
-  assert.throws(() => validateVaultFile(otherPath), /不是 Memory Vault/)
+  assert.throws(() => validateVaultFile(otherPath), /不是 Alaya/)
   const backup = createMemoryVault({ databasePath: backupPath })
   try {
     assert.equal(backup.store.stats().totals.entries, vault.store.stats().totals.entries)

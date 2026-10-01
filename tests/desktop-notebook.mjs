@@ -110,7 +110,56 @@ export async function run(window,bridge) {
     assert.equal(bridge.vault.store.listEntries({limit:100}).length,initial)
     const bad=await api('simulation.open',{id:'evil'});assert.equal(bad.ok,false)
     if(process.argv.includes('--test-simulation')) await testSimulation(window)
+    // 手写笔记：画布书写 → 保存手写页 → 图片入库
+    await click('[data-mb-view=all]');await idle()
+    await create('handwriting')
+    await fill(field('title'),'电磁学手写')
+    const draw=`(()=>{const c=document.querySelector('#mb-handwrite-canvas');const r=c.getBoundingClientRect();const p=(x,y)=>new PointerEvent('pointerdown',{pointerId:1,clientX:r.left+x,clientY:r.top+y,bubbles:true});const m=(x,y)=>new PointerEvent('pointermove',{pointerId:1,clientX:r.left+x,clientY:r.top+y,bubbles:true});c.dispatchEvent(p(60,60));for(let i=0;i<=30;i++)c.dispatchEvent(m(60+i*8,60+Math.sin(i/4)*30));c.dispatchEvent(new PointerEvent('pointerup',{pointerId:1,bubbles:true}));return true})()`
+    await js(draw)
+    await click('#mb-hw-save');await idle()
+    assert.equal(await js("document.querySelectorAll('.mb-image-thumb').length"),1)
+    await click('#mb-save');await idle()
+    const written=(await api('list',{type:'handwriting'})).result.records
+    assert.equal(written.length,1);assert.equal(written[0].imageCount,1);assert.equal(written[0].title,'电磁学手写')
+    // 多选删除：勾选两篇移入回收站，再恢复
+    const beforeTrash=(await api('list',{view:'trash'})).result.records.length
+    await click('#mb-pick');await until("document.querySelector('#mb-pick-bar')!==null");await idle()
+    const cardIds=await js("[...document.querySelectorAll('[data-question-id]')].map(n=>n.dataset.questionId)")
+    for(const id of cardIds){await click(`[data-question-id="${id}"]`);await idle()}
+    const total=cardIds.length
+    assert.equal(await js("document.querySelector('#mb-pick-bar strong').textContent"),`已选 ${total} 篇`)
+    await click('#mb-batch-delete');await until("document.querySelector('#mb-pick-bar')===null");await idle()
+    assert.equal((await api('list',{view:'trash'})).result.records.length,beforeTrash+total)
+    await click('[data-mb-view=trash]');await idle()
+    await click('#mb-pick');await until("document.querySelector('#mb-pick-bar')!==null");await idle()
+    await js("document.querySelector('#mb-pick-all').click()");await idle()
+    await click('#mb-batch-restore');await until("document.querySelector('#mb-pick-bar')===null");await idle()
+    assert.equal((await api('list',{view:'trash'})).result.records.length,beforeTrash)
+    await click('[data-mb-view=all]');await idle()
+    // 词汇视图：紧凑词条磁贴 + 词典式复习卡
+    await click('[data-mb-type=vocabulary]');await until("document.querySelectorAll('.mb-word-card').length>0");await idle()
+    assert.equal(await js("document.querySelector('.mb-word-card .mb-word-term')?.textContent.length>0"),true)
+    assert.equal(await js("document.querySelector('#mb-list').classList.contains('words')"),true)
+    const anyWord=(await api('list',{type:'vocabulary'})).result.records[0]
+    await click(`[data-question-id="${anyWord.id}"]`);await idle()
+    await click('#mb-start-review');await idle();await click('#mb-reveal');await idle()
+    assert.equal(await js("document.querySelector('#mb-dict .mb-dict-term')?.textContent"),anyWord.vocabulary.word)
+    const sensePrefix=anyWord.vocabulary.meaning.slice(0,4)
+    assert.equal(await js(`document.querySelector('#mb-dict .mb-dict-sense')?.textContent.includes(${JSON.stringify(sensePrefix)})`),true)
+    await js("document.querySelector('[aria-label=\"关闭题目\"]').click()");await idle()
+    // 复习优先分必须区分笔记：先给物理模型制造两次失败复习，再比较全体得分
+    await click('[data-mb-view=all]');await idle()
+    const physicsNote=(await api('list',{type:'physics'})).result.records[0]
+    await click(`[data-question-id="${physicsNote.id}"]`);await idle();await click('#mb-start-review');await idle()
+    await click('#mb-reveal');await idle();await click('#mb-review-fail');await idle()
+    await click('#mb-reveal');await idle();await click('#mb-review-fail');await idle()
+    assert.equal((await api('read',{id:physicsNote.id})).result.repeatCount,2)
+    await js("document.querySelector('[aria-label=\"关闭题目\"]').click()");await idle()
+    const scores=await js("[...document.querySelectorAll('.mb-card .mb-score')].map(n=>Number(n.textContent.replace(/[^0-9]/g,'')))")
+    assert.equal(scores.length>3,true);assert.equal(new Set(scores).size>1,true)
+    await js("document.querySelector('#mb-status').classList.remove('visible');document.activeElement.blur()")
+    await shot('笔记本-手写与多选')
     await click('#mb-mode-switch');await until("document.body.dataset.mode==='memory'");await idle();assert.equal(await js("document.querySelectorAll('#views button').length"),4)
-    console.log('Desktop notebook: five-category UI, structure, image AI input, encrypted settings, safe AI acceptance/cancel, manual word import, photo word capture from table pages with duplicate marking/row deletion/AI extraction, general OCR entry into notes, spelling/cloze scores/history, mode switch and memory isolation passed')
+    console.log('Desktop notebook: six-category UI, structure, image AI input, encrypted settings, safe AI acceptance/cancel, manual word import, photo word capture with duplicate marking/row deletion/AI extraction, general OCR entry into notes, spelling/cloze scores/history, handwriting canvas, multi-select delete/restore, dictionary review cards, word tile compaction, differentiated review scores, mode switch and memory isolation passed')
   } finally {for(const w of BrowserWindow.getAllWindows())if(w!==window)w.destroy();dialog.showMessageBox=previousConfirm;server.close();server.closeAllConnections()}
 }

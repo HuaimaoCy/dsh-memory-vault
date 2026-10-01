@@ -48,7 +48,13 @@ function dueState(record) {
   return overdue < 0 ? 'notDue' : overdue > 7 * 86400000 ? 'overdueLong' : 'overdueShort'
 }
 export function evaluate(record) {
-  return curriculum.evaluate({ nodeID: record.nodeID, target: record.target, repeatCount: record.repeatCount, mastery: record.mastery, dueState: dueState(record) })
+  const now = Date.now(), next = record.nextReviewAt ? Date.parse(record.nextReviewAt) : null
+  return curriculum.evaluate({
+    nodeID: record.nodeID, target: record.target, repeatCount: record.repeatCount, mastery: record.mastery, dueState: dueState(record), reviewState: record.reviewState,
+    daysOverdue: next && now > next ? (now - next) / 86400000 : 0,
+    daysUntil: next && next > now ? (next - now) / 86400000 : 0,
+    lastReviewAt: record.reviewHistory?.at(-1)?.at ?? record.updatedAt ?? null,
+  })
 }
 function normalize(raw, previous = {}) {
   const merged = { ...previous, ...raw }

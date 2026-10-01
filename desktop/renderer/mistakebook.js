@@ -52,7 +52,7 @@ const firstMeaningfulLine = text => text.split(/\r?\n/).map(line => line.replace
 export function mountMistakebook({ beforeEnter }) {
   const memory = document.querySelector('.app-shell')
   const shell = h('div', { class: 'mb-shell', hidden: true, 'aria-label': '笔记本' })
-  const state = { data: null, view: 'all', type: '', subjectID: '', nodeID: '', query: '', order: 'priority', draft: null, dirty: false, busy: false, review: false, showAnswer: false }
+  const state = { data: null, view: 'all', type: '', subjectID: '', nodeID: '', query: '', order: 'priority', draft: null, dirty: false, busy: false, review: false, showAnswer: false, picking: false, selection: new Set() }
   let messageTimer
   const notify = (message, error = false) => {
     const output = document.getElementById('mb-status'); output.textContent = message; output.className = `mb-status visible${error ? ' error' : ''}`
@@ -72,7 +72,7 @@ export function mountMistakebook({ beforeEnter }) {
   const names = () => new Map((state.data?.taxonomy.nodes ?? []).map(node => [node.id, node.name]))
   const changeView = async (view, subjectID = '', nodeID = '', type = '') => {
     if (!await discard()) return
-    Object.assign(state, { view, subjectID, nodeID, type, draft: null, dirty: false, review: false }); await load()
+    Object.assign(state, { view, subjectID, nodeID, type, draft: null, dirty: false, review: false, picking: false }); state.selection.clear(); await load()
   }
   const load = async () => {
     state.data = await call('list', { view: state.view, type: state.type, subjectID: state.subjectID, nodeID: state.nodeID, query: state.query, order: state.order })
@@ -113,6 +113,8 @@ export function mountMistakebook({ beforeEnter }) {
       button('导出笔记本 JSON', async () => { moreMenu.removeAttribute('open'); if (await call('export')) notify('笔记本已导出，包含图片') }, false, { id: 'mb-export' }),
       button('导入旧版错题 JSON', () => { moreMenu.removeAttribute('open'); jsonPicker.click() }, false, { id: 'mb-legacy-import' })))
   document.addEventListener('click', event => { if (moreMenu.open && !moreMenu.contains(event.target)) moreMenu.removeAttribute('open') })
+  const pickButton = button('多选', () => { state.picking = !state.picking; state.selection.clear(); renderList() }, false, { class: 'btn ghost', id: 'mb-pick', 'aria-pressed': 'false' })
+  const togglePick = id => { state.selection.has(id) ? state.selection.delete(id) : state.selection.add(id); renderList() }
   shell.append(h('aside', { class: 'mb-side' },
     h('div', { class: 'brand' }, h('div', { class: 'mb-book-mark' }, icon('book')), h('div', {}, h('div', { class: 'brand-name', text: '笔记本' }), h('div', { class: 'brand-caption', text: 'ALAYA NOTEBOOK' }))),
     h('div', { class: 'mb-side-scroll' }, h('div', { class: 'side-head', text: '我的学习' }), sideViews, h('details', { class: 'mb-side-group', id: 'mb-types-wrap', open: true }, h('summary', { text: '笔记类型' }), categories), h('details', { class: 'mb-side-group', id: 'mb-subjects-wrap' }, h('summary', { text: '按学科整理' }), subjects)),
@@ -121,7 +123,7 @@ export function mountMistakebook({ beforeEnter }) {
     h('div', { class: 'mb-workspace' }, h('header', { class: 'mb-bar' }, h('div', { class: 'breadcrumb' }, icon('book'), h('span', { text: '学习空间' })),
       h('div', { class: 'toolbar-actions' }, h('label', { class: 'search-wrap' }, icon('search'), search), button('单词检测', openQuiz, false, { id: 'mb-quiz' }), button('录入', () => openImport(), false, { id: 'mb-import', title: '识别或粘贴，导入错题、笔记与词汇' }), button([icon('plus'), '新建笔记'], openCreate, true, { id: 'mb-new' }), switchButton)),
       h('div', { class: 'mb-body' }, h('main', { class: 'mb-main' }, h('div', { class: 'mb-page-heading' }, h('div', {}, h('div', { class: 'eyebrow', text: 'BUILD YOUR OWN UNDERSTANDING' }), heading, subtitle), h('div', { class: 'mb-total', id: 'mb-total' })),
-        h('div', { class: 'mb-board' }, order, h('span', { class: 'spacer' }), moreMenu), list), detail),
+        h('div', { class: 'mb-board' }, order, h('span', { class: 'spacer' }), pickButton, moreMenu), list), detail),
       h('footer', { class: 'mb-foot' }, h('span', { text: '笔记本 · 本地保存' }), h('span', { class: 'spacer' }))), jsonPicker, h('div', { id: 'mb-status', class: 'mb-status', role: 'status', 'aria-live': 'polite' }))
   document.body.append(shell)
   document.getElementById('mode-switch').addEventListener('click', () => void guard(async () => {
@@ -139,21 +141,56 @@ export function mountMistakebook({ beforeEnter }) {
       document.getElementById('mb-subjects-wrap').open = true
     }
   }
+  async function performBatch(action) {
+    const ids = [...state.selection]
+    if (!ids.length) throw new Error('请先选择笔记')
+    if (action === 'purge' && !await confirm(`永久删除 ${ids.length} 篇笔记及原图？此操作无法恢复。`)) return
+    if (action === 'delete' && !await confirm(`将 ${ids.length} 篇笔记移入回收站？之后可以恢复。`)) return
+    for (const id of ids) await call('action', { id, action })
+    if (state.draft && ids.includes(state.draft.id)) { state.draft = null; state.dirty = false }
+    state.selection.clear(); await load()
+    notify(({ delete: `已将 ${ids.length} 篇移入回收站`, restore: `已恢复 ${ids.length} 篇`, purge: `已永久删除 ${ids.length} 篇` })[action])
+  }
   function renderList() {
     const dictionary = names(), rows = state.data.records
     heading.textContent = NOTE_TYPES[state.type]?.label || dictionary.get(state.nodeID) || dictionary.get(state.subjectID) || ({ all: '全部笔记', due: '今天，复习一点', mastered: '已经掌握', archived: '归档笔记', trash: '回收站' })[state.view]
     subtitle.textContent = NOTE_TYPES[state.type]?.caption || (state.view === 'due' ? '先独立回忆，再展开答案与笔记核对。' : '记录问题，建立模型，积累自己的解题方法。')
     document.getElementById('mb-total').replaceChildren(h('strong', { text: rows.length }), h('span', { text: '篇笔记' }))
     list.replaceChildren()
-    if (!rows.length) list.append(h('div', { class: 'mb-empty' }, h('div', { class: 'mb-empty-symbol' }, icon(NOTE_TYPES[state.type]?.icon||'book')), h('h2', { text: state.query ? '没有找到相关笔记' : state.view === 'due' ? '今天的复习已完成' : '从一篇笔记开始' }), h('p', { text: '整理错题、建立模型，或记下一个值得积累的单词。' }), button('新建笔记', openCreate, true)))
+    list.classList.toggle('words', state.type === 'vocabulary')
+    pickButton.textContent = state.picking ? '完成' : '多选'
+    pickButton.classList.toggle('on', state.picking)
+    pickButton.setAttribute('aria-pressed', String(state.picking))
+    if (!rows.length) { list.append(h('div', { class: 'mb-empty' }, h('div', { class: 'mb-empty-symbol' }, icon(NOTE_TYPES[state.type]?.icon||'book')), h('h2', { text: state.query ? '没有找到相关笔记' : state.view === 'due' ? '今天的复习已完成' : '从一篇笔记开始' }), h('p', { text: '整理错题、建立模型，或记下一个值得积累的单词。' }), button('新建笔记', openCreate, true))); return }
+    if (state.picking) {
+      const allSelected = rows.length > 0 && rows.every(row => state.selection.has(row.id))
+      list.append(h('div', { class: 'mb-pick-bar', id: 'mb-pick-bar' },
+        h('strong', { text: `已选 ${state.selection.size} 篇` }),
+        button(allSelected ? '全不选' : '全选', () => { if (allSelected) state.selection.clear(); else for (const row of rows) state.selection.add(row.id); renderList() }, false, { class: 'btn ghost', id: 'mb-pick-all' }),
+        h('span', { class: 'spacer' }),
+        state.view === 'trash' ? button('恢复所选', () => performBatch('restore'), false, { id: 'mb-batch-restore' }) : null,
+        state.view === 'trash' ? button('彻底删除', () => performBatch('purge'), false, { class: 'btn ghost danger', id: 'mb-batch-purge' }) : button('移入回收站', () => performBatch('delete'), false, { class: 'btn ghost danger', id: 'mb-batch-delete' })))
+    }
     for (const row of rows) {
-      const score = row.value.overallScore
-      list.append(button([
-        h('div', { class: 'mb-card-head' }, h('span', { class: `mb-type-label ${row.type}`, text: NOTE_TYPES[row.type]?.label||'错题' }), h('span', { class: 'spacer' }), h('span', { class: `mb-state ${row.reviewState}`, text: labelStates[row.reviewState] })),
-        h('h2', { text: row.title || row.vocabulary?.word || row.stem.split('\n')[0].slice(0,90) || '图片笔记' }), h('p', { class: 'mb-card-stem', text: (row.type==='vocabulary'?row.vocabulary.meaning:row.stem||row.physics?.object||row.method?.prerequisites||'打开笔记补充内容。').replace(/\s+/g,' ').slice(0,180) }),
-        h('div', { class: 'mb-card-tags' }, row.subjectID ? h('span',{text:dictionary.get(row.subjectID)}) : null, row.nodeID ? h('span', { text: dictionary.get(row.nodeID) }) : null, row.imageCount ? h('span', { text: `${row.imageCount} 张原图` }) : null, row.errorType ? h('span', { text: row.errorType }) : null),
-        h('div', { class: 'mb-card-foot' }, h('span', { class: `mb-score ${row.value.level}`, text: `复习优先 ${score}` }), h('span', { text: `更新于 ${date(row.updatedAt)}` })),
-      ], () => select(row.id), false, { class: `mb-card${state.draft?.id === row.id ? ' selected' : ''}`, 'data-question-id': row.id, 'aria-pressed': String(state.draft?.id === row.id) }))
+      const picked = state.selection.has(row.id)
+      const cardClass = `mb-card${!state.picking && state.draft?.id === row.id ? ' selected' : ''}${picked ? ' picked' : ''}`
+      const click = () => state.picking ? togglePick(row.id) : select(row.id)
+      const props = { class: cardClass, 'data-question-id': row.id, 'aria-pressed': String(state.picking ? picked : state.draft?.id === row.id) }
+      const check = state.picking ? h('span', { class: `mb-check${picked ? ' on' : ''}`, 'aria-hidden': 'true' }, picked ? '✓' : '') : null
+      if (row.type === 'vocabulary') {
+        list.append(button([check,
+          h('div', { class: 'mb-word-head' }, h('span', { class: 'mb-word-term', text: row.vocabulary.word || '未命名词条' }), row.vocabulary.phonetic ? h('span', { class: 'mb-word-phonetic', text: row.vocabulary.phonetic }) : null, h('span', { class: 'spacer' }), h('span', { class: `mb-state ${row.reviewState}`, text: labelStates[row.reviewState] })),
+          h('p', { class: 'mb-word-sense', text: [row.vocabulary.partOfSpeech, row.vocabulary.meaning].filter(Boolean).join(' ') || '打开补充释义与例句' })], click, false, { ...props, class: `${cardClass} mb-word-card` }))
+      } else {
+        const score = row.value.overallScore
+        list.append(button([check,
+          h('div', { class: 'mb-card-head' }, h('span', { class: `mb-type-label ${row.type}`, text: NOTE_TYPES[row.type]?.label || '错题' }), h('span', { class: 'spacer' }), h('span', { class: `mb-state ${row.reviewState}`, text: labelStates[row.reviewState] })),
+          h('h2', { text: row.title || row.vocabulary?.word || row.stem.split('\n')[0].slice(0,90) || (row.type === 'handwriting' ? '手写笔记' : '图片笔记') }),
+          h('p', { class: 'mb-card-stem', text: (row.type==='handwriting' ? (row.imageCount ? `${row.imageCount} 页手写` : row.stem) : row.type==='vocabulary'?row.vocabulary.meaning:row.stem||row.physics?.object||row.method?.prerequisites||'打开笔记补充内容。').replace(/\s+/g,' ').slice(0,180) }),
+          h('div', { class: 'mb-card-tags' }, row.subjectID ? h('span',{text:dictionary.get(row.subjectID)}) : null, row.nodeID ? h('span', { text: dictionary.get(row.nodeID) }) : null, row.imageCount ? h('span', { text: row.type === 'handwriting' ? `${row.imageCount} 页手写` : `${row.imageCount} 张原图` }) : null, row.errorType ? h('span', { text: row.errorType }) : null),
+          h('div', { class: 'mb-card-foot' }, h('span', { class: `mb-score ${row.value.level}`, text: `复习优先 ${score}` }), h('span', { text: `更新于 ${date(row.updatedAt)}` })),
+        ], click, false, props))
+      }
     }
   }
   async function select(id) {
@@ -205,18 +242,24 @@ export function mountMistakebook({ beforeEnter }) {
     const form = h('form', { class: 'mb-editor-form', onSubmit: event => { event.preventDefault(); void guard(save) } })
     if (state.review) {
       form.append(h('h3',{class:'mb-review-title',text:draft.title||draft.vocabulary?.word||NOTE_TYPES[draft.type].label}),h('div', { class: 'mb-review-stem', text: draft.type==='vocabulary'?draft.vocabulary.word:draft.stem || draft.physics?.object || '请查看笔记原图' }))
-      if (state.showAnswer) form.append(h('div', { class: 'mb-answer' }, h('span', { class: 'label', text: '参考答案与讲解' }), h('p', { text: draft.referenceAnswer || draft.aiResult?.text || draft.notes || '尚未填写' }), h('span', { class: 'label', text: '过往作答与复盘' }), h('p', { text: [draft.studentWork,draft.cause].filter(Boolean).join('\n') }), (STRUCTURED_FIELDS[draft.type]??[]).filter(([key])=>draft[draft.type][key]).map(([key,label])=>h('div',{},h('span',{class:'label',text:label}),h('p',{text:draft[draft.type][key]})))))
+      if (state.showAnswer) form.append(draft.type === 'vocabulary' ? dictionaryCard(draft.vocabulary) : h('div', { class: 'mb-answer' }, h('span', { class: 'label', text: '参考答案与讲解' }), h('p', { text: draft.referenceAnswer || draft.aiResult?.text || draft.notes || '尚未填写' }), h('span', { class: 'label', text: '过往作答与复盘' }), h('p', { text: [draft.studentWork,draft.cause].filter(Boolean).join('\n') }), (STRUCTURED_FIELDS[draft.type]??[]).filter(([key])=>draft[draft.type][key]).map(([key,label])=>h('div',{},h('span',{class:'label',text:label}),h('p',{text:draft[draft.type][key]})))))
       form.append(h('div', { class: 'row mb-review-actions' }, button(state.showAnswer ? '收起答案' : '展开答案核对', () => { state.showAnswer = !state.showAnswer; renderDetail() }, false, { id: 'mb-reveal' }), button('编辑题目', () => { state.review = false; renderDetail() }, false)))
       if (state.showAnswer) form.append(h('div', { class: 'row' }, button('还不会', () => perform('fail'), false, { id: 'mb-review-fail' }), button('做对了', () => perform('pass'), true, { id: 'mb-review-pass' })))
     } else {
-      append(form,field('标题',control('title',1)), field(draft.type==='mistake'?'题干':draft.type==='physics'?'问题情境与建模目标':draft.type==='method'?'方法概述与问题背景':draft.type==='vocabulary'?'相关语境与补充':'笔记内容与问题', control('stem', 5)), h('div', { class: 'mb-fields-row' }, field('学科', subject), field('知识点', nodeSelect)),
+      append(form,field('标题',control('title',1)), field(draft.type==='mistake'?'题干':draft.type==='physics'?'问题情境与建模目标':draft.type==='method'?'方法概述与问题背景':draft.type==='vocabulary'?'语境与补充（可选）':draft.type==='handwriting'?'补充文字（可选）':'笔记内容与问题', control('stem', draft.type==='vocabulary'||draft.type==='handwriting'?2:5)), h('div', { class: 'mb-fields-row' }, field('学科', subject), field('知识点', nodeSelect)),
+        draft.type === 'handwriting' ? handwritingPanel(draft) : null,
         draft.classificationSuggested ? h('p', { class: 'cap', text: '知识点由关键词建议，请确认后保存。' }) : null,
         draft.legacyNodeID ? h('p', { class: 'cap', text: `旧知识点「${draft.legacyNodeID}」需重新选择，原标识已保留。` }) : null,
         draft.type==='mistake'?field('我的作答', control('studentWork')):null, draft.type==='mistake'?field('参考答案', control('referenceAnswer')):null, draft.type==='mistake'?h('div', { class: 'mb-fields-row' }, field('错因类型', errorType), field('考试目标', target)):null, draft.type==='mistake'?field('错因与复盘', control('cause')):null)
+      if (draft.type === 'vocabulary') form.append(h('div', { class: 'mb-headword' },
+        field('单词或短语', control('vocabulary.word', 1)), field('音标', control('vocabulary.phonetic', 1)), field('词性', control('vocabulary.partOfSpeech', 1)),
+        field('中文释义', control('vocabulary.meaning', 2))))
       if (STRUCTURED_FIELDS[draft.type]) {
-        const renderField = ([key, label]) => field(label, control(`${draft.type}.${key}`, draft.type === 'vocabulary' && ['word', 'phonetic', 'partOfSpeech'].includes(key) ? 1 : ['derivation', 'steps', 'examples'].includes(key) ? 5 : 3))
+        const headwordKeys = draft.type === 'vocabulary' ? ['word', 'phonetic', 'partOfSpeech', 'meaning'] : []
+        const fields = STRUCTURED_FIELDS[draft.type].filter(([key]) => !headwordKeys.includes(key))
+        const renderField = ([key, label]) => field(label, control(`${draft.type}.${key}`, draft.type === 'vocabulary' && ['derivation', 'steps', 'examples'].includes(key) ? 5 : 3))
         const filled = [], empty = []
-        for (const entry of STRUCTURED_FIELDS[draft.type]) (String(draft[draft.type]?.[entry[0]] ?? '').trim() ? filled : empty).push(entry)
+        for (const entry of fields) (String(draft[draft.type]?.[entry[0]] ?? '').trim() ? filled : empty).push(entry)
         if (!draft.id || !empty.length) form.append(h('div', { class: 'mb-structured-fields' }, [...filled, ...empty].map(renderField)))
         else {
           if (filled.length) form.append(h('div', { class: 'mb-structured-fields' }, filled.map(renderField)))
@@ -239,7 +282,7 @@ export function mountMistakebook({ beforeEnter }) {
       if(draft.aiResult) form.append(h('div',{class:'mb-ai-result',id:'mb-ai-result'},h('div',{class:'row'},h('strong',{text:'AI 学习草稿'}),h('span',{class:'spacer'}),h('span',{class:'cap',text:draft.aiStale?'资料已修改，建议重新生成':date(draft.aiResult.generatedAt)})),h('div',{class:'mb-ai-text',text:draft.aiResult.text}),h('p',{class:'cap',text:'解答与模型仍需核对。补充空白字段会保留已有的人工内容。'}),button('补充到空白字段',async()=>{if(state.dirty)throw new Error('请先保存修改');state.draft=await call('ai.accept',{id:draft.id});state.dirty=false;await load();notify('AI 草稿已补充，人工内容保留')},false,{id:'mb-ai-accept',disabled:draft.aiStale})))
       const value = draft.value
       form.append(h('div', { class: 'mb-priority' }, h('div', { class: 'row' }, h('strong', { text: `复习优先 ${value.overallScore}` }), h('span', { class: 'spacer' }), h('span', { text: labelStates[draft.reviewState] })),
-        h('p', { class: 'cap', text: `再次出错 ${draft.repeatCount} 次 · 下次复习 ${date(draft.nextReviewAt)}` }), h('details', {}, h('summary', { text: '查看评分依据' }), h('p', { class: 'cap', text: value.reason }), h('p', { class: 'cap', text: '沿用旧版课标规则，含估算与默认值，作为复习排序参考。' }))))
+        h('p', { class: 'cap', text: `再次出错 ${draft.repeatCount} 次 · 下次复习 ${date(draft.nextReviewAt)}` }), h('details', {}, h('summary', { text: '查看评分依据' }), h('p', { class: 'cap', text: value.reason }), h('p', { class: 'cap', text: '按到期紧迫、掌握薄弱、重复出错与久未复习加权；课标权重仅作微调。' }))))
       const tools = h('div', { class: 'row mb-detail-actions' })
       if (draft.isSoftDeleted) tools.append(button('恢复', () => perform('restore')), button('永久删除', () => perform('purge'), false, { class: 'btn danger' }))
       else {
@@ -395,6 +438,65 @@ export function mountMistakebook({ beforeEnter }) {
       },true,{id:'mb-quiz-submit'}));node.querySelector('input')?.focus()
     },true,{id:'mb-quiz-start'}),cancel)),loading.element)
     node.addEventListener('cancel',()=>void call('cancelAI'))
+  }
+  function dictionaryCard(vocab) {
+    const section = (label, text) => text?.trim() ? h('div', { class: 'mb-dict-row' }, h('span', { class: 'mb-dict-label', text: label }), h('div', { class: 'mb-dict-body', text })) : null
+    return h('div', { class: 'mb-dict', id: 'mb-dict' },
+      h('div', { class: 'mb-dict-head' },
+        h('span', { class: 'mb-dict-term', text: vocab.word || '未命名词条' }),
+        vocab.phonetic ? h('span', { class: 'mb-dict-phonetic', text: vocab.phonetic }) : null,
+        vocab.partOfSpeech ? h('span', { class: 'mb-dict-pos', text: vocab.partOfSpeech }) : null),
+      h('p', { class: 'mb-dict-sense', text: vocab.meaning || '尚未填写释义' }),
+      vocab.examples?.trim() ? h('div', { class: 'mb-dict-examples' }, vocab.examples.split(/\n+/).filter(Boolean).map((line, index) => h('p', { text: `${index + 1}. ${line}` }))) : null,
+      section('常用搭配', vocab.collocations), section('词形变化', vocab.forms), section('用法与辨析', vocab.usage))
+  }
+  function handwritingPanel(draft) {
+    const W = 1400, H = 900
+    const panel = h('div', { class: 'mb-handwrite', id: 'mb-handwrite' })
+    const canvas = h('canvas', { class: 'mb-handwrite-canvas', id: 'mb-handwrite-canvas', width: W, height: H, 'aria-label': '手写区域，按住拖动书写' })
+    const ctx = canvas.getContext('2d')
+    const paintBackground = () => { ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, W, H) }
+    paintBackground(); ctx.lineCap = 'round'; ctx.lineJoin = 'round'
+    let strokes = [], drawing = null
+    const tool = { color: '#2b3138', width: 4, eraser: false }
+    const drawStroke = stroke => {
+      if (!stroke.points.length) return
+      ctx.globalCompositeOperation = stroke.eraser ? 'destination-out' : 'source-over'
+      ctx.strokeStyle = stroke.color; ctx.lineWidth = stroke.eraser ? stroke.width * 4 : stroke.width
+      ctx.beginPath()
+      ctx.moveTo(stroke.points[0].x, stroke.points[0].y)
+      for (const point of stroke.points.slice(1)) ctx.lineTo(point.x, point.y)
+      if (stroke.points.length === 1) ctx.lineTo(stroke.points[0].x + .1, stroke.points[0].y)
+      ctx.stroke()
+      ctx.globalCompositeOperation = 'source-over'
+    }
+    const redraw = () => { paintBackground(); for (const stroke of strokes) drawStroke(stroke) }
+    const point = event => { const rect = canvas.getBoundingClientRect(); return { x: (event.clientX - rect.left) * W / rect.width, y: (event.clientY - rect.top) * H / rect.height } }
+    canvas.addEventListener('pointerdown', event => { event.preventDefault(); try { canvas.setPointerCapture(event.pointerId) } catch { /* synthetic events in tests carry no active pointer */ } drawing = { color: tool.color, width: tool.width, eraser: tool.eraser, points: [point(event)] }; drawStroke(drawing) })
+    canvas.addEventListener('pointermove', event => { if (!drawing) return; event.preventDefault(); drawing.points.push(point(event)); redraw() })
+    const finish = () => { if (!drawing) return; strokes.push(drawing); drawing = null }
+    canvas.addEventListener('pointerup', finish)
+    canvas.addEventListener('pointercancel', finish)
+    const markTool = (nodes, active) => { for (const node of nodes) { const on = node === active; node.classList.toggle('on', on); node.setAttribute('aria-pressed', String(on)) } }
+    const colorButtons = ['#2b3138', '#1f5fa8', '#b23b32'].map((color, index) => h('button', { type: 'button', class: `mb-hw-color${index === 0 ? ' on' : ''}`, style: `background:${color}`, title: `笔色 ${color}`, 'aria-label': `笔色 ${color}`, 'aria-pressed': String(index === 0), onClick: event => { tool.eraser = false; tool.color = color; markTool(colorButtons, event.currentTarget); eraserButton.classList.remove('on'); eraserButton.setAttribute('aria-pressed', 'false') } }))
+    const widthButtons = [2.5, 4, 8].map((width, index) => button(String(width), event => { tool.width = width; tool.eraser = false; markTool(widthButtons, event.currentTarget); eraserButton.classList.remove('on'); eraserButton.setAttribute('aria-pressed', 'false') }, false, { class: `btn ghost mb-hw-width${index === 1 ? ' on' : ''}`, 'data-hw-width': String(width), 'aria-pressed': String(index === 1) }))
+    const eraserButton = button('橡皮', () => { tool.eraser = !tool.eraser; eraserButton.classList.toggle('on', tool.eraser); eraserButton.setAttribute('aria-pressed', String(tool.eraser)); if (tool.eraser) for (const node of colorButtons) { node.classList.remove('on'); node.setAttribute('aria-pressed', 'false') } }, false, { class: 'btn ghost', id: 'mb-hw-eraser', 'aria-pressed': 'false' })
+    const savePage = button('保存手写页', () => {
+      const data = canvas.toDataURL('image/png').split(',')[1]
+      if (draft.images.length + 1 > 16) throw new Error('每篇笔记最多 16 张图片')
+      if (draft.images.reduce((sum, image) => sum + (image.size || 0), 0) + data.length * 3 / 4 > 20 * 1024 * 1024) throw new Error('图片总量不能超过 20 MB')
+      const stamp = new Date().toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
+      draft.images.push({ name: `手写 ${stamp}.png`, mimeType: 'image/png', data, size: Math.floor(data.length * 3 / 4) })
+      strokes = []; redraw(); dirty(); renderDetail(); notify(`已加入手写页，共 ${draft.images.length} 页`)
+    }, true, { id: 'mb-hw-save' })
+    append(panel, h('div', { class: 'mb-handwrite-tools' },
+      ...colorButtons, ...widthButtons, eraserButton,
+      button('撤销', () => { strokes.pop(); redraw() }, false, { class: 'btn ghost', id: 'mb-hw-undo' }),
+      button('清空', () => { strokes = []; redraw() }, false, { class: 'btn ghost', id: 'mb-hw-clear' }),
+      h('span', { class: 'spacer' }), savePage),
+      canvas,
+      h('p', { class: 'cap', text: '按住书写；保存后生成一页 PNG，与图片一样随笔记存储、可预览。' }))
+    return panel
   }
   function imagePanel(draft) {
     const panel = h('div', { class: 'mb-images', id: 'mb-images' })
@@ -584,6 +686,7 @@ export function mountMistakebook({ beforeEnter }) {
   }
   document.addEventListener('keydown', event => {
     if (document.body.dataset.mode !== 'mistakebook' || document.querySelector('dialog[open]')) return
+    if (event.key === 'Escape' && state.picking) { state.picking = false; state.selection.clear(); renderList(); return }
     if (event.ctrlKey || event.metaKey) {
       if (event.key.toLowerCase() === 'f') { event.preventDefault(); search.focus(); search.select() }
       if (event.key.toLowerCase() === 'n') { event.preventDefault(); void guard(openCreate) }

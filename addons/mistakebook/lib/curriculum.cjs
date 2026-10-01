@@ -64,58 +64,75 @@ function propagationBoost(nodeID, allNodeIDs, attrs) {
   return Math.min(boost, P.propagation.cap);
 }
 
-/// 计算一道错题的重要性（0..100）与级别，返回可解释明细。
-function evaluate({ nodeID, target = 'gaokao', repeatCount = 0, mastery = 0, dueState = 'unplanned' }) {
+/// 计算一篇笔记的复习重要性（0..100）与级别，返回可解释明细。
+// 行为信号为主：到期紧迫 44%、掌握薄弱 28%、重复出错 16%、久未复习 12%。
+// 课标静态权重只在匹配到知识点时作 ±15% 微调；未匹配保持中性，
+// 避免旧版模型里所有无知识点笔记塌缩到同一分数（如恒为 42）。
+function evaluate({ nodeID, target = 'gaokao', repeatCount = 0, mastery = 0, dueState = 'unplanned',
+                    daysOverdue = 0, daysUntil = 0, lastReviewAt = null, reviewState = '' } = {}) {
   const P = params();
-  const { subjectID, features, attr } = staticFeatures(nodeID, target);
-  const dims = [];
-  let base = 0;
+  const now = Date.now();
+  const clamp = (v) => Math.max(0, Math.min(1, v));
+
+  // 1) 到期压力：逾期最紧（随逾期天数继续升高），从未排期次之，已排远期最低。
+  let dueScore; let dueText;
+  if (dueState === 'overdueShort' || dueState === 'overdueLong') {
+    dueScore = 0.78 + 0.22 * Math.min(1, (daysOverdue || 0) / 14);
+    dueText = `已逾期 ${Math.max(1, Math.round(daysOverdue || 1))} 天`;
+  } else if (dueState === 'unplanned') {
+    dueScore = 0.55; dueText = '尚未排期复习';
+  } else {
+    const days = Math.max(0, daysUntil || 0);
+    dueScore = Math.max(0.12, 0.34 - 0.2 * Math.min(1, days / 21));
+    dueText = `约 ${Math.round(days)} 天后到期`;
+  }
+
+  // 2) 掌握薄弱度与 3) 重复出错强度。
+  const weakness = clamp(1 - (Number.isFinite(+mastery) ? +mastery : 0));
+  const repeat = Math.min(1, (repeatCount || 0) / 6);
+
+  // 4) 久未复习：相对上次复习（或最后更新）的天数；已掌握的封顶一半。
+  const anchor = Date.parse(lastReviewAt || '');
+  const staleDays = Number.isFinite(anchor) && anchor > 0 ? Math.max(0, (now - anchor) / 86400000) : 0;
+  const staleness = Math.min(1, staleDays / 30) * (reviewState === 'mastered' ? 0.5 : 1);
+
+  const behavior = 0.44 * dueScore + 0.28 * weakness + 0.16 * repeat + 0.12 * staleness;
+
+  // 5) 课标微调：匹配到知识点时 0.85..1.15，未匹配为 1。
+  const { features, attr } = staticFeatures(nodeID, target);
+  let base = null;
   if (features) {
     const w = { ...P.staticWeights };
     delete w._note;
     let active = 0;
-    for (const [k, v] of Object.entries(features)) { active += w[k] || 0; }
+    for (const [k, v] of Object.entries(features)) active += w[k] || 0;
     if (active > 0) {
-      for (const [k, v] of Object.entries(features)) {
-        if (w[k]) { base += (w[k] / active) * v; dims.push({ key: k, weight: w[k] / active, value: v }); }
-      }
+      base = 0;
+      for (const [k, v] of Object.entries(features)) if (w[k]) base += (w[k] / active) * v;
     }
-  } else {
-    base = 0.4; // 未知知识点回退中位
   }
-  const repeatFactor = Math.min(1 + P.repeat.alpha * Math.log2(1 + (repeatCount || 0)), P.repeat.cap);
-  // 目标适配：认知层级 vs 高考水平（qualityLevelGaokao 默认 2）
-  let fit = P.targetFit.normal;
-  if (attr) {
-    const gaokaoLevel = (subject(subjectID)?.standard?.qualityLevelGaokao) ?? 2;
-    const level = attr.cognitiveLevel || 1;
-    if (attr.examScope && attr.examScope !== '高考') fit = P.targetFit.beyond;
-    else if (level === gaokaoLevel + 1) fit = P.targetFit.stretch;
-    else if (level > gaokaoLevel + 1) fit = P.targetFit.beyond;
-  }
-  const targetFactor = P.targetFit.F_base + 0.5 * fit;
-  const dueFactor = P.dueFactor[dueState] ?? P.dueFactor.unplanned;
-  const priority = base * repeatFactor * targetFactor * (1 + P.priority.gamma * (1 - Math.max(0, Math.min(1, mastery))) * 0.2) * dueFactor;
-  const overall = Math.round(Math.max(0, Math.min(1, priority)) * 100);
+  const curriculumFactor = base === null ? 1 : 0.85 + 0.3 * base;
+
+  const priority = clamp(behavior * curriculumFactor);
+  const overall = Math.round(priority * 100);
   const level = overall >= P.levels.high ? 'high' : overall >= P.levels.medium ? 'medium' : 'low';
+
   const reasonBits = [];
-  if (attr) {
-    reasonBits.push(`知识点「${attr.citation || nodeID}」：${attr.courseType}，认知层级 ${attr.cognitiveLevel}，课标先验 ${(attr.examWeightPrior * 100).toFixed(1)}%`);
-  } else {
-    reasonBits.push('知识点未在课标属性表中，使用中位回退值');
-  }
-  reasonBits.push(`重复错误 ${repeatCount} 次 → 系数 ×${repeatFactor.toFixed(2)}`);
-  reasonBits.push(`目标适配 ×${targetFactor.toFixed(2)}，复习时效(${dueState}) ×${dueFactor}`);
+  reasonBits.push(`到期压力 ${dueScore.toFixed(2)}（${dueText}）`);
+  reasonBits.push(`掌握度 ${(1 - weakness).toFixed(2)}，薄弱 ${weakness.toFixed(2)}`);
+  reasonBits.push(`重复出错 ${repeatCount || 0} 次（强度 ${repeat.toFixed(2)}）`);
+  reasonBits.push(`距上次复习约 ${Math.round(staleDays)} 天`);
+  reasonBits.push(attr ? `课标权重 ×${curriculumFactor.toFixed(2)}（${attr.citation || nodeID}）` : '未匹配课标知识点，权重中性');
   return {
-    dimensions: { knowledgeValue: +(base).toFixed(3), representativeness: +(features?.examWeight ?? 0.4).toFixed(3),
-      recurrenceRisk: +Math.min(1, repeatFactor / P.repeat.cap).toFixed(3), reasoningValue: +(features?.cognitive ?? 0.3).toFixed(3),
-      examValue: +(features?.scope ?? 0.5).toFixed(3), reviewPriority: +(priority).toFixed(3) },
+    dimensions: { knowledgeValue: +(base ?? 0.5).toFixed(3), representativeness: +(features?.examWeight ?? 0.4).toFixed(3),
+      recurrenceRisk: +repeat.toFixed(3), reasoningValue: +(features?.cognitive ?? 0.3).toFixed(3),
+      examValue: +(features?.scope ?? 0.5).toFixed(3), reviewPriority: +priority.toFixed(3) },
     overallScore: overall,
     level,
     reason: reasonBits.join('；'),
-    detail: { dims, repeatFactor, targetFactor, dueFactor },
+    detail: { dueScore, weakness, repeat, staleness, behavior, curriculumFactor },
     engineID: 'curriculum-quantification.web',
-    engineVersion: 'params-1.0.0',
+    engineVersion: 'behavior-2.0',
   };
 }
 

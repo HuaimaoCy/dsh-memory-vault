@@ -4,6 +4,7 @@ export const NOTE_TYPES = {
   physics: { label: '物理模型', caption: '从对象与假设，到方程与推导', icon: 'fact' },
   method: { label: '解题方法', caption: '理解每一步为什么成立', icon: 'decision' },
   vocabulary: { label: '英语词汇', caption: '积累词义、例句，检验记忆', icon: 'book' },
+  handwriting: { label: '手写笔记', caption: '纸笔手感，随手写随手存', icon: 'pen' },
   note: { label: '普通笔记', caption: '记录知识、问题与自己的理解', icon: 'note' },
 }
 export const STRUCTURED_FIELDS = {

@@ -35,6 +35,12 @@ try {
   const failed = store.action(b.id,'fail'); assert.equal(failed.repeatCount,1); assert.equal(failed.reviewHistory.length,1)
   assert.equal(failed.reviewHistory[0].result,'fail'); assert.ok(failed.nextReviewAt)
   assert.ok(evaluate({...failed,nextReviewAt:null}).overallScore >= evaluate({...b,nextReviewAt:null}).overallScore)
+  // 新评分模型必须区分复习状态，而不是塌缩到同一分数
+  const fresh = evaluate({ mastery: 0, repeatCount: 0 })
+  const weak = evaluate({ mastery: 0, repeatCount: 3, nextReviewAt: new Date(Date.now() - 10 * 86400000).toISOString() })
+  const rested = evaluate({ mastery: 1, reviewState: 'mastered', repeatCount: 0, nextReviewAt: new Date(Date.now() + 14 * 86400000).toISOString() })
+  assert.ok(weak.overallScore > fresh.overallScore + 10, `weak ${weak.overallScore} vs fresh ${fresh.overallScore}`)
+  assert.ok(rested.overallScore < fresh.overallScore - 10, `rested ${rested.overallScore} vs fresh ${fresh.overallScore}`)
   for(let i=0;i<4;i++) store.action(b.id,'pass')
   assert.equal(store.read(b.id).reviewState,'mastered'); assert.equal(store.read(b.id).reviewHistory.length,5)
   assert.equal(store.list({view:'mastered'}).records.length,1)
