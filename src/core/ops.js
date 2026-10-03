@@ -19,7 +19,6 @@ import {
   intParam, limitDefaults, normalizePriority, normalizeTags, validateEntryWrite,
   validateGroupDescription, validateGroupName,
 } from '../policy.js'
-import { handlers as NOTEBOOK_HANDLERS, NOTEBOOK_OPS, NOTEBOOK_OP_NAMES } from './notebook_ops.mjs'
 
 /**
  * Every operation the vault serves, and whether it changes the vault.
@@ -51,10 +50,13 @@ export const VAULT_OPS = {
   'settings.set': { write: true },
   curate: { write: true },
   'session.bind': { write: true },
-  // The notebook rides the same channel; its read/write split lives in the
-  // notebook table and is merged in here so every transport sees one map.
-  ...Object.fromEntries(NOTEBOOK_OP_NAMES.map(name => [name, { write: NOTEBOOK_OPS[name].write }])),
 }
+
+// 扩展（如笔记本）经注入的 extensions 挂载，核心对它们零静态依赖：
+// 每个扩展是 { ops: {name:{write}}, handlers: {name: fn}, scope }。核心
+// 仓库可以整体去掉扩展模块而照常工作——独立性由构建保证。
+export const extensionOps = extensions => Object.fromEntries(
+  (extensions ?? []).flatMap(extension => Object.entries(extension.ops ?? {})))
 
 /** Provenance labels a non-panel caller may declare on an `entry.write`. */
 const WRITE_SOURCES = ['panel', 'cli', 'codex', 'api']
@@ -105,11 +107,13 @@ export function stateOf(store, config) {
  * @returns {Promise<Record<string, unknown>>} Operation result.
  * @throws {Error} When the op is unknown or its parameters break a rule.
  */
-export async function operateVault({ store, config, notify, curate, updates, notebook, notebookHooks }, body) {
+export async function operateVault({ store, config, notify, curate, updates, extensions }, body) {
   const op = body.op
-  if (Object.prototype.hasOwnProperty.call(NOTEBOOK_OPS, op)) {
-    if (!notebook) throw new Error('此宿主未接入笔记本')
-    return NOTEBOOK_HANDLERS[op]({ notebook, hooks: notebookHooks ?? {} }, body)
+  // 扩展操作优先交给注入的扩展表（笔记本等）；核心不认识它们的名字。
+  for (const extension of extensions ?? []) {
+    if (extension?.ops && Object.prototype.hasOwnProperty.call(extension.ops, op)) {
+      return extension.handlers[op](extension.scope ?? {}, body)
+    }
   }
   switch (op) {
     case 'image.list': return { images: store.listImages(String(body.entryId ?? '')) }

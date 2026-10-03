@@ -12,6 +12,7 @@
 
 import { createMemoryVault, defaultDatabasePath } from '../../src/core/vault.js'
 import { operateVault } from '../../src/core/ops.js'
+import { NOTEBOOK_OPS, handlers as notebookHandlers } from '../../src/core/notebook_ops.mjs'
 
 /**
  * Open the vault the desktop app works on.
@@ -47,11 +48,11 @@ export function openVault(options = {}) {
   // one: a build without a model hook must fail that one operation with the
   // vault's own message, not with "curate is not a function".
   if (typeof vault.curate === 'function') deps.curate = vault.curate
-  // The notebook extends the vault core rather than standing beside it: its
-  // store and main-process hooks ride the same deps object, so `notebook.*`
-  // ops are indistinguishable from vault ops at this seam.
-  if (options.notebook) deps.notebook = options.notebook
-  if (options.notebookHooks) deps.notebookHooks = options.notebookHooks
+  // The notebook extends the vault core through the injected extension table:
+  // the core itself has zero static knowledge of it, so a build without the
+  // notebook extension still serves every vault op unchanged.
+  if (options.notebook) deps.extensions = [{ ops: NOTEBOOK_OPS, handlers: notebookHandlers, scope: {} }]
+  if (options.notebook) deps.extensions[0].scope = { notebook: options.notebook, hooks: options.notebookHooks ?? {} }
 
   return {
     vault,
@@ -85,8 +86,7 @@ export function openVault(options = {}) {
 
     /** Attach notebook extensions to this already-open vault (same-database hosting). */
     attach(extensions = {}) {
-      if (extensions.notebook) deps.notebook = extensions.notebook
-      if (extensions.notebookHooks) deps.notebookHooks = extensions.notebookHooks
+      if (extensions.notebook) deps.extensions = [{ ops: NOTEBOOK_OPS, handlers: notebookHandlers, scope: { notebook: extensions.notebook, hooks: extensions.notebookHooks ?? {} } }]
       return this
     },
 
