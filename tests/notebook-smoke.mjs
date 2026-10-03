@@ -8,6 +8,7 @@ import { MistakebookStore, taxonomy, evaluate } from '../addons/mistakebook/stor
 import { solve, createCloze, extractWordsWithAI, lookupWord } from '../addons/mistakebook/services.mjs'
 import { extractWords, parseRelatedWords, relationsOf } from '../addons/mistakebook/words.mjs'
 import { buildGraph, vocabularyGraph, RELATION_TYPES } from '../desktop/renderer/relations.js'
+import { normalizeTag } from '../desktop/renderer/tags.js'
 import { SIMULATIONS, simulationURL } from '../addons/mistakebook/simulations.mjs'
 import { createModelAdapter } from '../src/model.js'
 
@@ -139,10 +140,21 @@ try {
   const generic=buildGraph([{key:'m',word:'模型',edges:[{type:'similar',key:'n',word:'类似题'}]}],'m',['m'])
   assert.equal(generic.edges.length,1);assert.equal(generic.nodes.get('n').record,null)
   assert.equal(buildGraph([],'missing',new Set()).root,null)
+  // 自定义标签：规整、统计与按标签过滤（独立库验证）
+  assert.equal(normalizeTag('  重点模型，'),'重点模型');assert.equal(normalizeTag('   '),'');assert.equal(normalizeTag(`长${'标签'.repeat(20)}`).length,30)
+  const tagStore=new MistakebookStore(join(folder,'tags.sqlite'))
+  try {
+    tagStore.save({type:'note',title:'带标签',stem:'标签内容',tags:['重点','物理']})
+    tagStore.save({type:'note',title:'无标签',stem:'普通内容'})
+    assert.deepEqual(tagStore.list().stats.tags,{重点:1,物理:1})
+    assert.equal(tagStore.list({tag:'重点'}).records.length,1);assert.equal(tagStore.list({tag:'没有的标签'}).records.length,0)
+    assert.equal(tagStore.list({tag:'物理',query:'标签内容'}).records.length,1);assert.equal(tagStore.list({tag:'物理',query:'普通内容'}).records.length,0)
+    assert.equal(tagStore.list({tag:'重点'}).records[0].tags.includes('重点'),true)
+  } finally { tagStore.close() }
   const db=new DatabaseSync(path);const old={...legacy};for(const field of ['type','title','physics','method','vocabulary','simulationId','aiResult','contentHash','aiStale','images','value'])delete old[field]
   db.prepare('UPDATE questions SET payload=? WHERE id=?').run(JSON.stringify(old),old.id);db.prepare("UPDATE addon_meta SET value='1' WHERE key='schema'").run();db.close()
   store=new MistakebookStore(path);assert.ok(existsSync(store.migrationBackup));const migrated=store.read(old.id)
   assert.equal(migrated.type,'mistake');assert.equal(migrated.updatedAt,old.updatedAt);assert.equal(migrated.createdAt,old.createdAt);assert.equal(migrated.revision,old.revision);assert.equal(migrated.images[0].data,image.data)
   const before=store.records().length, restored=new MistakebookStore(join(folder,'restored.sqlite'));try{restored.import(store.export());assert.equal(restored.records().length,before)}finally{restored.close()}
-  console.log('Notebook: five types, structure/search, v1 backup/migration, vision API, AI validation/cancel/provenance, manual preservation, word capture from OCR pages and HTML tables with dedupe/limits, AI page-level word extraction, word dedup, dictionary lookup with auto-save/recite counting/related words, word relations and the generic relation tree, private quizzes/scoring/review/stale/deleted entries, cloze and simulation allowlist passed')
+  console.log('Notebook: five types, structure/search, v1 backup/migration, vision API, AI validation/cancel/provenance, manual preservation, word capture from OCR pages and HTML tables with dedupe/limits, AI page-level word extraction, word dedup, dictionary lookup with auto-save/recite counting/related words, word relations and the generic relation tree, custom tags with filtering and stats, private quizzes/scoring/review/stale/deleted entries, cloze and simulation allowlist passed')
 } finally {try{store.close()}catch{/* 已关闭时保留原始断言错误 */}server.close();server.closeAllConnections();rmSync(folder,{recursive:true,force:true})}

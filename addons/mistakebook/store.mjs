@@ -138,13 +138,14 @@ export class MistakebookStore {
   }
   read(id) { const record = this.require(id), images = this.listImages(id, true), hash = contentHash({ ...record, images }); return { ...record, images, value: evaluate(record), contentHash: hash, aiStale: Boolean(record.aiResult && record.aiResult.inputHash !== hash) } }
   records() { return this.db.prepare('SELECT payload FROM questions').all().map(row => JSON.parse(row.payload)) }
-  list({ view = 'all', type = '', subjectID = '', nodeID = '', query = '', order = 'priority' } = {}) {
+  list({ view = 'all', type = '', subjectID = '', nodeID = '', query = '', tag = '', order = 'priority' } = {}) {
     const active = this.records(), now = Date.now()
-    const stats = { all: 0, due: 0, mastered: 0, archived: 0, trash: 0, subjects: {}, types: {} }
+    const stats = { all: 0, due: 0, mastered: 0, archived: 0, trash: 0, subjects: {}, types: {}, tags: {} }
     for (const row of active) {
       if (row.isSoftDeleted) { stats.trash++; continue }
       if (row.isArchived) { stats.archived++; continue }
       stats.all++; stats.types[row.type] = (stats.types[row.type] ?? 0) + 1; stats.subjects[row.subjectID] = (stats.subjects[row.subjectID] ?? 0) + 1
+      for (const name of row.tags) stats.tags[name] = (stats.tags[name] ?? 0) + 1
       if (row.reviewState === 'mastered') stats.mastered++
       else if (!row.nextReviewAt || Date.parse(row.nextReviewAt) <= now) stats.due++
     }
@@ -157,6 +158,7 @@ export class MistakebookStore {
       if (type && row.type !== type) return false
       if (subjectID && row.subjectID !== subjectID) return false
       if (nodeID && row.nodeID !== nodeID && !row.nodeID.startsWith(`${nodeID}/`)) return false
+      if (tag && !row.tags.includes(tag)) return false
       return terms.every(term => `${JSON.stringify(contentOf(row))}\n${row.tags.join(' ')}`.toLocaleLowerCase().includes(term))
     }).map(row => ({ ...row, imageCount: this.listImages(row.id).length, value: evaluate(row) }))
     records.sort((a, b) => order === 'updated' ? b.updatedAt.localeCompare(a.updatedAt) : b.value.overallScore - a.value.overallScore || b.updatedAt.localeCompare(a.updatedAt))
