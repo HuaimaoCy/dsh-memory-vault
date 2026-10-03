@@ -1,5 +1,5 @@
 import { DatabaseSync } from 'node:sqlite'
-import { mkdirSync, readFileSync, existsSync } from 'node:fs'
+import { mkdirSync, readFileSync, existsSync, rmSync } from 'node:fs'
 import { dirname } from 'node:path'
 import { randomUUID, createHash, randomInt } from 'node:crypto'
 import { NOTE_TYPES, normalizeFields, contentOf } from './fields.mjs'
@@ -432,5 +432,29 @@ export class MistakebookStore {
     return {score:Math.round(results.filter(row=>row.correct).length/results.length*100),results}
   }
   export() { return { format: 'memory-vault-notebook', schemaVersion: 2, exportedAt: new Date().toISOString(), sidebar: this.sidebarConfig(), records: this.records().map(row => ({ ...row, images: this.listImages(row.id, true) })) } }
-  backupTo(path) { this.db.prepare('VACUUM INTO ?').run(path) }
+  backupTo(path) {
+    if (this.ownsDb) { this.db.prepare('VACUUM INTO ?').run(path); return }
+    // 注入模式（与数据库同库承载）：备份只投影本域 notebook_* 表，落成
+    // 独立传统格式（可直接以文件模式打开，或经 migrateFromFile 迁回），
+    // 绝不携带数据库（vault）域的任何数据。
+    const target = new DatabaseSync(path)
+    try {
+      target.exec(`PRAGMA journal_mode=DELETE;
+        CREATE TABLE addon_meta(key TEXT PRIMARY KEY, value TEXT NOT NULL);
+        CREATE TABLE questions(id TEXT PRIMARY KEY, payload TEXT NOT NULL, fingerprint TEXT NOT NULL);
+        CREATE INDEX questions_fingerprint ON questions(fingerprint);
+        CREATE TABLE question_images(id TEXT PRIMARY KEY, question_id TEXT NOT NULL REFERENCES questions(id) ON DELETE CASCADE,
+          name TEXT NOT NULL, mime_type TEXT NOT NULL, width INTEGER NOT NULL, height INTEGER NOT NULL, sha256 TEXT NOT NULL, data BLOB NOT NULL, UNIQUE(question_id,sha256));`)
+      const { meta, questions, images } = this.tables
+      for (const row of this.db.prepare(`SELECT key,value FROM ${meta}`).all()) target.prepare('INSERT INTO addon_meta VALUES(?,?)').run(row.key, row.value)
+      for (const row of this.db.prepare(`SELECT id,payload,fingerprint FROM ${questions}`).all()) target.prepare('INSERT INTO questions VALUES(?,?,?)').run(row.id, row.payload, row.fingerprint)
+      const insertImage = target.prepare('INSERT INTO question_images VALUES(?,?,?,?,?,?,?,?)')
+      for (const row of this.db.prepare(`SELECT id,question_id,name,mime_type,width,height,sha256,data FROM ${images}`).all()) insertImage.run(row.id, row.question_id, row.name, row.mime_type, row.width, row.height, row.sha256, row.data)
+      target.close()
+    } catch (error) {
+      try { target.close() } catch { /* 已关闭 */ }
+      try { rmSync(path, { force: true }) } catch { /* 由调用方处理 */ }
+      throw error
+    }
+  }
 }

@@ -1,4 +1,5 @@
 import { app, BrowserWindow, dialog, ipcMain, Notification, safeStorage, shell } from 'electron'
+import { DatabaseSync } from 'node:sqlite'
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
@@ -132,7 +133,13 @@ function registerDesktop() {
     const target = resolve(reply.filePath)
     if (target.toLowerCase() === resolve(bridge.databasePath).toLowerCase() || existsSync(`${target}-wal`) || existsSync(`${target}-shm`)) throw new Error('请选择不同于正在使用的数据库的备份路径')
     const temporary = `${target}.${randomUUID()}.tmp`
-    try { bridge.vault.store.backupTo(temporary); renameSync(temporary, target) }
+    try {
+      bridge.vault.store.backupTo(temporary)
+      // 数据域隔离：数据库备份只含数据库域，剔除共享库中的笔记本表。
+      const trimmed = new DatabaseSync(temporary)
+      try { for (const row of trimmed.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'notebook_%'").all()) trimmed.exec(`DROP TABLE IF EXISTS "${row.name}"`) } finally { trimmed.close() }
+      renameSync(temporary, target)
+    }
     finally { rmSync(temporary, { force: true }) }
     return { path: target }
   })
