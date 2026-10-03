@@ -1,8 +1,9 @@
-// 侧边栏模块：区块注册表 + 顺序/显隐配置 + 区块内条目编辑 + 拖拽排序界面。
-// 区块由调用方注册为 { id, label, element(), items?() }；带 items 的区块
-//（我的学习 / 笔记类型 / 学科）还支持条目级排序与显隐——同一套注册表，
-// 配置界面自动出现「编辑内容」。模块不含任何具体区块的知识。
-import { readPrefs, writePrefs, clearPrefs } from './layout.js'
+// 侧边栏模块（0.7.7 统一架构）：配置完全数据化，存笔记本数据库
+// （mistakebook.sqlite 的 addon_meta），与记忆库侧边栏同为数据驱动。
+// 配置模型：{ sections: [{id, label, custom?, tags?, items:[itemId]}], hidden:[id] }
+// itemId 形如 view:all / type:physics / subject:english；每个条目只属于一个
+// 区块（拖拽跨区块移动即改变它的归属）；hidden 同时收纳区块 id 与条目 id。
+import { readPrefs, clearPrefs } from './layout.js'
 
 const h = (tag, props = {}, ...children) => {
   const node = document.createElement(tag)
@@ -17,142 +18,192 @@ const h = (tag, props = {}, ...children) => {
   return node
 }
 
-const asIdList = value => Array.isArray(value) ? value.map(String) : []
+export const BUILTIN_SECTIONS = ['views', 'types', 'subjects', 'tags']
+const DEFAULT_LABELS = { views: '我的学习', types: '笔记类型', subjects: '按学科整理', tags: '标签' }
+const homeOf = id => id.startsWith('view:') ? 'views' : id.startsWith('type:') ? 'types' : id.startsWith('subject:') ? 'subjects' : ''
 
-export function createSidebarController({ storageKey, sections, mount, onApply }) {
-  let config = readPrefs(storageKey, {})
-  const known = id => sections.some(section => section.id === id)
-  const apply = () => { controller.refresh(); onApply?.() }
-  const sectionOrder = () => [...new Set([...asIdList(config.order), ...sections.map(section => section.id)])].filter(known)
-  const hiddenSet = () => new Set(asIdList(config.hidden).filter(known))
+// 把任意输入整成合法配置：内置区块缺失即补；未知条目丢弃；没进任何区块的
+// 已知条目回到默认归属区块；标签区块 items 恒空（内容由标签云动态填充）。
+export function normalizeSidebarConfig(raw, knownIds = []) {
+  const known = new Set(knownIds)
+  const sections = [], seen = new Set(), placed = new Set()
+  for (const entry of Array.isArray(raw?.sections) ? raw.sections : []) {
+    if (!entry || typeof entry !== 'object' || typeof entry.id !== 'string' || !entry.id) continue
+    const id = entry.id.slice(0, 60)
+    const builtIn = BUILTIN_SECTIONS.includes(id)
+    if (sections.some(section => section.id === id)) continue
+    const label = String(entry.label ?? '').trim().slice(0, 30) || DEFAULT_LABELS[id] || '区块'
+    const items = builtIn && id === 'tags' ? [] : [...new Set((Array.isArray(entry.items) ? entry.items : []).map(String))].filter(item => known.has(item) && !placed.has(item))
+    for (const item of items) placed.add(item)
+    sections.push(builtIn ? { id, label, ...(id === 'tags' ? { tags: true } : {}), items: id === 'tags' ? [] : items } : { id, label, custom: true, items })
+  }
+  for (const id of BUILTIN_SECTIONS) if (!sections.some(section => section.id === id)) sections.push(id === 'tags' ? { id, label: DEFAULT_LABELS[id], tags: true, items: [] } : { id, label: DEFAULT_LABELS[id], items: [] })
+  for (const id of known) if (!placed.has(id)) {
+    const home = sections.find(section => section.id === homeOf(id))
+    if (home) home.items.push(id)
+  }
+  const hidden = [...new Set((Array.isArray(raw?.hidden) ? raw.hidden : []).map(String))]
+    .filter(id => known.has(id) || sections.some(section => section.id === id))
+  return { sections, hidden }
+}
+
+// 控制器：read() 取数据库里的原始配置（随 list 返回），write(next) 异步持久
+// 化，knownItems() 给出当前合法条目 id；onApply 在每次改动后重渲染侧边栏。
+export function createSidebarController({ read, write, knownItems, onApply }) {
+  let cache = normalizeSidebarConfig(read(), knownItems())
   const controller = {
-    // 重新装配：按配置顺序把未隐藏的区块放进容器；区块内容仍由调用方渲染。
-    refresh() {
-      const hidden = hiddenSet()
-      const byId = new Map()
-      for (const section of sections) {
-        const element = section.element()
-        element.dataset.sideSection = section.id
-        byId.set(section.id, element)
-      }
-      mount.replaceChildren(...sectionOrder().filter(id => !hidden.has(id)).map(id => byId.get(id)))
-    },
-    config() { return { order: sectionOrder(), hidden: [...hiddenSet()], items: config.items ?? {} } },
-    // 条目级装配：按该区块的条目配置过滤 + 排序，items 为 [{id, label, element}]。
-    arrange(sectionId, items) {
-      const itemConfig = config.items?.[sectionId] ?? {}
-      const hidden = new Set(asIdList(itemConfig.hidden))
-      const ordered = [...new Set([...asIdList(itemConfig.order), ...items.map(item => item.id)])].filter(id => items.some(item => item.id === id))
-      const byId = new Map(items.map(item => [item.id, item]))
-      return ordered.filter(id => !hidden.has(id)).map(id => byId.get(id))
-    },
+    sync() { cache = normalizeSidebarConfig(read(), knownItems()); return cache },
+    config() { return cache },
     setConfig(next) {
-      const orderNext = [...new Set([...asIdList(next?.order), ...sections.map(section => section.id)])].filter(known)
-      const hiddenNext = [...new Set(asIdList(next?.hidden).filter(known))]
-      // 至少保留一个可见区块，避免把自己锁在空白侧边栏外。
-      while (hiddenNext.length >= sections.length) hiddenNext.pop()
-      config = { ...config, order: orderNext, hidden: hiddenNext }
-      writePrefs(storageKey, config); apply()
+      cache = normalizeSidebarConfig(next, knownItems())
+      void write(cache)
+      onApply?.()
     },
-    setItems(sectionId, next) {
-      if (!known(sectionId)) return
-      const items = { ...(config.items ?? {}) }
-      items[sectionId] = { order: asIdList(next?.order), hidden: asIdList(next?.hidden) }
-      config = { ...config, items }
-      writePrefs(storageKey, config); apply()
-    },
-    reset() { clearPrefs(storageKey); config = {}; apply() },
   }
   return controller
 }
 
-const reorderList = (list, sourceId, targetId) => {
-  const from = list.indexOf(sourceId), to = list.indexOf(targetId)
+const reorder = (list, source, target) => {
+  const from = list.indexOf(source), to = list.indexOf(target)
   if (from < 0 || to < 0 || from === to) return null
   const next = [...list]
   next.splice(to, 0, next.splice(from, 1)[0])
   return next
 }
 
-// renderSidebarConfig({ sections, current, onChange, onItemsChange })
-// 区块行可拖拽排序 / 显隐；带 items 的区块可展开条目列表做同样的排序与
-// 显隐。所有改动即时回调，持久化归控制器。
-export function renderSidebarConfig({ sections, current, onChange, onItemsChange }) {
-  const sectionOrder = [...new Set([...asIdList(current?.order), ...sections.map(section => section.id)])]
-    .filter(id => sections.some(section => section.id === id))
-  const sectionHidden = new Set(asIdList(current?.hidden))
-  const expanded = new Set()
-  // 条目工作副本：{ [sectionId]: { order, hidden } }，从 current.items 初始化。
-  const itemState = {}
-  for (const section of sections) {
-    const saved = current?.items?.[section.id] ?? {}
-    const ids = (section.items?.() ?? []).map(item => item.id)
-    itemState[section.id] = { order: [...new Set([...asIdList(saved.order), ...ids])], hidden: new Set(asIdList(saved.hidden)) }
+// 配置对话框：区块可重命名 / 新增 / 排序 / 隐藏；「编辑内容」展开条目，
+// 条目可勾选隐藏，也可拖到别的区块（改变条目归属）；改完即时回调 onChange。
+export function renderSidebarConfig({ config, knownItems, onChange }) {
+  const sections = config.sections.map(section => ({ ...section, items: [...section.items] }))
+  const hidden = new Set(config.hidden)
+  const expanded = new Set(), renaming = new Set()
+  const context = { section: '', item: '' }
+  const catalog = knownItems()
+  const known = catalog.map(item => item.id)
+  const itemLabel = id => {
+    const [kind, ref] = id.split(':')
+    return kind === 'view' ? ({ all: '全部笔记', due: '待复习', mastered: '已掌握', archived: '归档', trash: '回收站' })[ref] ?? ref
+      : kind === 'type' ? ({ mistake: '错题', physics: '物理模型', method: '解题方法', vocabulary: '英语词汇', handwriting: '手写笔记', note: '普通笔记' })[ref] ?? ref
+      : (catalog.find(item => item.id === id)?.label ?? ref)
   }
-  const context = { drag: '' }
-  // 拖拽行：共享 context 记录源行，drop 时把 (source, target) 交给 onReorder。
-  const dragRow = ({ id, label, attributes = {}, children = [], onReorder }) => {
-    const row = h('div', { class: 'mb-side-config-row', role: 'listitem', draggable: 'true', ...attributes },
-      h('span', { class: 'mb-side-config-grip', 'aria-hidden': 'true', title: '拖动调整顺序' }, '⠿'),
-      h('span', { class: 'mb-side-config-name', text: label }),
-      ...children)
-    row.addEventListener('dragstart', () => { context.drag = id; row.classList.add('dragging') })
-    row.addEventListener('dragend', () => { context.drag = ''; row.classList.remove('dragging') })
-    row.addEventListener('dragover', event => { event.preventDefault(); if (context.drag && context.drag !== id) row.classList.add('drop-above') })
+  const apply = () => onChange({ sections: sections.map(section => ({ ...section, items: [...section.items] })), hidden: [...hidden] })
+  const itemRows = section => {
+    if (!section.items.length) return [h('p', { class: 'cap mb-side-empty', 'data-side-items': section.id, text: '暂无条目——从其他区块拖一项进来，或用上方「编辑内容」整理。' })]
+    return section.items.flatMap(itemId => {
+      if (!known.includes(itemId)) return []
+      return [h('div', { class: 'mb-side-config-row', role: 'listitem', draggable: 'true', 'data-side-item': itemId },
+        h('span', { class: 'mb-side-config-grip', 'aria-hidden': 'true', title: '拖动排序；拖到其他区块可改变归属' }, '⠿'),
+        h('span', { class: 'mb-side-config-name', text: itemLabel(itemId) }),
+        h('label', { class: 'row cap' }, h('input', { type: 'checkbox', checked: !hidden.has(itemId), 'data-side-item-visible': itemId, onChange: event => { event.target.checked ? hidden.delete(itemId) : hidden.add(itemId); apply() } }), '显示'),
+      )]
+    })
+  }
+  const sectionDrop = (row, section) => {
+    row.addEventListener('dragover', event => {
+      if (context.section && context.section !== section.id) { event.preventDefault(); row.classList.add('drop-above'); return }
+      if (context.item && !section.items.includes(context.item)) { event.preventDefault(); row.classList.add('drop-above') }
+    })
     row.addEventListener('dragleave', () => row.classList.remove('drop-above'))
     row.addEventListener('drop', event => {
       event.preventDefault(); row.classList.remove('drop-above')
-      if (!context.drag || context.drag === id) return
-      const source = context.drag
-      context.drag = ''
-      onReorder?.(source, id)
+      if (context.section && context.section !== section.id) {
+        const from = sections.findIndex(item => item.id === context.section), to = sections.findIndex(item => item.id === section.id)
+        context.section = ''
+        if (from < 0 || to < 0) return
+        sections.splice(to, 0, sections.splice(from, 1)[0])
+        apply(); paint(); return
+      }
+      if (context.item && !section.items.includes(context.item)) {
+        const item = context.item
+        context.item = ''
+        for (const other of sections) other.items = other.items.filter(id => id !== item)
+        section.items.push(item)
+        apply(); paint()
+      }
     })
-    return row
   }
-  const applySection = () => onChange({ order: [...sectionOrder], hidden: [...sectionHidden] })
-  const applyItems = id => onItemsChange?.(id, { order: [...itemState[id].order], hidden: [...itemState[id].hidden] })
+  const wireItemDrag = (row, itemId, section) => {
+    row.addEventListener('dragstart', () => { context.item = itemId; context.section = ''; row.classList.add('dragging') })
+    row.addEventListener('dragend', () => { context.item = ''; row.classList.remove('dragging') })
+    row.addEventListener('dragover', event => {
+      if (!context.item || context.item === itemId) return
+      event.preventDefault(); row.classList.add('drop-above')
+    })
+    row.addEventListener('dragleave', () => row.classList.remove('drop-above'))
+    row.addEventListener('drop', event => {
+      event.preventDefault(); row.classList.remove('drop-above')
+      const source = context.item
+      context.item = ''
+      if (!source || source === itemId) return
+      for (const other of sections) other.items = other.items.filter(id => id !== source)
+      section.items.splice(section.items.indexOf(itemId) + 1, 0, source)
+      apply(); paint()
+    })
+  }
   const paint = () => {
     const nodes = []
-    for (const id of sectionOrder) {
-      const section = sections.find(item => item.id === id)
-      nodes.push(dragRow({
-        id, label: section.label, attributes: { 'data-side-config': id },
-        children: [
-          section.items ? h('button', { type: 'button', class: 'btn ghost', id: `mb-side-config-edit-${id}`, 'aria-expanded': String(expanded.has(id)), onClick: () => { expanded.has(id) ? expanded.delete(id) : expanded.add(id); paint() } }, expanded.has(id) ? '收起内容' : '编辑内容') : null,
-          h('label', { class: 'row cap' }, h('input', { type: 'checkbox', checked: !sectionHidden.has(id), 'data-side-visible': id, onChange: event => { event.target.checked ? sectionHidden.delete(id) : sectionHidden.add(id); applySection() } }), '显示'),
-        ],
-        onReorder: (source, target) => {
-          const next = reorderList(sectionOrder, source, target)
-          if (!next) return
-          sectionOrder.length = 0; sectionOrder.push(...next)
-          applySection(); paint()
-        },
-      }))
-      if (section.items && expanded.has(id)) {
-        const items = section.items() ?? []
-        const state = itemState[id]
-        const visible = [...new Set([...state.order, ...items.map(item => item.id)])].filter(itemId => items.some(item => item.id === itemId))
-        nodes.push(h('div', { class: 'mb-side-items', role: 'list' }, visible.flatMap(itemId => {
-          const item = items.find(entry => entry.id === itemId)
-          if (!item) return []
-          return [dragRow({
-            id: itemId, label: item.label, attributes: { 'data-side-item': itemId },
-            children: [h('label', { class: 'row cap' }, h('input', { type: 'checkbox', checked: !state.hidden.has(itemId), 'data-side-item-visible': itemId, onChange: event => { event.target.checked ? state.hidden.delete(itemId) : state.hidden.add(itemId); applyItems(id) } }), '显示')],
-            onReorder: (source, target) => {
-              const next = reorderList(state.order, source, target)
-              if (!next) return
-              state.order.length = 0; state.order.push(...next)
-              applyItems(id); paint()
-            },
-          })]
-        })))
+    for (const section of sections) {
+      const renameBox = renaming.has(section.id)
+      const row = h('div', { class: 'mb-side-config-row', role: 'listitem', draggable: String(!renameBox), 'data-side-config': section.id },
+        h('span', { class: 'mb-side-config-grip', 'aria-hidden': 'true', title: '拖动调整区块顺序' }, '⠿'),
+        renameBox
+          ? h('div', { class: 'row mb-side-rename' },
+              h('input', { class: 'input', id: 'mb-side-rename-input', value: section.label, 'aria-label': '区块名称', onKeydown: event => { if (event.key === 'Enter') { section.label = event.target.value.trim().slice(0, 30) || section.label; renaming.delete(section.id); apply(); paint() } } }),
+              h('button', { type: 'button', class: 'btn ghost', id: 'mb-side-rename-save', text: '保存', onClick: () => { const input = row.querySelector('#mb-side-rename-input'); section.label = (input?.value ?? '').trim().slice(0, 30) || section.label; renaming.delete(section.id); apply(); paint() } }))
+          : h('span', { class: 'mb-side-config-name', text: section.label }),
+        !renameBox ? h('button', { type: 'button', class: 'btn ghost', id: `mb-side-config-rename-${section.id}`, text: '重命名', onClick: () => { renaming.add(section.id); paint() } }) : null,
+        !section.tags ? h('button', { type: 'button', class: 'btn ghost', id: `mb-side-config-edit-${section.id}`, 'aria-expanded': String(expanded.has(section.id)), text: expanded.has(section.id) ? '收起内容' : '编辑内容', onClick: () => { expanded.has(section.id) ? expanded.delete(section.id) : expanded.add(section.id); paint() } }) : null,
+        h('label', { class: 'row cap' }, h('input', { type: 'checkbox', checked: !hidden.has(section.id), 'data-side-visible': section.id, onChange: event => { event.target.checked ? hidden.delete(section.id) : hidden.add(section.id); apply() } }), '显示'))
+      row.addEventListener('dragstart', () => { if (renameBox) return; context.section = section.id; context.item = ''; row.classList.add('dragging') })
+      row.addEventListener('dragend', () => { context.section = ''; row.classList.remove('dragging') })
+      sectionDrop(row, section)
+      nodes.push(row)
+      if (!section.tags && expanded.has(section.id)) {
+        const list = h('div', { class: 'mb-side-items', role: 'list', 'data-side-items': section.id })
+        const rows = itemRows(section)
+        for (const itemRow of rows) if (itemRow.classList?.contains('mb-side-config-row')) wireItemDrag(itemRow, itemRow.dataset.sideItem, section)
+        list.append(...rows)
+        nodes.push(list)
       }
     }
-    list.replaceChildren(...nodes)
+    body.replaceChildren(...nodes)
   }
-  const list = h('div', { class: 'mb-side-config', id: 'mb-side-config', role: 'list' })
+  const body = h('div', { class: 'mb-side-config', id: 'mb-side-config', role: 'list' })
   paint()
   return h('div', { class: 'mb-side-config-wrap' },
-    h('p', { class: 'cap', text: '拖动调整区块顺序，取消勾选隐藏区块；「编辑内容」可继续排序、隐藏区块里的每一项。设置即时生效并保存在本机。' }),
-    list)
+    h('p', { class: 'cap', text: '区块可重命名、新增、排序、隐藏；「编辑内容」可整理条目，把条目拖到别的区块即改变归属。配置保存在笔记本数据库里。' }),
+    body,
+    h('div', { class: 'row mb-side-add' },
+      h('input', { class: 'input', id: 'mb-side-new-section', placeholder: '新区块名称，如「常用」', 'aria-label': '新区块名称', onKeydown: event => { if (event.key === 'Enter') addSection() } }),
+      h('button', { type: 'button', class: 'btn ghost', id: 'mb-side-add-section', text: '添加区块', onClick: addSection })))
+  function addSection() {
+    const input = document.getElementById('mb-side-new-section')
+    const label = (input?.value ?? '').trim().slice(0, 30)
+    if (!label) return
+    let id = `custom-${Date.now().toString(36)}${Math.floor(Math.random() * 1e4).toString(36)}`
+    while (sections.some(section => section.id === id)) id += 'x'
+    sections.push({ id, label, custom: true, items: [] })
+    expanded.add(id)
+    input.value = ''
+    apply(); paint()
+  }
+}
+
+// 旧版（localStorage）一次性迁移：把 0.7.5/0.7.6 的区块/条目配置换算成
+// 统一模型。迁移后清掉旧键，之后数据库是唯一事实源。
+export function migrateLegacySidebar() {
+  const legacy = readPrefs('alaya.sidebar', null)
+  if (!legacy || typeof legacy !== 'object' || !Array.isArray(legacy.order)) return null
+  const prefix = { views: 'view', types: 'type', subjects: 'subject' }
+  const sections = [], hidden = []
+  for (const id of legacy.order) {
+    if (!BUILTIN_SECTIONS.includes(id)) continue
+    const items = legacy.items?.[id] ?? {}
+    const ids = (Array.isArray(items.order) ? items.order : []).map(item => `${prefix[id] ?? ''}${prefix[id] ? ':' : ''}${item}`)
+      .filter(item => !prefix[id] || item !== ':')
+    for (const item of Array.isArray(items.hidden) ? items.hidden : []) hidden.push(`${prefix[id] ?? ''}${prefix[id] ? ':' : ''}${item}`)
+    sections.push(id === 'tags' ? { id, label: '标签', tags: true, items: [] } : { id, items: ids })
+  }
+  clearPrefs('alaya.sidebar')
+  return { sections, hidden }
 }

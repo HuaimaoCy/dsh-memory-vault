@@ -64,6 +64,8 @@ function registerDesktop() {
       case 'save': return mistakebook.save(body)
       case 'action': return mistakebook.action(body.id, body.action)
       case 'reorder': return mistakebook.reorder(body?.ids)
+      case 'sidebar.save': return mistakebook.setSidebar(body?.config)
+      case 'assign': return mistakebook.assign(body?.id, body?.target ?? {})
       case 'ai.accept': return mistakebook.acceptAI(body.id)
       case 'cancelAI': aiRequest?.abort(); return { cancelled: true }
       case 'solve': {

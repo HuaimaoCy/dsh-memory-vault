@@ -163,6 +163,25 @@ try {
     assert.throws(()=>orderStore.reorder([]),/排列/)
     assert.throws(()=>orderStore.save({...orderStore.read(a.id),sortIndex:-1}),/排列位置/)
   } finally { orderStore.close() }
+  // 侧边栏配置入库 + 拖动改分类（学科/标签）
+  const sideStore=new MistakebookStore(join(folder,'sidebar.sqlite'))
+  try {
+    assert.equal(sideStore.sidebarConfig(),null)
+    sideStore.setSidebar({sections:[{id:'views',label:'快速',items:[]},{id:'custom-x',label:'常用',custom:true,items:[]}],hidden:['view:trash']})
+    const saved=sideStore.sidebarConfig()
+    assert.equal(saved.sections[0].label,'快速');assert.deepEqual(saved.hidden,['view:trash'])
+    assert.equal(sideStore.list().sidebar.sections[0].label,'快速')
+    assert.throws(()=>sideStore.setSidebar('x'),/无效/)
+    const note=sideStore.save({type:'note',title:'待分类',stem:'x'})
+    const moved=sideStore.assign(note.id,{subjectID:'physics'})
+    assert.equal(moved.subjectID,'physics');assert.equal(moved.nodeID,'')
+    const tagged=sideStore.assign(note.id,{tag:'物理'})
+    assert.deepEqual(tagged.tags,['物理'])
+    assert.equal(sideStore.assign(note.id,{tag:'物理'}).revision,tagged.revision)
+    assert.throws(()=>sideStore.assign(note.id,{subjectID:'不存在'}),/学科/)
+    assert.throws(()=>sideStore.assign(note.id,{}),/指明/)
+    assert.equal(sideStore.export().sidebar.sections[0].label,'快速')
+  } finally { sideStore.close() }
   const db=new DatabaseSync(path);const old={...legacy};for(const field of ['type','title','physics','method','vocabulary','simulationId','aiResult','contentHash','aiStale','images','value'])delete old[field]
   db.prepare('UPDATE questions SET payload=? WHERE id=?').run(JSON.stringify(old),old.id);db.prepare("UPDATE addon_meta SET value='1' WHERE key='schema'").run();db.close()
   store=new MistakebookStore(path);assert.ok(existsSync(store.migrationBackup));const migrated=store.read(old.id)

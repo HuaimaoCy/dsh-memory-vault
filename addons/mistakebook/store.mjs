@@ -164,7 +164,7 @@ export class MistakebookStore {
       return terms.every(term => `${JSON.stringify(contentOf(row))}\n${row.tags.join(' ')}`.toLocaleLowerCase().includes(term))
     }).map(row => ({ ...row, imageCount: this.listImages(row.id).length, value: evaluate(row) }))
     records.sort((a, b) => order === 'updated' ? b.updatedAt.localeCompare(a.updatedAt) : order === 'manual' ? (a.sortIndex ?? Infinity) - (b.sortIndex ?? Infinity) || b.updatedAt.localeCompare(a.updatedAt) : b.value.overallScore - a.value.overallScore || b.updatedAt.localeCompare(a.updatedAt))
-    return { records, stats, taxonomy, path: this.path }
+    return { records, stats, taxonomy, path: this.path, sidebar: this.sidebarConfig() }
   }
   save(raw) {
     if (!raw || typeof raw !== 'object') throw new Error('无效的题目')
@@ -220,9 +220,44 @@ export class MistakebookStore {
       return this.saveInside({ ...record })
     })
   }
+  // —— 侧边栏配置：存 addon_meta（数据库），与记忆库侧边栏同为数据驱动 ——
+  sidebarConfig() {
+    const row = this.db.prepare("SELECT value FROM addon_meta WHERE key='sidebar'").get()
+    if (!row) return null
+    try {
+      const value = JSON.parse(row.value)
+      return value && typeof value === 'object' && !Array.isArray(value) ? value : null
+    } catch { return null }
+  }
+  setSidebar(raw) {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new Error('侧边栏配置无效')
+    const text = JSON.stringify(raw)
+    if (text.length > 100000) throw new Error('侧边栏配置过大')
+    this.db.prepare("INSERT INTO addon_meta VALUES('sidebar',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").run(text)
+    return { saved: true }
+  }
+  // 拖动改分类：笔记卡片拖到侧边栏学科项 → 换学科；拖到标签 → 补标签。
+  assign(id, { subjectID = '', tag = '' } = {}) {
+    return this.transaction(() => {
+      const record = this.require(id)
+      if (tag) {
+        const name = bounded(tag, 30).trim()
+        if (!name) throw new Error('标签无效')
+        if (record.tags.includes(name)) return this.read(id)
+        return this.saveInside({ ...record, tags: [...record.tags, name] })
+      }
+      if (subjectID) {
+        if (!nodes.has(subjectID)) throw new Error('学科不存在')
+        return this.saveInside({ ...record, subjectID, nodeID: '' })
+      }
+      throw new Error('请指明学科或标签')
+    })
+  }
   import(input) {
     const rows = Array.isArray(input) ? input : Array.isArray(input?.records) ? input.records : input?.records && typeof input.records === 'object' ? Object.values(input.records) : null
     if (!rows || rows.length > 3000) throw new Error('请选择错题本 JSON；一次最多 3000 道题')
+    const sidebar = input && !Array.isArray(input) && input.sidebar && typeof input.sidebar === 'object' ? input.sidebar : null
+    if (sidebar) this.setSidebar(sidebar)
     return this.transaction(() => {
       const known = new Set(this.records().filter(record => record.stem.trim() || record.title.trim() || record.type === 'vocabulary').map(dedupKey))
       let created = 0, skipped = 0, unmapped = 0, missingImages = 0
@@ -321,6 +356,6 @@ export class MistakebookStore {
     this.quizzes.delete(id)
     return {score:Math.round(results.filter(row=>row.correct).length/results.length*100),results}
   }
-  export() { return { format: 'memory-vault-notebook', schemaVersion: 2, exportedAt: new Date().toISOString(), records: this.records().map(row => ({ ...row, images: this.listImages(row.id, true) })) } }
+  export() { return { format: 'memory-vault-notebook', schemaVersion: 2, exportedAt: new Date().toISOString(), sidebar: this.sidebarConfig(), records: this.records().map(row => ({ ...row, images: this.listImages(row.id, true) })) } }
   backupTo(path) { this.db.prepare('VACUUM INTO ?').run(path) }
 }
