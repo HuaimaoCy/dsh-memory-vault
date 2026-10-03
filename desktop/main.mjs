@@ -63,6 +63,7 @@ function registerDesktop() {
       case 'read': return mistakebook.read(body.id)
       case 'save': return mistakebook.save(body)
       case 'action': return mistakebook.action(body.id, body.action)
+      case 'reorder': return mistakebook.reorder(body?.ids)
       case 'ai.accept': return mistakebook.acceptAI(body.id)
       case 'cancelAI': aiRequest?.abort(); return { cancelled: true }
       case 'solve': {

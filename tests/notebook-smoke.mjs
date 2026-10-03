@@ -151,6 +151,18 @@ try {
     assert.equal(tagStore.list({tag:'物理',query:'标签内容'}).records.length,1);assert.equal(tagStore.list({tag:'物理',query:'普通内容'}).records.length,0)
     assert.equal(tagStore.list({tag:'重点'}).records[0].tags.includes('重点'),true)
   } finally { tagStore.close() }
+  // 自由排列：reorder 写 sortIndex，manual 排序稳定，updated 不受影响
+  const orderStore=new MistakebookStore(join(folder,'order.sqlite'))
+  try {
+    const a=orderStore.save({type:'note',title:'A',stem:'a'})
+    const b=orderStore.save({type:'note',title:'B',stem:'b'})
+    const c=orderStore.save({type:'note',title:'C',stem:'c'})
+    assert.deepEqual(orderStore.reorder([b.id,c.id,a.id]),{ordered:3})
+    assert.equal(orderStore.list({order:'manual'}).records.map(row=>row.title).join(''),'BCA')
+    assert.equal(orderStore.read(a.id).sortIndex,2)
+    assert.throws(()=>orderStore.reorder([]),/排列/)
+    assert.throws(()=>orderStore.save({...orderStore.read(a.id),sortIndex:-1}),/排列位置/)
+  } finally { orderStore.close() }
   const db=new DatabaseSync(path);const old={...legacy};for(const field of ['type','title','physics','method','vocabulary','simulationId','aiResult','contentHash','aiStale','images','value'])delete old[field]
   db.prepare('UPDATE questions SET payload=? WHERE id=?').run(JSON.stringify(old),old.id);db.prepare("UPDATE addon_meta SET value='1' WHERE key='schema'").run();db.close()
   store=new MistakebookStore(path);assert.ok(existsSync(store.migrationBackup));const migrated=store.read(old.id)

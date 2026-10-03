@@ -73,6 +73,8 @@ function normalize(raw, previous = {}) {
   const repeatCount = Number(merged.repeatCount ?? 0), mastery = Number(merged.mastery ?? (reviewState === 'mastered' ? 1 : reviewState === 'reviewing' ? .5 : 0)), reciteCount = Number(merged.reciteCount ?? 0)
   if (!Number.isInteger(repeatCount) || repeatCount < 0 || repeatCount > 100000 || !Number.isFinite(mastery) || mastery < 0 || mastery > 1) throw new Error('复习次数或掌握度无效')
   if (!Number.isInteger(reciteCount) || reciteCount < 0 || reciteCount > 100000) throw new Error('背诵次数无效')
+  const sortIndex = merged.sortIndex ?? null
+  if (sortIndex !== null && (!Number.isInteger(sortIndex) || sortIndex < 0 || sortIndex > 1000000000)) throw new Error('排列位置无效')
   if (merged.nextReviewAt && !Number.isFinite(Date.parse(merged.nextReviewAt))) throw new Error('复习时间无效')
   let aiResult = merged.aiResult ?? null
   if (aiResult) {
@@ -86,7 +88,7 @@ function normalize(raw, previous = {}) {
     notes: bounded(merged.notes), errorType: bounded(merged.errorType, 100), cause: bounded(merged.cause ?? merged.analysisResult?.conclusion, 30000),
     subjectID, nodeID, legacyNodeID: bounded(merged.legacyNodeID, 500), legacySubjectID: bounded(merged.legacySubjectID, 500), classificationSuggested: raw.nodeID !== undefined ? false : Boolean(previous.classificationSuggested ?? classification.assignmentState === 'suggested'),
     tags: Array.isArray(merged.tags) ? merged.tags.slice(0, 30).map(tag => bounded(tag, 100)) : [], target: merged.target === 'huige' ? 'huige' : 'gaokao',
-    reviewState, repeatCount, reciteCount, mastery, nextReviewAt: merged.nextReviewAt ?? null, reviewHistory: Array.isArray(merged.reviewHistory) ? merged.reviewHistory.slice(-200).map(item => ({ at: String(item.at), result: item.result === 'pass' ? 'pass' : 'fail' })) : [],
+    reviewState, repeatCount, reciteCount, sortIndex, mastery, nextReviewAt: merged.nextReviewAt ?? null, reviewHistory: Array.isArray(merged.reviewHistory) ? merged.reviewHistory.slice(-200).map(item => ({ at: String(item.at), result: item.result === 'pass' ? 'pass' : 'fail' })) : [],
     isArchived: Boolean(merged.isArchived), isSoftDeleted: Boolean(merged.isSoftDeleted), createdAt: previous.createdAt ?? merged.createdAt ?? new Date().toISOString(),
     updatedAt: new Date().toISOString(), revision: (previous.revision ?? 0) + 1 }
 }
@@ -161,7 +163,7 @@ export class MistakebookStore {
       if (tag && !row.tags.includes(tag)) return false
       return terms.every(term => `${JSON.stringify(contentOf(row))}\n${row.tags.join(' ')}`.toLocaleLowerCase().includes(term))
     }).map(row => ({ ...row, imageCount: this.listImages(row.id).length, value: evaluate(row) }))
-    records.sort((a, b) => order === 'updated' ? b.updatedAt.localeCompare(a.updatedAt) : b.value.overallScore - a.value.overallScore || b.updatedAt.localeCompare(a.updatedAt))
+    records.sort((a, b) => order === 'updated' ? b.updatedAt.localeCompare(a.updatedAt) : order === 'manual' ? (a.sortIndex ?? Infinity) - (b.sortIndex ?? Infinity) || b.updatedAt.localeCompare(a.updatedAt) : b.value.overallScore - a.value.overallScore || b.updatedAt.localeCompare(a.updatedAt))
     return { records, stats, taxonomy, path: this.path }
   }
   save(raw) {
@@ -262,6 +264,18 @@ export class MistakebookStore {
       const existing = this.vocabularyByWord(word)
       if (existing) return { created: false, record: this.saveInside({ ...existing, reciteCount: (existing.reciteCount ?? 0) + 1 }) }
       return { created: true, record: this.saveInside({ type: 'vocabulary', title: word, vocabulary, reciteCount: 1 }) }
+    })
+  }
+  // 自由排列：把当前视图的记录按调用方给出的新顺序依次写 sortIndex。
+  // 未列出的记录保持原位（旧 sortIndex 不变），手动排序按 index 升序、
+  // 未排过的排在其后并按更新时间倒序。
+  reorder(ids) {
+    const list = [...new Set((Array.isArray(ids) ? ids : []).map(id => String(id)))]
+    if (!list.length) throw new Error('没有可排列的笔记')
+    return this.transaction(() => {
+      let index = 0
+      for (const id of list) this.saveInside({ ...this.require(id), sortIndex: index++ })
+      return { ordered: list.length }
     })
   }
   acceptAI(id) {
