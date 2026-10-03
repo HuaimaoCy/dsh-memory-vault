@@ -1,6 +1,6 @@
 {
   "name": "dsh-memory-vault",
-  "version": "0.7.8",
+  "version": "0.7.9",
   "description": "Independent knowledge and memory vault with a desktop app, Codex MCP, a DSH plugin, CLI and local RPC sharing one SQLite database.",
   "type": "module",
   "main": "index.js",

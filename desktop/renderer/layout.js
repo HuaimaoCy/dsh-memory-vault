@@ -1,14 +1,20 @@
 // 通用布局模块：可拖动分隔条（滑块）与界面偏好持久化。
 // 只负责指针位移与回调——宽度怎么算、应用到哪个元素、复位到什么值，
 // 全部由调用方决定；本模块不包含任何具体面板的知识。
-export const readPrefs = (key, fallback = {}) => {
-  try {
-    const saved = JSON.parse(localStorage.getItem(key) ?? '{}')
-    return saved && typeof saved === 'object' && !Array.isArray(saved) ? { ...fallback, ...saved } : { ...fallback }
-  } catch { return { ...fallback } }
+// 偏好持久化不再绑定 localStorage：createPrefStore 让调用方注入读写后端
+// （0.7.9 起笔记本偏好存笔记本数据库，渲染层 localStorage 清零）。
+export function createPrefStore({ read, write, clear }) {
+  return {
+    readPrefs: (key, fallback = {}) => {
+      try {
+        const saved = JSON.parse(read(key) ?? '{}')
+        return saved && typeof saved === 'object' && !Array.isArray(saved) ? { ...fallback, ...saved } : { ...fallback }
+      } catch { return { ...fallback } }
+    },
+    writePrefs: (key, prefs) => { try { write(key, JSON.stringify(prefs)) } catch { /* 存储不可用时静默降级为本次会话生效 */ } },
+    clearPrefs: key => { try { clear(key) } catch { /* 同上 */ } },
+  }
 }
-export const writePrefs = (key, prefs) => { try { localStorage.setItem(key, JSON.stringify(prefs)) } catch { /* 存储不可用时静默降级为本次会话生效 */ } }
-export const clearPrefs = key => { try { localStorage.removeItem(key) } catch { /* 同上 */ } }
 
 // attachSplitter(element, { onStart, onResize({dx,dy}), onReset })
 // pointerdown 捕获指针并回调 onStart（记录起始宽度等），pointermove 派发

@@ -1,5 +1,5 @@
 import { DatabaseSync } from 'node:sqlite'
-import { mkdirSync, readFileSync } from 'node:fs'
+import { mkdirSync, readFileSync, existsSync } from 'node:fs'
 import { dirname } from 'node:path'
 import { randomUUID, createHash, randomInt } from 'node:crypto'
 import { NOTE_TYPES, normalizeFields, contentOf } from './fields.mjs'
@@ -95,51 +95,110 @@ function normalize(raw, previous = {}) {
 function fieldsForAI(type, fields = {}) { return ['physics','method','vocabulary'].includes(type) ? { [type]: normalizeFields(type, fields[type]) } : {} }
 
 export class MistakebookStore {
-  constructor(path) {
-    this.path = path
-    this.quizzes = new Map()
-    mkdirSync(dirname(path), { recursive: true })
-    this.db = new DatabaseSync(path)
+  // 两种模式：
+  //  - new MistakebookStore(path)：自建独立数据库文件（历史行为，测试在用）。
+  //  - new MistakebookStore({ database })：注入 vault 的 DatabaseSync 连接，
+  //    在其中创建/使用 notebook_* 前缀表，不拥有、不关闭该连接。
+  constructor(options) {
+    const injected = options && typeof options === 'object' && !(options instanceof String) && typeof options !== 'string' && 'database' in options
+    if (injected) {
+      if (!options.database || typeof options.database.prepare !== 'function') throw new Error('database 必须是 DatabaseSync 实例')
+      this.db = options.database
+      this.path = options.path ?? null
+      this.ownsDb = false
+      this.tables = { meta: 'notebook_meta', questions: 'notebook_questions', images: 'notebook_images' }
+      this.quizzes = new Map()
+    } else {
+      const path = typeof options === 'string' ? options : options?.path
+      if (!path) throw new Error('MistakebookStore 需要文件路径或 { database }')
+      this.path = path
+      this.ownsDb = true
+      this.tables = { meta: 'addon_meta', questions: 'questions', images: 'question_images' }
+      this.quizzes = new Map()
+      mkdirSync(dirname(path), { recursive: true })
+      this.db = new DatabaseSync(path)
+    }
     this.db.exec('PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000;')
-    const hasMeta = this.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='addon_meta'").get()
-    const version = hasMeta ? this.db.prepare("SELECT value FROM addon_meta WHERE key='schema'").get()?.value : null
-    if (version && !['1','2'].includes(version)) { this.db.close(); throw new Error('笔记本数据库版本较新，请使用对应版本') }
+    const { meta, questions, images } = this.tables
+    const hasMeta = this.db.prepare(`SELECT 1 FROM sqlite_master WHERE type='table' AND name='${meta}'`).get()
+    const version = hasMeta ? this.db.prepare(`SELECT value FROM ${meta} WHERE key='schema'`).get()?.value : null
+    if (version && !['1','2'].includes(version)) { if (this.ownsDb) this.db.close(); throw new Error('笔记本数据库版本较新，请使用对应版本') }
     if (version === '1') {
-      this.migrationBackup = `${path}.v1-${Date.now()}-${randomUUID()}.bak`
+      this.migrationBackup = `${this.path}.v1-${Date.now()}-${randomUUID()}.bak`
       this.db.prepare('VACUUM INTO ?').run(this.migrationBackup)
     }
     this.db.exec(`PRAGMA journal_mode=WAL;
-      CREATE TABLE IF NOT EXISTS addon_meta(key TEXT PRIMARY KEY, value TEXT NOT NULL);
-      CREATE TABLE IF NOT EXISTS questions(id TEXT PRIMARY KEY, payload TEXT NOT NULL, fingerprint TEXT NOT NULL);
-      CREATE INDEX IF NOT EXISTS questions_fingerprint ON questions(fingerprint);
-      CREATE TABLE IF NOT EXISTS question_images(id TEXT PRIMARY KEY, question_id TEXT NOT NULL REFERENCES questions(id) ON DELETE CASCADE,
+      CREATE TABLE IF NOT EXISTS ${meta}(key TEXT PRIMARY KEY, value TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS ${questions}(id TEXT PRIMARY KEY, payload TEXT NOT NULL, fingerprint TEXT NOT NULL);
+      CREATE INDEX IF NOT EXISTS ${questions}_fingerprint ON ${questions}(fingerprint);
+      CREATE TABLE IF NOT EXISTS ${images}(id TEXT PRIMARY KEY, question_id TEXT NOT NULL REFERENCES ${questions}(id) ON DELETE CASCADE,
         name TEXT NOT NULL, mime_type TEXT NOT NULL, width INTEGER NOT NULL, height INTEGER NOT NULL, sha256 TEXT NOT NULL, data BLOB NOT NULL, UNIQUE(question_id,sha256));`)
     try { this.transaction(() => {
       if (version === '1') for (const previous of this.records()) {
         const converted = { ...normalize(previous, previous), updatedAt: previous.updatedAt, revision: previous.revision, classificationSuggested: previous.classificationSuggested }
-        this.db.prepare('UPDATE questions SET payload=?, fingerprint=? WHERE id=?').run(JSON.stringify(converted), dedupKey(converted), previous.id)
+        this.db.prepare(`UPDATE ${questions} SET payload=?, fingerprint=? WHERE id=?`).run(JSON.stringify(converted), dedupKey(converted), previous.id)
       }
-      this.db.prepare("INSERT INTO addon_meta VALUES('schema','2') ON CONFLICT(key) DO UPDATE SET value=excluded.value").run()
-    }) } catch (error) { this.db.close(); throw error }
+      this.db.prepare(`INSERT INTO ${meta} VALUES('schema','2') ON CONFLICT(key) DO UPDATE SET value=excluded.value`).run()
+    }) } catch (error) { if (this.ownsDb) this.db.close(); throw error }
   }
-  close() { this.db.close() }
+  close() { if (this.ownsDb) this.db.close() }
+  // 把旧独立库（mistakebook.sqlite）的数据整库搬进当前连接的 notebook_* 表。
+  // 幂等：已迁移过（notebook_meta 有标记且 legacy 无新增数据）或 legacy 不存在则跳过。
+  migrateFromFile(legacyPath) {
+    if (!existsSync(legacyPath)) return { migrated: false, reason: 'missing' }
+    if (this.migrationFromFile?.path === legacyPath) return { migrated: false, reason: 'already' }
+    const backup = `${legacyPath}.bak-${Date.now()}`
+    this.db.prepare('VACUUM INTO ?').run(backup)
+    const { meta, questions, images } = this.tables
+    // ATTACH/DETACH 不能发生在事务内：先挂载，事务搬数据，事务提交后再卸载。
+    this.db.exec(`ATTACH DATABASE '${String(legacyPath).replaceAll("'", "''")}' AS legacy_nb`)
+    try {
+      const result = this.transaction(() => {
+        const hasLegacyQuestions = this.db.prepare("SELECT 1 FROM legacy_nb.sqlite_master WHERE type='table' AND name='questions'").get()
+        const legacyCount = hasLegacyQuestions ? this.db.prepare('SELECT count(*) AS n FROM legacy_nb.questions').get().n : 0
+        const done = this.db.prepare(`SELECT value FROM ${meta} WHERE key='migratedFrom'`).get()
+        let previous = null
+        try { previous = done ? JSON.parse(done.value) : null } catch { previous = null }
+        if (previous && legacyCount <= (previous.count ?? 0)) return { migrated: false, reason: 'already' }
+        let count = 0
+        if (legacyCount) {
+          this.db.exec(`INSERT OR REPLACE INTO ${questions}(id, payload, fingerprint) SELECT id, payload, fingerprint FROM legacy_nb.questions`)
+          this.db.exec(`INSERT OR IGNORE INTO ${images}(id, question_id, name, mime_type, width, height, sha256, data)
+            SELECT id, question_id, name, mime_type, width, height, sha256, data FROM legacy_nb.question_images`)
+          // 防孤儿：清掉指向缺失题目的图片
+          this.db.prepare(`DELETE FROM ${images} WHERE question_id NOT IN (SELECT id FROM ${questions})`).run()
+          count = legacyCount
+        }
+        const hasLegacyMeta = this.db.prepare("SELECT 1 FROM legacy_nb.sqlite_master WHERE type='table' AND name='addon_meta'").get()
+        const legacySidebar = hasLegacyMeta ? this.db.prepare("SELECT value FROM legacy_nb.addon_meta WHERE key='sidebar'").get()?.value ?? null : null
+        if (legacySidebar && !this.db.prepare(`SELECT 1 FROM ${meta} WHERE key='sidebar'`).get())
+          this.db.prepare(`INSERT INTO ${meta}(key, value) VALUES('sidebar', ?)`).run(legacySidebar)
+        const marker = JSON.stringify({ path: String(legacyPath), count, at: new Date().toISOString() })
+        if (previous) this.db.prepare(`UPDATE ${meta} SET value=? WHERE key='migratedFrom'`).run(marker)
+        else this.db.prepare(`INSERT INTO ${meta}(key, value) VALUES('migratedFrom', ?)`).run(marker)
+        this.migrationFromFile = { path: legacyPath }
+        return { migrated: true, count, backup }
+      })
+      return result
+    } finally { this.db.exec('DETACH DATABASE legacy_nb') }
+  }
   transaction(action) {
     this.db.exec('BEGIN IMMEDIATE')
     try { const result = action(); this.db.exec('COMMIT'); return result } catch (error) { this.db.exec('ROLLBACK'); throw error }
   }
   require(id) {
-    const row = this.db.prepare('SELECT payload FROM questions WHERE id=?').get(String(id))
+    const row = this.db.prepare(`SELECT payload FROM ${this.tables.questions} WHERE id=?`).get(String(id))
     if (!row) throw new Error('题目不存在')
     return JSON.parse(row.payload)
   }
   listImages(id, includeData = false) {
-    return this.db.prepare('SELECT * FROM question_images WHERE question_id=? ORDER BY rowid').all(id).map(image => ({
+    return this.db.prepare(`SELECT * FROM ${this.tables.images} WHERE question_id=? ORDER BY rowid`).all(id).map(image => ({
       id: image.id, name: image.name, mimeType: image.mime_type, width: image.width, height: image.height, size: image.data.length, sha256: image.sha256,
       ...(includeData ? { data: Buffer.from(image.data).toString('base64') } : {}),
     }))
   }
   read(id) { const record = this.require(id), images = this.listImages(id, true), hash = contentHash({ ...record, images }); return { ...record, images, value: evaluate(record), contentHash: hash, aiStale: Boolean(record.aiResult && record.aiResult.inputHash !== hash) } }
-  records() { return this.db.prepare('SELECT payload FROM questions').all().map(row => JSON.parse(row.payload)) }
+  records() { return this.db.prepare(`SELECT payload FROM ${this.tables.questions}`).all().map(row => JSON.parse(row.payload)) }
   list({ view = 'all', type = '', subjectID = '', nodeID = '', query = '', tag = '', order = 'priority' } = {}) {
     const active = this.records(), now = Date.now()
     const stats = { all: 0, due: 0, mastered: 0, archived: 0, trash: 0, subjects: {}, types: {}, tags: {} }
@@ -164,7 +223,7 @@ export class MistakebookStore {
       return terms.every(term => `${JSON.stringify(contentOf(row))}\n${row.tags.join(' ')}`.toLocaleLowerCase().includes(term))
     }).map(row => ({ ...row, imageCount: this.listImages(row.id).length, value: evaluate(row) }))
     records.sort((a, b) => order === 'updated' ? b.updatedAt.localeCompare(a.updatedAt) : order === 'manual' ? (a.sortIndex ?? Infinity) - (b.sortIndex ?? Infinity) || b.updatedAt.localeCompare(a.updatedAt) : b.value.overallScore - a.value.overallScore || b.updatedAt.localeCompare(a.updatedAt))
-    return { records, stats, taxonomy, path: this.path, sidebar: this.sidebarConfig() }
+    return { records, stats, taxonomy, path: this.path, sidebar: this.sidebarConfig(), prefs: this.prefs() }
   }
   save(raw) {
     if (!raw || typeof raw !== 'object') throw new Error('无效的题目')
@@ -179,7 +238,7 @@ export class MistakebookStore {
     let size = 0
     const prepared = images.map(image => {
       if (image.id) {
-        const stored = this.db.prepare('SELECT * FROM question_images WHERE id=? AND question_id=?').get(String(image.id), record.id)
+        const stored = this.db.prepare(`SELECT * FROM ${this.tables.images} WHERE id=? AND question_id=?`).get(String(image.id), record.id)
         if (!stored) throw new Error('图片不属于当前题目')
         size += stored.data.length; return { stored }
       }
@@ -188,11 +247,11 @@ export class MistakebookStore {
     if (size > IMAGE_TOTAL_BYTES) throw new Error('每道题的图片总计不能超过 20 MB')
     if (record.type === 'vocabulary' && !record.vocabulary.word.trim()) throw new Error('请填写英语单词或短语')
     if (!record.stem.trim() && !images.length && !(record.type === 'vocabulary' ? record.vocabulary.word.trim() : record.type !== 'mistake' && (record.title.trim() || Object.values(record[record.type] ?? {}).some(value => value.trim())))) throw new Error('请填写题干、笔记内容或添加图片')
-    this.db.prepare('INSERT INTO questions VALUES(?,?,?) ON CONFLICT(id) DO UPDATE SET payload=excluded.payload, fingerprint=excluded.fingerprint')
+    this.db.prepare(`INSERT INTO ${this.tables.questions} VALUES(?,?,?) ON CONFLICT(id) DO UPDATE SET payload=excluded.payload, fingerprint=excluded.fingerprint`)
       .run(record.id, JSON.stringify(record), dedupKey(record))
     const keep = new Set(prepared.filter(image => image.stored).map(image => image.stored.id))
-    for (const old of this.listImages(record.id)) if (!keep.has(old.id)) this.db.prepare('DELETE FROM question_images WHERE id=?').run(old.id)
-    const insert = this.db.prepare('INSERT OR IGNORE INTO question_images VALUES(?,?,?,?,?,?,?,?)')
+    for (const old of this.listImages(record.id)) if (!keep.has(old.id)) this.db.prepare(`DELETE FROM ${this.tables.images} WHERE id=?`).run(old.id)
+    const insert = this.db.prepare(`INSERT OR IGNORE INTO ${this.tables.images} VALUES(?,?,?,?,?,?,?,?)`)
     for (const { normalized: image } of prepared) if (image) insert.run(randomUUID(), record.id, image.name, image.mimeType, image.width, image.height, image.sha256, image.bytes)
     return this.read(record.id)
   }
@@ -201,7 +260,7 @@ export class MistakebookStore {
       const record = this.require(id)
       if (action === 'purge') {
         if (!record.isSoftDeleted) throw new Error('只有回收站中的题目可永久删除')
-        this.db.prepare('DELETE FROM questions WHERE id=?').run(id); return { removed: true }
+        this.db.prepare(`DELETE FROM ${this.tables.questions} WHERE id=?`).run(id); return { removed: true }
       }
       if (action === 'delete') record.isSoftDeleted = true
       else if (action === 'restore') record.isSoftDeleted = false
@@ -222,18 +281,34 @@ export class MistakebookStore {
   }
   // —— 侧边栏配置：存 addon_meta（数据库），与记忆库侧边栏同为数据驱动 ——
   sidebarConfig() {
-    const row = this.db.prepare("SELECT value FROM addon_meta WHERE key='sidebar'").get()
+    const row = this.db.prepare(`SELECT value FROM ${this.tables.meta} WHERE key='sidebar'`).get()
     if (!row) return null
     try {
       const value = JSON.parse(row.value)
       return value && typeof value === 'object' && !Array.isArray(value) ? value : null
     } catch { return null }
   }
+  // —— 界面偏好（布局/排序等）：整包存 meta，随 list 返回 ——
+  prefs() {
+    const row = this.db.prepare(`SELECT value FROM ${this.tables.meta} WHERE key='prefs'`).get()
+    if (!row) return {}
+    try {
+      const value = JSON.parse(row.value)
+      return value && typeof value === 'object' && !Array.isArray(value) ? value : {}
+    } catch { return {} }
+  }
+  setPrefs(raw) {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new Error('偏好数据无效')
+    const text = JSON.stringify(raw)
+    if (text.length > 100000) throw new Error('偏好数据过大')
+    this.db.prepare(`INSERT INTO ${this.tables.meta} VALUES('prefs',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value`).run(text)
+    return { saved: true }
+  }
   setSidebar(raw) {
     if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new Error('侧边栏配置无效')
     const text = JSON.stringify(raw)
     if (text.length > 100000) throw new Error('侧边栏配置过大')
-    this.db.prepare("INSERT INTO addon_meta VALUES('sidebar',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").run(text)
+    this.db.prepare(`INSERT INTO ${this.tables.meta} VALUES('sidebar',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value`).run(text)
     return { saved: true }
   }
   // 拖动改分类：笔记卡片拖到侧边栏学科项 → 换学科；拖到标签 → 补标签。
@@ -344,7 +419,7 @@ export class MistakebookStore {
     if (!Array.isArray(answers) || answers.length > session.records.length || new Set(answers.map(row=>row.id)).size !== answers.length || answers.some(row=>!session.records.some(record=>record.id===row.id) || typeof row.answer!=='string' || row.answer.length>300)) throw new Error('检测答案格式无效')
     const results=this.transaction(()=>session.records.map(item=>{
       const answer=answers.find(row=>row.id===item.id)?.answer ?? '', correct=english(answer)===english(item.word)
-      if (!this.db.prepare('SELECT 1 FROM questions WHERE id=?').get(item.id)) return {id:item.id,answer,expected:item.word,correct,recorded:false}
+      if (!this.db.prepare(`SELECT 1 FROM ${this.tables.questions} WHERE id=?`).get(item.id)) return {id:item.id,answer,expected:item.word,correct,recorded:false}
       const record=this.read(item.id)
       if (record.contentHash!==item.hash || record.isSoftDeleted || record.isArchived) return {id:item.id,answer,expected:item.word,correct,recorded:false}
       const passed=correct

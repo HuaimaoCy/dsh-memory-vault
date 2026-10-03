@@ -12,7 +12,7 @@ export async function run(window,bridge) {
   const fill=(selector,value,event='input')=>js(`(()=>{const n=document.querySelector(${JSON.stringify(selector)});n.value=${JSON.stringify(value)};n.dispatchEvent(new Event(${JSON.stringify(event)},{bubbles:true}))})()`)
   const until=async expression=>{for(let i=0;i<350;i++){if(await js(expression))return;await new Promise(r=>setTimeout(r,30))}throw new Error(`UI timeout ${expression}; ${await js("document.querySelector('#mb-status')?.textContent")}`)}
   const idle=()=>until("!document.querySelector('.mb-shell').hasAttribute('aria-busy')")
-  const api=(action,body={})=>js(`window.vault.mistakebook(${JSON.stringify(action)},${JSON.stringify(body)})`)
+  const api=(action,body={})=>js(`(window.vault.notebook?window.vault.notebook(${JSON.stringify(action)},${JSON.stringify(body)}):window.vault.mistakebook(${JSON.stringify(action)},${JSON.stringify(body)}))`)
   const field=key=>`[data-mb-field="${key}"]`
   const output=process.argv.includes('--shot')?dirname(resolve(process.argv[process.argv.indexOf('--shot')+1])):null
   const shot=async(name,target=window)=>{if(!output)return;const paint=new Promise((r,reject)=>{const t=setTimeout(()=>reject(new Error('No paint')),5000);target.webContents.once('paint',()=>{clearTimeout(t);r()})});target.webContents.invalidate();await paint;await new Promise(r=>setTimeout(r,160));writeFileSync(join(output,`${name}.png`),(await target.webContents.capturePage()).toPNG())}

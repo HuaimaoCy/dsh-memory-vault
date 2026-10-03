@@ -1,6 +1,8 @@
 const { contextBridge, ipcRenderer } = require('electron')
 contextBridge.exposeInMainWorld('vault', {
   mistakebook: (action, body) => ipcRenderer.invoke('mistakebook:invoke', action, body),
+  // Notebook ops ride the shared vault channel: notebook('list') == invoke('notebook.list').
+  notebook: (op, body) => ipcRenderer.invoke('vault:invoke', `notebook.${op}`, body),
   invoke: (op, body) => ipcRenderer.invoke('vault:invoke', op, body),
   info: () => ipcRenderer.invoke('vault:info'),
   confirm: message => ipcRenderer.invoke('vault:confirm', message),

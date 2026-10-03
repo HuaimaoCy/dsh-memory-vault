@@ -3,7 +3,6 @@
 // 配置模型：{ sections: [{id, label, custom?, tags?, items:[itemId]}], hidden:[id] }
 // itemId 形如 view:all / type:physics / subject:english；每个条目只属于一个
 // 区块（拖拽跨区块移动即改变它的归属）；hidden 同时收纳区块 id 与条目 id。
-import { readPrefs, clearPrefs } from './layout.js'
 
 const h = (tag, props = {}, ...children) => {
   const node = document.createElement(tag)
@@ -191,9 +190,11 @@ export function renderSidebarConfig({ config, knownItems, onChange }) {
 
 // 旧版（localStorage）一次性迁移：把 0.7.5/0.7.6 的区块/条目配置换算成
 // 统一模型。迁移后清掉旧键，之后数据库是唯一事实源。
+// 这是渲染层唯一允许读 localStorage 的地方（仅为旧配置迁移，读一次即清）。
 export function migrateLegacySidebar() {
-  const legacy = readPrefs('alaya.sidebar', null)
-  if (!legacy || typeof legacy !== 'object' || !Array.isArray(legacy.order)) return null
+  let legacy = null
+  try { legacy = JSON.parse(localStorage.getItem('alaya.sidebar') ?? 'null') } catch { legacy = null }
+  if (!legacy || typeof legacy !== 'object' || Array.isArray(legacy) || !Array.isArray(legacy.order)) return null
   const prefix = { views: 'view', types: 'type', subjects: 'subject' }
   const sections = [], hidden = []
   for (const id of legacy.order) {
@@ -204,6 +205,6 @@ export function migrateLegacySidebar() {
     for (const item of Array.isArray(items.hidden) ? items.hidden : []) hidden.push(`${prefix[id] ?? ''}${prefix[id] ? ':' : ''}${item}`)
     sections.push(id === 'tags' ? { id, label: '标签', tags: true, items: [] } : { id, items: ids })
   }
-  clearPrefs('alaya.sidebar')
+  try { localStorage.removeItem('alaya.sidebar') } catch { /* 存储不可用时忽略 */ }
   return { sections, hidden }
 }

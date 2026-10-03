@@ -4,7 +4,7 @@ import { NOTE_TYPES, STRUCTURED_FIELDS, normalizeFields } from '../../addons/mis
 import { SIMULATIONS } from '../../addons/mistakebook/simulations.mjs'
 import { extractWords, normalizeWord } from '../../addons/mistakebook/words.mjs'
 import { renderRelationTree, vocabularyGraph } from './relations.js'
-import { readPrefs, writePrefs, clearPrefs, attachSplitter } from './layout.js'
+import { attachSplitter } from './layout.js'
 import { renderTagEditor, renderTagCloud } from './tags.js'
 import { createSidebarController, renderSidebarConfig, migrateLegacySidebar } from './sidebar.js'
 
@@ -27,7 +27,9 @@ const labelStates = { new: '待复习', reviewing: '复习中', mastered: '已�
 const date = value => value ? new Date(value).toLocaleDateString('zh-CN', { month: 'short', day: 'numeric' }) : '尚未安排'
 const dataURL = image => `data:${image.mimeType};base64,${image.data}`
 async function call(action, body) {
-  const reply = await window.vault.mistakebook(action, body)
+  // 统一 op 通道：vault.notebook；后端未就绪时回退旧通道（兼容期）。
+  const channel = typeof window.vault?.notebook === 'function' ? window.vault.notebook : window.vault.mistakebook
+  const reply = await channel(action, body)
   if (!reply.ok) throw new Error(reply.error || '操作失败')
   return reply.result
 }
@@ -81,6 +83,12 @@ export function mountMistakebook({ beforeEnter }) {
   }
   const load = async () => {
     state.data = await call('list', { view: state.view, type: state.type, subjectID: state.subjectID, nodeID: state.nodeID, query: state.query, tag: state.tag, order: state.order })
+    const incoming = state.data.prefs
+    prefsCache = incoming && typeof incoming === 'object' && !Array.isArray(incoming) ? { ...incoming } : {}
+    if (['priority', 'updated', 'manual'].includes(prefsCache.order) && state.order !== prefsCache.order) {
+      state.order = prefsCache.order
+      const sort = document.getElementById('mb-sort'); if (sort) sort.value = state.order
+    }
     if (state.data.sidebar === null) {
       const migrated = migrateLegacySidebar()
       if (migrated) { await call('sidebar.save', { config: migrated }); state.data.sidebar = migrated }
@@ -106,14 +114,18 @@ export function mountMistakebook({ beforeEnter }) {
   const sideViews = h('nav', { id: 'mb-views', 'aria-label': '笔记视图' }), categories = h('nav', { id: 'mb-types', 'aria-label': '笔记类型' }), subjects = h('nav', { id: 'mb-subjects', 'aria-label': '学科' })
   const list = h('div', { id: 'mb-list', class: 'mb-list' }), detail = h('section', { id: 'mb-detail', class: 'mb-detail', hidden: true, 'aria-label': '题目编辑器' })
   // —— 自由布局：侧边栏/详情宽度用 CSS 变量承载，拖动分隔条即改写并持久化 ——
-  const LAYOUT_KEY = 'alaya.layout'
-  const layoutPrefs = () => readPrefs(LAYOUT_KEY, { sideW: 220, detailW: 440, detailSide: 'right' })
+  // 布局与排序偏好存笔记本数据库（随 list 返回 prefs，写入走 prefs.save），
+  // 渲染层不再使用 localStorage。prefsCache 是内存镜像，写入异步落库。
+  const LAYOUT_DEFAULTS = { sideW: 220, detailW: 440, detailSide: 'right' }
+  let prefsCache = {}
+  const layoutPrefs = () => ({ ...LAYOUT_DEFAULTS, ...prefsCache })
   const applyLayout = (prefs = layoutPrefs()) => {
     shell.style.setProperty('--mb-side-w', `${prefs.sideW}px`)
     shell.style.setProperty('--mb-detail-w', `${prefs.detailW}px`)
     shell.classList.toggle('detail-left', prefs.detailSide === 'left')
   }
-  const saveLayout = prefs => { writePrefs(LAYOUT_KEY, prefs); applyLayout(prefs) }
+  const savePrefs = next => { prefsCache = next; void guard(() => call('prefs.save', next)); applyLayout(next) }
+  const saveLayout = prefs => savePrefs(prefs)
   const setPanelWidth = (name, width, min, max) => {
     const prefs = layoutPrefs()
     prefs[name] = Math.round(Math.min(max, Math.max(min, width)))
@@ -164,9 +176,7 @@ export function mountMistakebook({ beforeEnter }) {
     if (!await confirm(`将从「${file.name}」导入 ${records.length} 道题，重复题干会跳过。继续？`)) return
     const result = await call('import', value); state.draft = null; state.dirty = false; await load(); notify(`导入 ${result.created} 道题，跳过 ${result.skipped} 道重复题${result.unmapped ? `；${result.unmapped} 道旧知识点需重新分类` : ''}${result.missingImages ? `；${result.missingImages} 道需补充旧版原图` : ''}`)
   }) })
-  const savedOrder = readPrefs('alaya.order', {}).value
-  if (['priority', 'updated', 'manual'].includes(savedOrder)) state.order = savedOrder
-  const order = h('select', { id: 'mb-sort', class: 'select', 'aria-label': '笔记排序', onChange: event => void guard(async () => { state.order = event.target.value; writePrefs('alaya.order', { value: state.order }); await load() }) }, h('option', { value: 'priority', text: '复习优先级' }), h('option', { value: 'updated', text: '最近更新' }), h('option', { value: 'manual', text: '自由排列' }))
+  const order = h('select', { id: 'mb-sort', class: 'select', 'aria-label': '笔记排序', onChange: event => void guard(async () => { state.order = event.target.value; savePrefs({ ...prefsCache, order: state.order }); await load() }) }, h('option', { value: 'priority', text: '复习优先级' }), h('option', { value: 'updated', text: '最近更新' }), h('option', { value: 'manual', text: '自由排列' }))
   order.value = state.order
   const clearSearch = async () => { if (!await discard()) return; clearTimeout(searchTimer); state.query = ''; state.tag = ''; search.value = ''; state.draft = null; state.dirty = false; state.selection.clear(); await load(); search.focus() }
   const searchFilter = h('div', { class: 'mb-search-filter', id: 'mb-search-filter', hidden: true }, h('span', { id: 'mb-search-filter-label' }), button('清除搜索', clearSearch, false, { class: 'btn ghost', id: 'mb-clear-search' }))
@@ -203,7 +213,7 @@ export function mountMistakebook({ beforeEnter }) {
       const switching = state.order !== 'manual'
       void guard(async () => {
         if (switching) {
-          state.order = 'manual'; writePrefs('alaya.order', { value: 'manual' })
+          state.order = 'manual'; savePrefs({ ...prefsCache, order: 'manual' })
           const sort = document.getElementById('mb-sort'); if (sort) sort.value = 'manual'
         }
         await call('reorder', { ids })
@@ -797,7 +807,7 @@ export function mountMistakebook({ beforeEnter }) {
       }, true, { id: 'mb-config-save' }), h('h3', { text: '本地数据' }), h('p', { class: 'mb-data-path', text: config.path }), button('备份笔记本', async () => { if (await call('backup')) notify('笔记本已备份，包含原图') }), h('p', { class: 'cap', text: '笔记本使用独立数据库，不进入 Codex / DSH 的记忆上下文。' }),
       h('h3', { text: '界面布局' }), h('p', { class: 'cap', text: '侧边栏与详情面板之间有可拖动的分隔条：按住拖动自由调整宽度，双击恢复默认。' }),
       field('详情面板位置', h('select', { class: 'select', id: 'mb-detail-side', onChange: event => void guard(() => { const prefs = layoutPrefs(); prefs.detailSide = event.target.value; saveLayout(prefs); notify('布局已更新') }) }, [['right', '右侧（默认）'], ['left', '左侧']].map(([value, text]) => h('option', { value, text, selected: layoutPrefs().detailSide === value ? 'selected' : undefined })))),
-      button('恢复默认布局', () => { clearPrefs(LAYOUT_KEY); applyLayout(); notify('布局已恢复默认') }, false, { class: 'btn ghost', id: 'mb-layout-reset' })))
+      button('恢复默认布局', () => { savePrefs({ ...prefsCache, ...LAYOUT_DEFAULTS }); notify('布局已恢复默认') }, false, { class: 'btn ghost', id: 'mb-layout-reset' })))
   }
   async function openImport(initial = 'mistake') {
     if (!await discard()) return

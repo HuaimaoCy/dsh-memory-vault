@@ -8,9 +8,7 @@ import { connectorConfig } from './lib/connectors.mjs'
 import { createModelAdapter, validateModelSettings } from '../src/model.js'
 import { validateVaultFile } from './lib/databases.mjs'
 import { createDesktopUpdater } from './lib/updates.mjs'
-import { MistakebookStore, segmentQuestions } from '../addons/mistakebook/store.mjs'
-import { recognize, analyze, solve, createCloze, extractWordsWithAI, lookupWord, validateOCRSettings } from '../addons/mistakebook/services.mjs'
-import { SIMULATIONS, simulationURL } from '../addons/mistakebook/simulations.mjs'
+import { MistakebookStore } from '../addons/mistakebook/store.mjs'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const argv = process.argv.slice(1)
@@ -56,109 +54,39 @@ function register(channel, action) {
     } catch (error) { return { ok: false, error: error instanceof Error ? error.message : String(error) } }
   })
 }
+// Notebook handlers live in the shared op table (src/core/notebook_ops.mjs);
+// this hooks object is the only place the main process meets them. The old
+// `mistakebook:invoke` channel stays as a compatibility alias forwarding
+// into the same table, and goes away once every caller is migrated.
+const notebookHooks = {
+  getWindow: () => window,
+  isSelftest: () => selftest,
+  simulations,
+  checkDataTarget,
+  getPreferences: () => preferences,
+  savePreferences,
+  getModel: () => adapter(),
+  isEncryptionAvailable: () => safeStorage.isEncryptionAvailable(),
+  encryptText: text => safeStorage.encryptString(text).toString('base64'),
+  getOCRKey: () => preferences.encryptedOCRKey ? safeStorage.decryptString(Buffer.from(preferences.encryptedOCRKey, 'base64')) : '',
+  showSaveDialog: options => dialog.showSaveDialog(window, options),
+  writeFileSync,
+  saveAtomically: (target, temporary, write) => { write(temporary); renameSync(temporary, target) },
+  discardTemp: temporary => rmSync(temporary, { force: true }),
+  createSimulationWindow: url => {
+    const simulation = new BrowserWindow({ parent: window, width: 1100, height: 780, title: '笔记本 · PhET 物理仿真', show: !selftest, autoHideMenuBar: true,
+      webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true, partition: `notebook-simulation-${randomUUID()}`, offscreen: selftest } })
+    simulation.webContents.session.setPermissionRequestHandler((_contents, _permission, callback) => callback(false))
+    simulation.webContents.session.on('will-download', event => event.preventDefault())
+    simulation.webContents.on('will-navigate', (event, target) => { if (new URL(target).origin !== 'https://phet.colorado.edu') event.preventDefault() })
+    simulation.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
+    return simulation
+  },
+  getAI: () => aiRequest, setAI: request => { aiRequest = request },
+  getOCR: () => ocrRequest, setOCR: request => { ocrRequest = request },
+}
 function registerDesktop() {
-  register('mistakebook:invoke', async (action, body = {}) => {
-    switch (action) {
-      case 'list': return mistakebook.list(body)
-      case 'read': return mistakebook.read(body.id)
-      case 'save': return mistakebook.save(body)
-      case 'action': return mistakebook.action(body.id, body.action)
-      case 'reorder': return mistakebook.reorder(body?.ids)
-      case 'sidebar.save': return mistakebook.setSidebar(body?.config)
-      case 'assign': return mistakebook.assign(body?.id, body?.target ?? {})
-      case 'ai.accept': return mistakebook.acceptAI(body.id)
-      case 'cancelAI': aiRequest?.abort(); return { cancelled: true }
-      case 'solve': {
-        if (aiRequest) throw new Error('已有 AI 任务正在进行')
-        const request = new AbortController(); aiRequest = request
-        try { const record = mistakebook.read(body.id), aiResult = await solve(record, adapter(), request.signal); return mistakebook.save({ ...record, aiResult }) }
-        finally { if (aiRequest === request) aiRequest = undefined }
-      }
-      case 'quiz.start': {
-        const records = mistakebook.planQuiz(body.count ?? 10)
-        if (body.mode !== 'cloze') return mistakebook.startQuiz(records)
-        if (aiRequest) throw new Error('已有 AI 任务正在进行')
-        const request = new AbortController(); aiRequest = request
-        try { return mistakebook.startQuiz(records, await createCloze(records, adapter(), request.signal)) }
-        finally { if (aiRequest === request) aiRequest = undefined }
-      }
-      case 'quiz.submit': return mistakebook.submitQuiz(body.id, body.answers)
-      case 'words.extract': {
-        if (aiRequest) throw new Error('已有 AI 任务正在进行')
-        const request = new AbortController(); aiRequest = request
-        try { return await extractWordsWithAI(body?.text, adapter(), request.signal) }
-        finally { if (aiRequest === request) aiRequest = undefined }
-      }
-      case 'lookup': {
-        // 已在词库的词无需再调用模型：本地直接累计背诵次数并返回词条。
-        const existing = mistakebook.bumpLookup(body?.word)
-        if (existing) return existing
-        if (aiRequest) throw new Error('已有 AI 任务正在进行')
-        const request = new AbortController(); aiRequest = request
-        try { return mistakebook.recordLookup(await lookupWord(body?.word, adapter(), request.signal)) }
-        finally { if (aiRequest === request) aiRequest = undefined }
-      }
-      case 'simulation.info': return SIMULATIONS
-      case 'simulation.open': {
-        const url = simulationURL(body.id)
-        if (simulations.size >= 4) throw new Error('请先关闭一个仿真窗口再打开新的仿真')
-        const simulation = new BrowserWindow({ parent: window, width: 1100, height: 780, title: '笔记本 · PhET 物理仿真', show: !selftest, autoHideMenuBar: true,
-          webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true, partition: `notebook-simulation-${randomUUID()}`, offscreen: selftest } })
-        simulations.add(simulation); simulation.on('closed',()=>simulations.delete(simulation))
-        simulation.webContents.session.setPermissionRequestHandler((_contents,_permission,callback)=>callback(false))
-        simulation.webContents.session.on('will-download',event=>event.preventDefault())
-        simulation.webContents.on('will-navigate',(event,target)=>{ if (new URL(target).origin !== 'https://phet.colorado.edu') event.preventDefault() })
-        simulation.webContents.setWindowOpenHandler(()=>({action:'deny'}))
-        let timer
-        try { await Promise.race([simulation.loadURL(url),new Promise((_,reject)=>{timer=setTimeout(()=>reject(new Error('timeout')),45000)})]) }
-        catch { if (!simulation.isDestroyed()) simulation.destroy(); throw new Error('仿真打开失败，请检查网络连接') }
-        finally { clearTimeout(timer) }
-        return { opened: true, id: body.id, url }
-      }
-      case 'segment': return { questions: segmentQuestions(body.text) }
-      case 'import': return mistakebook.import(body)
-      case 'export': {
-        const result = await dialog.showSaveDialog(window, { title: '导出笔记本（含图片）', defaultPath: `notebook-${new Date().toISOString().slice(0,10)}.json`, filters: [{ name: '笔记本 JSON', extensions: ['json'] }] })
-        if (result.canceled || !result.filePath) return null
-        checkDataTarget(result.filePath)
-        const temporary = `${result.filePath}.${randomUUID()}.tmp`
-        try { writeFileSync(temporary, JSON.stringify(mistakebook.export(), null, 2)); renameSync(temporary, result.filePath) }
-        finally { rmSync(temporary, { force: true }) }
-        return { path: result.filePath }
-      }
-      case 'backup': {
-        const result = await dialog.showSaveDialog(window, { title: '备份笔记本', defaultPath: `notebook-${Date.now()}.sqlite`, filters: [{ name: 'SQLite 备份', extensions: ['sqlite'] }] })
-        if (result.canceled || !result.filePath) return null
-        checkDataTarget(result.filePath)
-        const temporary = `${result.filePath}.${randomUUID()}.tmp`
-        try { mistakebook.backupTo(temporary); renameSync(temporary, result.filePath) } finally { rmSync(temporary, { force: true }) }
-        return { path: result.filePath }
-      }
-      case 'settings': return { ...validateOCRSettings(preferences.ocr), hasKey: Boolean(preferences.encryptedOCRKey), modelConfigured: Boolean(adapter().resolveRoute()), path: mistakebook.path }
-      case 'configure': {
-        const ocr = validateOCRSettings(body)
-        let encryptedOCRKey = preferences.encryptedOCRKey
-        if (body.clearKey === true) encryptedOCRKey = undefined
-        else if (typeof body.apiKey === 'string' && body.apiKey.trim()) {
-          if (!safeStorage.isEncryptionAvailable()) throw new Error('系统安全存储不可用，无法保存密钥')
-          encryptedOCRKey = safeStorage.encryptString(body.apiKey.trim()).toString('base64')
-        }
-        savePreferences({ ...preferences, ocr, encryptedOCRKey }); return { saved: true }
-      }
-      case 'ocr': {
-        if (ocrRequest) throw new Error('已有识别任务正在进行')
-        const request = new AbortController(); ocrRequest = request
-        try { return await recognize(body, preferences.ocr, preferences.encryptedOCRKey ? safeStorage.decryptString(Buffer.from(preferences.encryptedOCRKey, 'base64')) : '', { signal: request.signal }) }
-        finally { if (ocrRequest === request) ocrRequest = undefined }
-      }
-      case 'cancelOCR': ocrRequest?.abort(); return { cancelled: true }
-      case 'analyze': {
-        const record = mistakebook.read(body.id), result = await analyze(record, adapter())
-        return mistakebook.save({ ...record, cause: result.cause })
-      }
-      default: throw new Error('未知笔记本操作')
-    }
-  })
+  register('mistakebook:invoke', (action, body = {}) => bridge.invoke(`notebook.${action}`, body))
   register('vault:updates', async (action, body) => {
     switch (action) {
       case 'status': return updater.status()
@@ -184,7 +112,7 @@ function registerDesktop() {
     if (reply.canceled) return null
     const databasePath = resolve(reply.filePaths[0])
     validateVaultFile(databasePath)
-    const next = openVault({ databasePath, updates: updater, ...adapter() })
+    const next = openVault({ databasePath, updates: updater, ...adapter(), notebook: mistakebook, notebookHooks })
     try { savePreferences({ ...preferences, databasePath }) } catch (error) { next.close(); throw error }
     const previous = bridge
     bridge = next
@@ -272,8 +200,8 @@ app.whenReady().then(async () => {
           }
         },
       })
-      bridge = openVault({ databasePath: option('--db') ?? process.env.MEMORY_VAULT_DB ?? preferences.databasePath, updates: updater, ...adapter(), logger: { info: diagnostic, warn: diagnostic } })
       mistakebook = new MistakebookStore(option('--mistake-db') ?? join(app.getPath('userData'), 'mistakebook.sqlite'))
+      bridge = openVault({ databasePath: option('--db') ?? process.env.MEMORY_VAULT_DB ?? preferences.databasePath, updates: updater, ...adapter(), logger: { info: diagnostic, warn: diagnostic }, notebook: mistakebook, notebookHooks })
       registerDesktop(); await openWindow()
       if (app.isPackaged && !selftest) {
         const check = () => { if (updater.status().settings.autoCheck) void updater.check().catch(error => diagnostic(error.message)) }

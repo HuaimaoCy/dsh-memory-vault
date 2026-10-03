@@ -19,6 +19,8 @@ import { operateVault } from '../../src/core/ops.js'
  * @param {string} [options.databasePath] - SQLite path; defaults to `$MEMORY_VAULT_DB`, else the shared default.
  * @param {(call: Record<string, any>) => Promise<Record<string, any>>} [options.callModel] - Model adapter, when one is configured.
  * @param {(input: { purpose: string }) => { provider: string, model: string }|undefined} [options.resolveRoute] - Route hook.
+ * @param {import('../../addons/mistakebook/store.mjs').MistakebookStore} [options.notebook] - Notebook store; when present, `notebook.*` ops dispatch through the shared channel.
+ * @param {object} [options.notebookHooks] - Main-process capabilities the notebook handlers need (dialogs, simulation windows, preferences, in-flight request controllers).
  * @param {{ info?: (message: string) => void, warn?: (message: string) => void }} [options.logger] - Diagnostics sink.
  * @returns {Record<string, any>} Handle with `invoke`, `info` and `close`.
  */
@@ -45,6 +47,11 @@ export function openVault(options = {}) {
   // one: a build without a model hook must fail that one operation with the
   // vault's own message, not with "curate is not a function".
   if (typeof vault.curate === 'function') deps.curate = vault.curate
+  // The notebook extends the vault core rather than standing beside it: its
+  // store and main-process hooks ride the same deps object, so `notebook.*`
+  // ops are indistinguishable from vault ops at this seam.
+  if (options.notebook) deps.notebook = options.notebook
+  if (options.notebookHooks) deps.notebookHooks = options.notebookHooks
 
   return {
     vault,

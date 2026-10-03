@@ -19,6 +19,7 @@ import {
   intParam, limitDefaults, normalizePriority, normalizeTags, validateEntryWrite,
   validateGroupDescription, validateGroupName,
 } from '../policy.js'
+import { handlers as NOTEBOOK_HANDLERS, NOTEBOOK_OPS, NOTEBOOK_OP_NAMES } from './notebook_ops.mjs'
 
 /**
  * Every operation the vault serves, and whether it changes the vault.
@@ -50,6 +51,9 @@ export const VAULT_OPS = {
   'settings.set': { write: true },
   curate: { write: true },
   'session.bind': { write: true },
+  // The notebook rides the same channel; its read/write split lives in the
+  // notebook table and is merged in here so every transport sees one map.
+  ...Object.fromEntries(NOTEBOOK_OP_NAMES.map(name => [name, { write: NOTEBOOK_OPS[name].write }])),
 }
 
 /** Provenance labels a non-panel caller may declare on an `entry.write`. */
@@ -101,8 +105,12 @@ export function stateOf(store, config) {
  * @returns {Promise<Record<string, unknown>>} Operation result.
  * @throws {Error} When the op is unknown or its parameters break a rule.
  */
-export async function operateVault({ store, config, notify, curate, updates }, body) {
+export async function operateVault({ store, config, notify, curate, updates, notebook, notebookHooks }, body) {
   const op = body.op
+  if (Object.prototype.hasOwnProperty.call(NOTEBOOK_OPS, op)) {
+    if (!notebook) throw new Error('此宿主未接入笔记本')
+    return NOTEBOOK_HANDLERS[op]({ notebook, hooks: notebookHooks ?? {} }, body)
+  }
   switch (op) {
     case 'image.list': return { images: store.listImages(String(body.entryId ?? '')) }
     case 'image.read': return { image: store.readImage(String(body.id ?? '')) }
