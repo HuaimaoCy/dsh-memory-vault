@@ -70,8 +70,9 @@ function normalize(raw, previous = {}) {
   if (subjectID && !nodes.has(subjectID)) throw new Error('学科不存在')
   const reviewState = merged.reviewState ?? 'new'
   if (!reviewStates.includes(reviewState)) throw new Error('无效的复习状态')
-  const repeatCount = Number(merged.repeatCount ?? 0), mastery = Number(merged.mastery ?? (reviewState === 'mastered' ? 1 : reviewState === 'reviewing' ? .5 : 0))
+  const repeatCount = Number(merged.repeatCount ?? 0), mastery = Number(merged.mastery ?? (reviewState === 'mastered' ? 1 : reviewState === 'reviewing' ? .5 : 0)), reciteCount = Number(merged.reciteCount ?? 0)
   if (!Number.isInteger(repeatCount) || repeatCount < 0 || repeatCount > 100000 || !Number.isFinite(mastery) || mastery < 0 || mastery > 1) throw new Error('复习次数或掌握度无效')
+  if (!Number.isInteger(reciteCount) || reciteCount < 0 || reciteCount > 100000) throw new Error('背诵次数无效')
   if (merged.nextReviewAt && !Number.isFinite(Date.parse(merged.nextReviewAt))) throw new Error('复习时间无效')
   let aiResult = merged.aiResult ?? null
   if (aiResult) {
@@ -85,7 +86,7 @@ function normalize(raw, previous = {}) {
     notes: bounded(merged.notes), errorType: bounded(merged.errorType, 100), cause: bounded(merged.cause ?? merged.analysisResult?.conclusion, 30000),
     subjectID, nodeID, legacyNodeID: bounded(merged.legacyNodeID, 500), legacySubjectID: bounded(merged.legacySubjectID, 500), classificationSuggested: raw.nodeID !== undefined ? false : Boolean(previous.classificationSuggested ?? classification.assignmentState === 'suggested'),
     tags: Array.isArray(merged.tags) ? merged.tags.slice(0, 30).map(tag => bounded(tag, 100)) : [], target: merged.target === 'huige' ? 'huige' : 'gaokao',
-    reviewState, repeatCount, mastery, nextReviewAt: merged.nextReviewAt ?? null, reviewHistory: Array.isArray(merged.reviewHistory) ? merged.reviewHistory.slice(-200).map(item => ({ at: String(item.at), result: item.result === 'pass' ? 'pass' : 'fail' })) : [],
+    reviewState, repeatCount, reciteCount, mastery, nextReviewAt: merged.nextReviewAt ?? null, reviewHistory: Array.isArray(merged.reviewHistory) ? merged.reviewHistory.slice(-200).map(item => ({ at: String(item.at), result: item.result === 'pass' ? 'pass' : 'fail' })) : [],
     isArchived: Boolean(merged.isArchived), isSoftDeleted: Boolean(merged.isSoftDeleted), createdAt: previous.createdAt ?? merged.createdAt ?? new Date().toISOString(),
     updatedAt: new Date().toISOString(), revision: (previous.revision ?? 0) + 1 }
 }
@@ -237,6 +238,28 @@ export class MistakebookStore {
         if (hasKey) known.add(hash); created++
       }
       return { created, skipped, unmapped, missingImages }
+    })
+  }
+  // 词典查询落库：新词条自动进入单词库并记为第 1 次背诵；重复查询不新建、
+  // 不覆盖已有人工内容，只把背诵次数加一（与导入去重一样覆盖归档与回收站）。
+  vocabularyByWord(word) {
+    const key = english(String(word ?? '').replace(/\s+/g, ' ').trim())
+    return key ? this.records().find(row => row.type === 'vocabulary' && english(row.vocabulary?.word ?? '') === key) : undefined
+  }
+  bumpLookup(word) {
+    return this.transaction(() => {
+      const existing = this.vocabularyByWord(word)
+      return existing ? { created: false, record: this.saveInside({ ...existing, reciteCount: (existing.reciteCount ?? 0) + 1 }) } : null
+    })
+  }
+  recordLookup(entry) {
+    return this.transaction(() => {
+      const vocabulary = normalizeFields('vocabulary', entry)
+      const word = vocabulary.word.trim()
+      if (!word) throw new Error('请填写英语单词或短语')
+      const existing = this.vocabularyByWord(word)
+      if (existing) return { created: false, record: this.saveInside({ ...existing, reciteCount: (existing.reciteCount ?? 0) + 1 }) }
+      return { created: true, record: this.saveInside({ type: 'vocabulary', title: word, vocabulary, reciteCount: 1 }) }
     })
   }
   acceptAI(id) {

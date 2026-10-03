@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import { createServer } from 'node:http'
 import { MistakebookStore, taxonomy, evaluate } from '../addons/mistakebook/store.mjs'
-import { solve, createCloze, extractWordsWithAI } from '../addons/mistakebook/services.mjs'
+import { solve, createCloze, extractWordsWithAI, lookupWord } from '../addons/mistakebook/services.mjs'
 import { extractWords } from '../addons/mistakebook/words.mjs'
 import { SIMULATIONS, simulationURL } from '../addons/mistakebook/simulations.mjs'
 import { createModelAdapter } from '../src/model.js'
@@ -94,10 +94,33 @@ try {
   await assert.rejects(()=>extractWordsWithAI('词'.repeat(200001),adapter),/过多/)
   assert.throws(()=>simulationURL('unknown'),/仿真/);assert.equal(SIMULATIONS.length,4);for(const item of SIMULATIONS)assert.match(simulationURL(item.id),/^https:\/\/phet.colorado.edu\/sims\/html\//)
   const legacy=store.read(mistake.id);store.close()
+  // 词典查询：模型产词条，store 自动入库；重复查询只累计背诵次数
+  await assert.rejects(()=>lookupWord('resilient',{resolveRoute:()=>undefined}),/配置/)
+  await assert.rejects(()=>lookupWord('   ',adapter),/单词/)
+  await assert.rejects(()=>lookupWord('紧急情况',adapter),/有效的英语单词或短语/)
+  response.choices[0].message.content=JSON.stringify({phonetic:'/rɪˈzɪliənt/',partOfSpeech:'adj.',meaning:'有弹性的；适应力强的',examples:'1. a resilient material 有弹性的材料',collocations:'resilient material',forms:'',usage:''})
+  const entry=await lookupWord('  Resilient ',adapter)
+  assert.equal(entry.word,'Resilient');assert.equal(entry.phonetic,'/rɪˈzɪliənt/');assert.equal(entry.meaning,'有弹性的；适应力强的')
+  assert.equal(request.body.messages[1].content,'Resilient')
+  response.choices[0].message.content='not JSON'
+  await assert.rejects(()=>lookupWord('resilient',adapter),/结构化|格式/)
+  const lookupStore=new MistakebookStore(join(folder,'lookup.sqlite'))
+  try {
+    const first=lookupStore.recordLookup(entry)
+    assert.equal(first.created,true);assert.equal(first.record.reciteCount,1);assert.equal(first.record.subjectID,'english');assert.equal(first.record.title,'Resilient')
+    const again=lookupStore.recordLookup({word:'  RESILIENT  ',meaning:'试图覆盖人工内容'})
+    assert.equal(again.created,false);assert.equal(again.record.id,first.record.id);assert.equal(again.record.reciteCount,2)
+    assert.equal(again.record.vocabulary.meaning,'有弹性的；适应力强的')
+    const bumped=lookupStore.bumpLookup('  resilient ')
+    assert.equal(bumped.record.reciteCount,3);assert.equal(lookupStore.bumpLookup('not-in-store'),null)
+    assert.throws(()=>lookupStore.recordLookup({meaning:'没有词头'}),/单词/)
+    assert.throws(()=>lookupStore.save({...bumped.record,reciteCount:-1}),/背诵/)
+    assert.equal(lookupStore.list({type:'vocabulary'}).records.length,1)
+  } finally { lookupStore.close() }
   const db=new DatabaseSync(path);const old={...legacy};for(const field of ['type','title','physics','method','vocabulary','simulationId','aiResult','contentHash','aiStale','images','value'])delete old[field]
   db.prepare('UPDATE questions SET payload=? WHERE id=?').run(JSON.stringify(old),old.id);db.prepare("UPDATE addon_meta SET value='1' WHERE key='schema'").run();db.close()
   store=new MistakebookStore(path);assert.ok(existsSync(store.migrationBackup));const migrated=store.read(old.id)
   assert.equal(migrated.type,'mistake');assert.equal(migrated.updatedAt,old.updatedAt);assert.equal(migrated.createdAt,old.createdAt);assert.equal(migrated.revision,old.revision);assert.equal(migrated.images[0].data,image.data)
   const before=store.records().length, restored=new MistakebookStore(join(folder,'restored.sqlite'));try{restored.import(store.export());assert.equal(restored.records().length,before)}finally{restored.close()}
-  console.log('Notebook: five types, structure/search, v1 backup/migration, vision API, AI validation/cancel/provenance, manual preservation, word capture from OCR pages and HTML tables with dedupe/limits, AI page-level word extraction, word dedup, private quizzes/scoring/review/stale/deleted entries, cloze and simulation allowlist passed')
+  console.log('Notebook: five types, structure/search, v1 backup/migration, vision API, AI validation/cancel/provenance, manual preservation, word capture from OCR pages and HTML tables with dedupe/limits, AI page-level word extraction, word dedup, dictionary lookup with auto-save and recite counting, private quizzes/scoring/review/stale/deleted entries, cloze and simulation allowlist passed')
 } finally {store.close();server.close();server.closeAllConnections();rmSync(folder,{recursive:true,force:true})}

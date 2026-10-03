@@ -67,6 +67,13 @@ body[data-mode="mistakebook"] > #status { display:none; }
 .mb-word-term { font-size:15px; font-weight:640; color:#2d3a30; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .mb-word-phonetic { font-size:11px; color:#8d968b; flex:0 0 auto; }
 .mb-word-sense { margin:0; font-size:12px; color:#667360; line-height:1.65; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
+.mb-word-recite { flex:0 0 auto; font-size:10px; color:#77648b; background:#f3eff8; border-radius:5px; padding:2px 6px; }
+.mb-lookup { display:flex; flex-direction:column; gap:14px; padding:22px 24px 24px; }
+.mb-lookup-form { flex-wrap:nowrap; gap:9px; }
+.mb-lookup-form .input { flex:1; min-width:0; }
+.mb-lookup-result { display:flex; flex-direction:column; gap:12px; }
+.mb-lookup-actions { align-items:center; flex-wrap:wrap; }
+.mb-lookup-actions .cap { min-width:0; }
 .mb-headword { display:grid; grid-template-columns:1.5fr 1fr .7fr; gap:12px; padding-top:18px; border-top:1px solid #edf0e7; }
 .mb-headword .col:last-child { grid-column:1/-1; }
 .mb-dict { border:1px solid #dfe3d6; border-radius:12px; padding:18px 20px; background:#fbfcf8; display:flex; flex-direction:column; gap:10px; }

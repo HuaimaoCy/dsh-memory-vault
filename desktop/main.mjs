@@ -9,7 +9,7 @@ import { createModelAdapter, validateModelSettings } from '../src/model.js'
 import { validateVaultFile } from './lib/databases.mjs'
 import { createDesktopUpdater } from './lib/updates.mjs'
 import { MistakebookStore, segmentQuestions } from '../addons/mistakebook/store.mjs'
-import { recognize, analyze, solve, createCloze, extractWordsWithAI, validateOCRSettings } from '../addons/mistakebook/services.mjs'
+import { recognize, analyze, solve, createCloze, extractWordsWithAI, lookupWord, validateOCRSettings } from '../addons/mistakebook/services.mjs'
 import { SIMULATIONS, simulationURL } from '../addons/mistakebook/simulations.mjs'
 
 const here = dirname(fileURLToPath(import.meta.url))
@@ -84,6 +84,15 @@ function registerDesktop() {
         if (aiRequest) throw new Error('已有 AI 任务正在进行')
         const request = new AbortController(); aiRequest = request
         try { return await extractWordsWithAI(body?.text, adapter(), request.signal) }
+        finally { if (aiRequest === request) aiRequest = undefined }
+      }
+      case 'lookup': {
+        // 已在词库的词无需再调用模型：本地直接累计背诵次数并返回词条。
+        const existing = mistakebook.bumpLookup(body?.word)
+        if (existing) return existing
+        if (aiRequest) throw new Error('已有 AI 任务正在进行')
+        const request = new AbortController(); aiRequest = request
+        try { return mistakebook.recordLookup(await lookupWord(body?.word, adapter(), request.signal)) }
         finally { if (aiRequest === request) aiRequest = undefined }
       }
       case 'simulation.info': return SIMULATIONS

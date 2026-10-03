@@ -126,7 +126,7 @@ export function mountMistakebook({ beforeEnter }) {
     h('div', { class: 'mb-workspace' }, h('header', { class: 'mb-bar' }, h('div', { class: 'breadcrumb' }, icon('book'), h('span', { text: '笔记本' })),
       h('div', { class: 'toolbar-actions' }, h('label', { class: 'search-wrap' }, icon('search'), search), button('录入', () => openImport(), false, { id: 'mb-import', title: '识别或粘贴，导入错题、笔记与词汇' }), button([icon('plus'), '新建笔记'], openCreate, true, { id: 'mb-new' }), switchButton)),
       h('div', { class: 'mb-body' }, h('main', { class: 'mb-main' }, h('div', { class: 'mb-page-heading' }, h('div', {}, heading, subtitle), h('div', { class: 'mb-total', id: 'mb-total' })),
-        h('div', { class: 'mb-board' }, order, h('span', { class: 'spacer' }), button('单词检测', openQuiz, false, { class: 'btn soft', id: 'mb-quiz' }), pickButton, moreMenu), searchFilter, list), detail),
+        h('div', { class: 'mb-board' }, order, h('span', { class: 'spacer' }), button('查词典', openLookup, false, { class: 'btn soft', id: 'mb-lookup', title: '查一个单词，自动存入单词库；重复查询累计背诵次数' }), button('单词检测', openQuiz, false, { class: 'btn soft', id: 'mb-quiz' }), pickButton, moreMenu), searchFilter, list), detail),
       h('footer', { class: 'mb-foot' }, h('span', { text: '笔记本 · 本地保存' }), h('span', { class: 'spacer' }))), jsonPicker, h('div', { id: 'mb-status', class: 'mb-status', role: 'status', 'aria-live': 'polite' }))
   document.body.append(shell)
   document.getElementById('mode-switch').addEventListener('click', () => void guard(async () => {
@@ -193,7 +193,7 @@ export function mountMistakebook({ beforeEnter }) {
       const check = state.picking ? h('span', { class: `mb-check${picked ? ' on' : ''}`, 'aria-hidden': 'true' }, picked ? '✓' : '') : null
       if (row.type === 'vocabulary') {
         list.append(button([check,
-          h('div', { class: 'mb-word-head' }, h('span', { class: 'mb-word-term', text: row.vocabulary.word || '未命名词条' }), row.vocabulary.phonetic ? h('span', { class: 'mb-word-phonetic', text: row.vocabulary.phonetic }) : null, h('span', { class: 'spacer' }), h('span', { class: `mb-state ${row.reviewState}`, text: labelStates[row.reviewState] })),
+          h('div', { class: 'mb-word-head' }, h('span', { class: 'mb-word-term', text: row.vocabulary.word || '未命名词条' }), row.vocabulary.phonetic ? h('span', { class: 'mb-word-phonetic', text: row.vocabulary.phonetic }) : null, row.reciteCount ? h('span', { class: 'mb-word-recite', text: `背${row.reciteCount}`, title: `词典查询背诵 ${row.reciteCount} 次` }) : null, h('span', { class: 'spacer' }), h('span', { class: `mb-state ${row.reviewState}`, text: labelStates[row.reviewState] })),
           h('p', { class: 'mb-word-sense', text: [row.vocabulary.partOfSpeech, row.vocabulary.meaning].filter(Boolean).join(' ') || '打开补充释义与例句' })], click, false, { ...props, class: `${cardClass} mb-word-card` }))
       } else {
         const score = row.value.overallScore
@@ -310,7 +310,7 @@ export function mountMistakebook({ beforeEnter }) {
       if(draft.aiResult) form.append(h('div',{class:'mb-ai-result',id:'mb-ai-result'},h('div',{class:'row'},h('strong',{text:'AI 学习草稿'}),h('span',{class:'spacer'}),h('span',{class:'cap',text:draft.aiStale?'资料已修改，建议重新生成':date(draft.aiResult.generatedAt)})),h('div',{class:'mb-ai-text',text:draft.aiResult.text}),h('p',{class:'cap',text:'解答与模型仍需核对。补充空白字段会保留已有的人工内容。'}),button('补充到空白字段',async()=>{if(state.dirty)throw new Error('请先保存修改');state.draft=await call('ai.accept',{id:draft.id});state.dirty=false;await load();notify('AI 草稿已补充，人工内容保留')},false,{id:'mb-ai-accept',disabled:draft.aiStale})))
       const value = draft.value
       form.append(h('div', { class: 'mb-priority' }, h('div', { class: 'row' }, h('strong', { text: `复习优先 ${value.overallScore}` }), h('span', { class: 'spacer' }), h('span', { text: labelStates[draft.reviewState] })),
-        h('p', { class: 'cap', text: `再次出错 ${draft.repeatCount} 次 · 下次复习 ${date(draft.nextReviewAt)}` }), h('details', {}, h('summary', { text: '查看评分依据' }), h('p', { class: 'cap', text: value.reason }), h('p', { class: 'cap', text: '按到期紧迫、掌握薄弱、重复出错与久未复习加权；课标权重仅作微调。' }))))
+        h('p', { class: 'cap', text: `再次出错 ${draft.repeatCount} 次${draft.reciteCount ? ` · 背诵 ${draft.reciteCount} 次` : ''} · 下次复习 ${date(draft.nextReviewAt)}` }), h('details', {}, h('summary', { text: '查看评分依据' }), h('p', { class: 'cap', text: value.reason }), h('p', { class: 'cap', text: '按到期紧迫、掌握薄弱、重复出错与久未复习加权；课标权重仅作微调。' }))))
       const tools = h('div', { class: 'row mb-detail-actions' })
       if (draft.isSoftDeleted) tools.append(button('恢复', () => perform('restore')), button('永久删除', () => perform('purge'), false, { class: 'btn danger' }))
       else {
@@ -447,6 +447,36 @@ export function mountMistakebook({ beforeEnter }) {
     pane.addEventListener('paste', event => { if (event.clipboardData?.files.length) { event.preventDefault(); void guard(() => addFiles(event.clipboardData.files)) } })
     pane.controller = controller
     return pane
+  }
+  async function openLookup() {
+    if (!await discard()) return
+    const input = h('input', { class: 'input', id: 'mb-lookup-word', autocomplete: 'off', spellcheck: 'false', placeholder: '输入英语单词或短语，如 conserve、give up', 'aria-label': '要查询的单词或短语' })
+    const resultArea = h('div', { class: 'mb-lookup-result', id: 'mb-lookup-result' })
+    const cancel = h('button', { type: 'button', class: 'btn ghost', text: '取消查询', hidden: true, id: 'mb-lookup-cancel', onClick: () => void call('cancelAI') })
+    const run = async () => {
+      const word = input.value.trim()
+      if (!word) throw new Error('请输入要查询的英语单词或短语')
+      lookupButton.disabled = true; cancel.hidden = false; resultArea.replaceChildren()
+      notify(`正在查询「${word}」…`)
+      try {
+        const outcome = await call('lookup', { word })
+        await load()
+        resultArea.replaceChildren(dictionaryCard(outcome.record.vocabulary),
+          h('div', { class: 'row mb-lookup-actions' },
+            h('span', { class: 'cap', id: 'mb-lookup-note', text: outcome.created ? '已自动存入英语词汇，第 1 次背诵。' : `词库已有该词，第 ${outcome.record.reciteCount} 次背诵已记录。` }),
+            h('span', { class: 'spacer' }),
+            button('打开词条', async () => { node.close(); Object.assign(state, { type: 'vocabulary', view: 'all', subjectID: '', nodeID: '', query: '' }); search.value = ''; await load(); await select(outcome.record.id) }, false, { id: 'mb-lookup-open' }),
+            button('再查一个', () => { input.value = ''; resultArea.replaceChildren(); input.focus() }, false, { class: 'btn ghost', id: 'mb-lookup-again' })))
+        notify(outcome.created ? `已存入单词库：${word}` : `「${word}」已在词库，背诵次数 +1`)
+      } finally { lookupButton.disabled = false; cancel.hidden = true }
+    }
+    const lookupButton = button('查询', run, true, { id: 'mb-lookup-start' })
+    const node = dialog('查词典', h('div', { class: 'mb-lookup', id: 'mb-lookup-pane' },
+      h('form', { class: 'row mb-lookup-form', onSubmit: event => { event.preventDefault(); void guard(run) } }, input, lookupButton, cancel),
+      h('p', { class: 'cap', text: '查询会调用已配置的模型生成词典词条，并自动存入英语词汇；重复查询不新建词条，只累计背诵次数。' }),
+      resultArea))
+    node.addEventListener('cancel', () => void call('cancelAI'))
+    input.focus()
   }
   async function openQuiz() {
     const loading=createLoadingStatus({compact:true,hidden:true,label:'AI 正在生成检测题'})

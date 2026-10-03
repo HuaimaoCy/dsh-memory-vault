@@ -23,6 +23,7 @@ export async function run(window,bridge) {
     let result
     if(request.messages[0].content.includes('例句填空检测')) {const words=JSON.parse(request.messages[1].content);result={exercises:words.map(row=>({id:row.id,prompt:'The lesson explains the idea of ___.',hint:row.meaning}))}}
     else if(request.messages[0].content.includes('积累本识别')) {result={entries:[{word:'abandon',phonetic:'/əˈbændən/',meaning:'放弃',examples:''},{word:'conserve',phonetic:'',meaning:'保存；守恒',examples:''},{word:'resilient',phonetic:'',meaning:'适应力强的',examples:''},{word:'momentum',phonetic:'',meaning:'动量',examples:''}]}}
+    else if(request.messages[0].content.includes('英语词典')) {const word=request.messages[1].content;result={phonetic:'/ˈdɪlɪdʒənt/',partOfSpeech:'adj.',meaning:'【词典】勤奋的',examples:`1. a ${word} student 一名勤奋的学生`,collocations:`a ${word} worker`,forms:'',usage:''}}
     else { const input=JSON.parse(request.messages[1].content[0].text)
       result=input.type==='物理模型'?{answer:'设质量为 m，劲度系数为 k。\n弹力 F=−kx，由牛顿第二定律 m x″=−kx。\n角频率 ω=√(k/m)，周期 T=2π√(m/k)。\n忽略摩擦且弹簧满足胡克定律时适用。',fields:{referenceAnswer:'T=2π√(m/k)',notes:'核对周期的单位为秒',physics:{object:'质量块与轻弹簧',assumptions:'AI 假设，不应覆盖人工设定',variables:'m：kg；k：N/m；x：m',equations:'m x″ + kx = 0',derivation:'x=A cos(ωt+φ)，ω=√(k/m)',conditions:'线性弹性范围；忽略阻尼',pitfalls:'先确定平衡位置，再定义位移'}}}: {answer:'先写出条件，再逐步推导。',fields:{referenceAnswer:'示例解答',notes:'检查适用前提'}}
     }
@@ -147,6 +148,27 @@ export async function run(window,bridge) {
     const sensePrefix=anyWord.vocabulary.meaning.slice(0,4)
     assert.equal(await js(`document.querySelector('#mb-dict .mb-dict-sense')?.textContent.includes(${JSON.stringify(sensePrefix)})`),true)
     await js("document.querySelector('[aria-label=\"关闭题目\"]').click()");await idle()
+    // 词典查询：已有词本地累计背诵次数，新词调模型并自动入库
+    await click('#mb-lookup');await until("document.querySelector('#mb-lookup-pane')!==null")
+    await fill('#mb-lookup-word','resilient');await click('#mb-lookup-start')
+    await until("document.querySelector('#mb-lookup-result .mb-dict')!==null");await idle()
+    assert.equal(await js("document.querySelector('#mb-lookup-result .mb-dict-term')?.textContent"),'resilient')
+    assert.match(await js("document.querySelector('#mb-lookup-note')?.textContent"),/词库已有该词，第 1 次背诵/)
+    const resilient=(await api('list',{type:'vocabulary'})).result.records.find(row=>row.vocabulary.word==='resilient')
+    assert.equal((await api('read',{id:resilient.id})).result.reciteCount,1)
+    await fill('#mb-lookup-word','diligent');await click('#mb-lookup-start')
+    await until("document.querySelector('#mb-lookup-result .mb-dict-term')?.textContent==='diligent'");await idle()
+    assert.equal(request.messages[1].content,'diligent')
+    assert.match(await js("document.querySelector('#mb-lookup-note')?.textContent"),/已自动存入英语词汇，第 1 次背诵/)
+    const diligent=(await api('list',{type:'vocabulary'})).result.records.find(row=>row.vocabulary.word==='diligent')
+    assert.equal(Boolean(diligent),true)
+    assert.equal((await api('read',{id:diligent.id})).result.reciteCount,1)
+    assert.equal((await api('read',{id:diligent.id})).result.vocabulary.meaning,'【词典】勤奋的')
+    await click('#mb-lookup-open');await until("document.querySelector('.mb-dialog')===null");await idle()
+    assert.equal(await js(`document.querySelector(${JSON.stringify(field('vocabulary.word'))})?.value`),'diligent')
+    assert.match(await js("document.querySelector('.mb-priority p')?.textContent"),/背诵 1 次/)
+    await js("document.querySelector('[aria-label=\"关闭题目\"]').click()");await idle()
+    assert.equal(await js(`document.querySelector(${JSON.stringify(`[data-question-id="${diligent.id}"] .mb-word-recite`)})?.textContent`),'背1')
     // 复习优先分必须区分笔记：先给物理模型制造两次失败复习，再比较全体得分
     await click('[data-mb-view=all]');await idle()
     const physicsNote=(await api('list',{type:'physics'})).result.records[0]
@@ -160,6 +182,6 @@ export async function run(window,bridge) {
     await js("document.querySelector('#mb-status').classList.remove('visible');document.activeElement.blur()")
     await shot('笔记本-手写与多选')
     await click('#mb-mode-switch');await until("document.body.dataset.mode==='memory'");await idle();assert.equal(await js("document.querySelectorAll('#views button').length"),4)
-    console.log('Desktop notebook: six-category UI, structure, image AI input, encrypted settings, safe AI acceptance/cancel, manual word import, photo word capture with duplicate marking/row deletion/AI extraction, general OCR entry into notes, spelling/cloze scores/history, handwriting canvas, multi-select delete/restore, dictionary review cards, word tile compaction, differentiated review scores, mode switch and memory isolation passed')
+    console.log('Desktop notebook: six-category UI, structure, image AI input, encrypted settings, safe AI acceptance/cancel, manual word import, photo word capture with duplicate marking/row deletion/AI extraction, dictionary lookup with auto-save and recite counting, general OCR entry into notes, spelling/cloze scores/history, handwriting canvas, multi-select delete/restore, dictionary review cards, word tile compaction, differentiated review scores, mode switch and memory isolation passed')
   } finally {for(const w of BrowserWindow.getAllWindows())if(w!==window)w.destroy();dialog.showMessageBox=previousConfirm;server.close();server.closeAllConnections()}
 }
