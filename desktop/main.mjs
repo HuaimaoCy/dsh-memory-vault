@@ -112,11 +112,18 @@ function registerDesktop() {
     if (reply.canceled) return null
     const databasePath = resolve(reply.filePaths[0])
     validateVaultFile(databasePath)
-    const next = openVault({ databasePath, updates: updater, ...adapter(), notebook: mistakebook, notebookHooks })
-    try { savePreferences({ ...preferences, databasePath }) } catch (error) { next.close(); throw error }
-    const previous = bridge
-    bridge = next
+    const next = openVault({ databasePath, updates: updater, ...adapter(), logger: { info: diagnostic, warn: diagnostic } })
+    // 换库后笔记本跟随新连接：注入模式下重建并挂到新 bridge；文件模式沿用原实例。
+    const nextNotebook = option('--mistake-db') ? mistakebook : new MistakebookStore({ database: next.vault.store.db })
+    try {
+      if (!option('--mistake-db')) { try { nextNotebook.migrateFromFile(join(app.getPath('userData'), 'mistakebook.sqlite')) } catch { /* 迁移失败不阻断换库 */ } }
+      next.attach({ notebook: nextNotebook, notebookHooks })
+      savePreferences({ ...preferences, databasePath })
+    } catch (error) { next.close(); throw error }
+    const previous = bridge, previousNotebook = mistakebook
+    bridge = next; mistakebook = nextNotebook
     previous.close()
+    try { if (previousNotebook && previousNotebook !== mistakebook && previousNotebook.ownsDb !== false) previousNotebook.close() } catch { /* 已关闭 */ }
     return desktopInfo()
   })
   register('vault:backup', async () => {
@@ -200,8 +207,18 @@ app.whenReady().then(async () => {
           }
         },
       })
-      mistakebook = new MistakebookStore(option('--mistake-db') ?? join(app.getPath('userData'), 'mistakebook.sqlite'))
-      bridge = openVault({ databasePath: option('--db') ?? process.env.MEMORY_VAULT_DB ?? preferences.databasePath, updates: updater, ...adapter(), logger: { info: diagnostic, warn: diagnostic }, notebook: mistakebook, notebookHooks })
+      // 笔记本是数据库（vault）之上的扩充：默认把 notebook_* 表放进 vault
+      // 同一连接；旧独立 mistakebook.sqlite 首次启动幂等迁入并留备份。
+      // --mistake-db 仍强制走独立文件模式（测试与调试出口）。
+      const legacyNotebookPath = option('--mistake-db') ?? join(app.getPath('userData'), 'mistakebook.sqlite')
+      bridge = openVault({ databasePath: option('--db') ?? process.env.MEMORY_VAULT_DB ?? preferences.databasePath, updates: updater, ...adapter(), logger: { info: diagnostic, warn: diagnostic } })
+      if (option('--mistake-db')) {
+        mistakebook = new MistakebookStore(option('--mistake-db'))
+      } else {
+        mistakebook = new MistakebookStore({ database: bridge.vault.store.db })
+        try { const migrated = mistakebook.migrateFromFile(legacyNotebookPath); if (migrated?.migrated) diagnostic(`notebook data migrated from ${legacyNotebookPath}`) } catch (error) { diagnostic(`notebook migration failed, falling back to file mode: ${error.message}`); mistakebook.close(); mistakebook = new MistakebookStore(legacyNotebookPath) }
+      }
+      bridge.attach({ notebook: mistakebook, notebookHooks })
       registerDesktop(); await openWindow()
       if (app.isPackaged && !selftest) {
         const check = () => { if (updater.status().settings.autoCheck) void updater.check().catch(error => diagnostic(error.message)) }

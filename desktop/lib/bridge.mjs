@@ -83,6 +83,13 @@ export function openVault(options = {}) {
       }
     },
 
+    /** Attach notebook extensions to this already-open vault (same-database hosting). */
+    attach(extensions = {}) {
+      if (extensions.notebook) deps.notebook = extensions.notebook
+      if (extensions.notebookHooks) deps.notebookHooks = extensions.notebookHooks
+      return this
+    },
+
     /** Close the database so the process can exit with nothing pending. */
     close() {
       try {
