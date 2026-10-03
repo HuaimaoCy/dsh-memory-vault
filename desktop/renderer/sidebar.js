@@ -1,5 +1,5 @@
 // 侧边栏模块（0.7.7 统一架构）：配置完全数据化，存笔记本数据库
-// （mistakebook.sqlite 的 addon_meta），与记忆库侧边栏同为数据驱动。
+// （mistakebook.sqlite 的 addon_meta），与数据库侧边栏同为数据驱动。
 // 配置模型：{ sections: [{id, label, custom?, tags?, items:[itemId]}], hidden:[id] }
 // itemId 形如 view:all / type:physics / subject:english；每个条目只属于一个
 // 区块（拖拽跨区块移动即改变它的归属）；hidden 同时收纳区块 id 与条目 id。

@@ -3,22 +3,22 @@
 <head>
   <meta charset="utf-8" />
   <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'none'; form-action 'none'; base-uri 'none'" />
-  <title>Alaya · 记忆库</title>
+  <title>Alaya · 数据库</title>
   <link rel="stylesheet" href="styles.css" />
   <link rel="stylesheet" href="mistakebook.css" />
   <link rel="stylesheet" href="loading.css" />
 </head>
 <body data-mode="memory">
   <div class="app-shell">
-    <aside class="side" aria-label="记忆库导航">
-      <div class="brand"><div class="brand-mark" aria-hidden="true"><span data-icon="vault"></span></div><div><div class="brand-name">Alaya</div><div class="brand-caption">记忆库</div></div></div>
+    <aside class="side" aria-label="数据库导航">
+      <div class="brand"><div class="brand-mark" aria-hidden="true"><span data-icon="vault"></span></div><div><div class="brand-name">Alaya</div><div class="brand-caption">数据库</div></div></div>
       <div class="side-scroll">
         <div class="side-head">资料库</div><nav id="views" class="views" aria-label="记忆视图"></nav>
         <div class="side-head groups-head"><span>记忆组</span><button id="manage-groups" class="icon-button" title="管理记忆组" aria-label="管理记忆组"><span data-icon="plus"></span></button></div>
         <nav id="tree" class="tree" aria-label="记忆组"></nav>
       </div>
       <div class="side-bottom">
-        <div class="local-library"><span class="library-dot"></span><div><span class="library-name">本地记忆库</span><span class="library-caption">保存在你的电脑上</span></div><span data-icon="shield"></span></div>
+        <div class="local-library"><span class="library-dot"></span><div><span class="library-name">本地数据库</span><span class="library-caption">保存在你的电脑上</span></div><span data-icon="shield"></span></div>
         <button id="settings" class="nav settings-link"><span data-icon="settings"></span><span>设置与连接</span><span data-icon="chevron-right" class="trailing"></span></button>
       </div>
     </aside>
@@ -34,7 +34,7 @@
       </header>
       <div class="body">
         <main class="main">
-          <div class="page-heading"><div><div class="eyebrow">记忆库</div><h1 id="view-title">全部记忆</h1><p id="view-description">让知识、灵感与约定各归其位。</p></div><div class="view-total"><strong id="view-count">0</strong><span>条记忆</span></div></div>
+          <div class="page-heading"><div><div class="eyebrow">数据库</div><h1 id="view-title">全部记忆</h1><p id="view-description">让知识、灵感与约定各归其位。</p></div><div class="view-total"><strong id="view-count">0</strong><span>条记忆</span></div></div>
           <div id="search-context" class="search-context hidden"><span id="search-hint" role="status"></span><span class="spacer"></span><button id="clear-search" type="button" class="btn ghost">清除搜索</button></div>
           <div class="board-toolbar">
             <div class="segmented" role="group" aria-label="显示方式"><button id="view-grid" class="segment active" title="卡片视图" aria-label="卡片视图" aria-pressed="true"><span data-icon="grid"></span></button><button id="view-list" class="segment" title="列表视图" aria-label="列表视图" aria-pressed="false"><span data-icon="list"></span></button></div>

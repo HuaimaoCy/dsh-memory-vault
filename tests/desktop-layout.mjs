@@ -93,7 +93,7 @@ export async function run(window, bridge) {
     }
     await click('#mb-mode-switch'); await until("document.body.dataset.mode==='memory'")
     for (const fixture of [
-      { title: '使用同一份记忆库', content: 'Alaya、Codex 和 DSH 共用同一个本地记忆库。\n确认的结论归入知识库，临时进展归入对话记忆。', tags: ['接口', '使用约定'], priority: 80 },
+      { title: '使用同一份数据库', content: 'Alaya、Codex 和 DSH 共用同一个本地数据库。\n确认的结论归入知识库，临时进展归入对话记忆。', tags: ['接口', '使用约定'], priority: 80 },
       { title: '学习方法：先理解再复习', content: '写下适用条件与推导步骤，并用自己的语言复述。\n将易错点与复习记录保存在笔记本中。', tags: ['学习'], priority: 60 },
       { title: '记录偏好', content: '内容按主题组织，编辑后明确保存。', tags: ['偏好'], kind: 'preference' },
     ]) memoryIds.push((await bridge.invoke('entry.write', { group: '知识库', ...fixture })).entry.id)
@@ -102,14 +102,14 @@ export async function run(window, bridge) {
       await resize(width, height)
       await layout('Memory overview', ['.app-shell', '.workspace', '.bar', '.toolbar-actions', '.main'], ['#new', '#refresh', '#mode-switch', '#settings'], null, null)
     }
-    await screenshot('Alaya-记忆库界面')
+    await screenshot('Alaya-数据库界面')
     await click(`[data-id="${memoryIds[0]}"]`)
     await until("document.querySelector('#editor-images .image-attachments')!==null")
     for (const [width, height] of [[1440, 940], [1040, 650]]) {
       await resize(width, height)
       await layout('Memory editor', ['.app-shell', '.workspace', '.bar', '.toolbar-actions', '.main', '#drawer', '.editor-scroll', '.editor-actions'], ['#new', '#refresh', '#mode-switch', '#settings', '#save-entry'], '.editor-scroll', '.editor-actions')
       await js("document.querySelector('.editor-scroll').scrollTop=0")
-      await screenshot(width === 1440 ? 'Alaya-记忆编辑界面' : 'Alaya-记忆库窄窗口')
+      await screenshot(width === 1440 ? 'Alaya-记忆编辑界面' : 'Alaya-数据库窄窗口')
     }
     await resize(1440, 940)
     console.log('Desktop layout: notebook/memory overview and persistent editor actions fit 1440×940 and 1040×650; actionable controls uncovered; editor content remains scrollable')

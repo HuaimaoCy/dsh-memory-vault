@@ -34,7 +34,7 @@ export async function run(window, bridge) {
   await click('.empty .btn')
   await until("document.querySelector('#drawer [data-field=title]')")
   await fill('[data-field="title"]', '快捷键保存')
-  await fill('[data-field="content"]', '通过键盘保存，关闭详情后保留在记忆库中。')
+  await fill('[data-field="content"]', '通过键盘保存，关闭详情后保留在数据库中。')
   await js("document.dispatchEvent(new KeyboardEvent('keydown', { key: 's', ctrlKey: true, bubbles: true }))")
   await until("document.querySelector('#status').textContent === '记忆已创建'")
   const temporary = bridge.vault.store.listEntries({ limit: 20 }).find(row => row.title === '快捷键保存')
@@ -46,7 +46,7 @@ export async function run(window, bridge) {
   await bridge.invoke('group.create', { name: '写作笔记', scope: 'knowledge' })
   const samples = [
     ['按任务选择合适的模型', '日常工作使用熟悉的模型。面对不同任务，按需切换到更适合的服务，让记录下来的记忆继续发挥作用。', 'preference', ['工作方式', '模型配置'], true],
-    ['一个记忆库，连接所有助手', '桌面软件、Codex 与 DSH 共用同一份记忆。已经确认的结论保存一次，在下次工作时继续使用。', 'decision', ['工作方式', '接口'], false],
+    ['一个数据库，连接所有助手', '桌面软件、Codex 与 DSH 共用同一份记忆。已经确认的结论保存一次，在下次工作时继续使用。', 'decision', ['工作方式', '接口'], false],
     ['先验证，再发布', '发布前检查核心功能、独立安装包与数据库备份。让每一次更新都可以验证，也方便回到之前的状态。', 'task', ['工作方式', '发布'], false],
     ['把结论写成可复用的知识', '用具体的标题记录解决办法，补充适用场景与限制。临时进度放在对话记忆，长期结论整理进知识库。', 'note', ['工作方式', '整理'], false],
     ['界面保持简单与清晰', '给主要内容留出空间，让操作出现在需要它的地方。文字优先，色彩克制，重要的状态一眼就能看清。', 'preference', ['工作方式', '设计'], false],
@@ -66,8 +66,8 @@ export async function run(window, bridge) {
   assert.equal(await js("document.querySelector('#list').classList.contains('rows')"), true)
   await geometry(); await shot('list')
   await click('#view-grid')
-  await js("[...document.querySelectorAll('.tile')].find(node => node.textContent.includes('一个记忆库')).click()")
-  await until("document.querySelector('#drawer [data-field=title]')?.value === '一个记忆库，连接所有助手'")
+  await js("[...document.querySelectorAll('.tile')].find(node => node.textContent.includes('一个数据库')).click()")
+  await until("document.querySelector('#drawer [data-field=title]')?.value === '一个数据库，连接所有助手'")
   await geometry(); await shot('detail')
   await click('#settings'); await click('#tab-model')
   assert.equal(await js("document.querySelector('#settings-model').classList.contains('hidden')"), false)

@@ -240,7 +240,7 @@ function renderDrawer() {
         h('div', { class: 'properties' }, field('优先级 · 0–100', control('priority', 'input', { type: 'number', min: 0, max: 100, step: 1 })),
           h('label', { class: 'switch-row' }, h('span', { text: '底层约定' }), control('base', 'input', { type: 'checkbox', checked: draft.base === true })))),
       isNew ? null : h('details', { class: 'record-info' }, h('summary', { text: '记录信息' }), h('div', { class: 'meta', text: `来源：${entry.source} · ID：${entry.id}\n更新：${new Date(entry.updatedAt).toLocaleString('zh-CN')}` }))),
-    h('div', { class: 'editor-actions' }, h('div', { id: 'editor-save-state', class: `editor-save-state${state.dirty ? ' dirty' : ''}`, role: 'status', 'aria-live': 'polite', text: state.dirty ? '有未保存的修改' : isNew ? '保存到当前记忆库' : '已保存到本地记忆库' }), h('div', { class: 'row' },
+    h('div', { class: 'editor-actions' }, h('div', { id: 'editor-save-state', class: `editor-save-state${state.dirty ? ' dirty' : ''}`, role: 'status', 'aria-live': 'polite', text: state.dirty ? '有未保存的修改' : isNew ? '保存到当前数据库' : '已保存到本地数据库' }), h('div', { class: 'row' },
       isNew ? null : button(entry.hidden ? '恢复显示' : '隐藏', async () => {
         if (!await discard()) return
         await call('entry.hide', { ids: [entry.id], hidden: !entry.hidden })
@@ -327,7 +327,7 @@ function render() {
   el('foot-right').title = state.info.databasePath
   el('curate').disabled = el('curate-review').disabled = !state.info.model.baseUrl
   el('curate').title = el('curate-review').title = state.info.model.baseUrl ? '会调用设置中的 AI 服务' : '先在设置中配置 AI 服务'
-  el('curation-hint').textContent = state.info.model.baseUrl ? '先预览建议，再决定是否整理保存。整理范围覆盖整个记忆库。' : '连接 AI 服务后，即可预览整理建议。'
+  el('curation-hint').textContent = state.info.model.baseUrl ? '先预览建议，再决定是否整理保存。整理范围覆盖整个数据库。' : '连接 AI 服务后，即可预览整理建议。'
   el('curation-setup').classList.toggle('hidden', Boolean(state.info.model.baseUrl))
   for (const [id, layout] of [['view-grid', 'grid'], ['view-list', 'rows']]) { el(id).classList.toggle('active', state.layout === layout); el(id).setAttribute('aria-pressed', String(state.layout === layout)) }
 }
@@ -375,14 +375,14 @@ function settings() {
   const limitControls = ['maxEntries', 'maxChars', 'baseMaxEntries', 'baseMaxChars'].map((name, i) => field(['知识条数', '知识字符预算', '底层约定条数', '底层约定字符预算'][i], h('input', { class: 'input', type: 'number', min: 1, value: limits[name], 'data-limit': name })))
   const panels = [
     ['general', '通用', 'database',
-      h('section', { class: 'col' }, h('h3', { text: '当前记忆库' }), h('p', { class: 'cap', text: '记忆保存在本机。打开其他记忆库，或为当前内容留一份备份。' }),
+      h('section', { class: 'col' }, h('h3', { text: '当前数据库' }), h('p', { class: 'cap', text: '记忆保存在本机。打开其他数据库，或为当前内容留一份备份。' }),
         h('code', { class: 'path-box', text: info.databasePath }),
-        h('div', { class: 'row' }, button('打开其他记忆库', async () => {
+        h('div', { class: 'row' }, button('打开其他数据库', async () => {
           if (!await discard()) return
           const result = await desktop('open')
-          if (result) { state.selected = null; state.dirty = false; state.view = { kind: 'all' }; await load(); settings(); say('记忆库已切换', 'ok') }
+          if (result) { state.selected = null; state.dirty = false; state.view = { kind: 'all' }; await load(); settings(); say('数据库已切换', 'ok') }
         }), button('备份数据库', async () => { const result = await desktop('backup'); if (result) say(`备份已保存：${result.path}`, 'ok') }))),
-      h('section', {}, h('div', { class: 'settings-info' }, icon('vault'), h('div', {}, h('strong', { text: `Alaya ${info.version}` }), h('p', { text: '独立桌面记忆库 · 支持 Codex 与 DSH 接口' }))))],
+      h('section', {}, h('div', { class: 'settings-info' }, icon('vault'), h('div', {}, h('strong', { text: `Alaya ${info.version}` }), h('p', { text: '独立桌面数据库 · 支持 Codex 与 DSH 接口' }))))],
     ['model', 'AI 服务', 'sparkles',
       h('section', { class: 'col' }, h('h3', { text: '连接 AI 服务' }), h('p', { class: 'cap', text: '可选。用于预览和整理记忆。候选内容会发送到你配置的服务；密钥在本机加密保存。' }),
         field('服务地址（含 /v1 等前缀，不含 /chat/completions）', url), field('模型名称', model), field('API 密钥', key), h('label', { class: 'row cap' }, clearKey, '删除已保存密钥'),
@@ -395,7 +395,7 @@ function settings() {
         await call('settings.set', fields); await load(); say('知识预算已保存', 'ok')
       }, true))],
     ['connectors', 'Codex 与 DSH', 'code',
-      h('section', { class: 'col' }, h('h3', { text: '连接你的助手' }), h('p', { class: 'cap', text: '将配置合并到各自的配置文件，两个接口即可共用当前记忆库。切换库后请同步更新路径。' }),
+      h('section', { class: 'col' }, h('h3', { text: '连接你的助手' }), h('p', { class: 'cap', text: '将配置合并到各自的配置文件，两个接口即可共用当前数据库。切换库后请同步更新路径。' }),
         h('div', { class: 'connector-label' }, icon('code'), 'Codex · config.toml'), h('textarea', { class: 'area config', readonly: 'readonly', value: info.connectors.codex, 'aria-label': 'Codex 接口配置' })),
       h('section', { class: 'col' }, h('div', { class: 'connector-label' }, icon('conversation'), 'DSH · cordis.patch.yml'), h('span', { class: 'cap', text: '保留原插件安装，更新配置后重启 DSH。' }),
         h('textarea', { class: 'area config', readonly: 'readonly', value: info.connectors.dsh, 'aria-label': 'DSH 接口配置' }))],

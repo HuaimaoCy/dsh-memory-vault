@@ -180,7 +180,7 @@ function registerDesktop() {
     return reply.response === 1
   })
   register('vault:open', async () => {
-    const reply = await dialog.showOpenDialog(window, { title: '打开记忆库', properties: ['openFile'], filters: [{ name: 'SQLite 记忆库', extensions: ['sqlite', 'db'] }] })
+    const reply = await dialog.showOpenDialog(window, { title: '打开数据库', properties: ['openFile'], filters: [{ name: 'SQLite 数据库', extensions: ['sqlite', 'db'] }] })
     if (reply.canceled) return null
     const databasePath = resolve(reply.filePaths[0])
     validateVaultFile(databasePath)
@@ -192,7 +192,7 @@ function registerDesktop() {
     return desktopInfo()
   })
   register('vault:backup', async () => {
-    const reply = await dialog.showSaveDialog(window, { title: '备份记忆库', defaultPath: `memory-vault-${new Date().toISOString().slice(0, 10)}.sqlite`, filters: [{ name: 'SQLite 记忆库', extensions: ['sqlite'] }] })
+    const reply = await dialog.showSaveDialog(window, { title: '备份数据库', defaultPath: `memory-vault-${new Date().toISOString().slice(0, 10)}.sqlite`, filters: [{ name: 'SQLite 数据库', extensions: ['sqlite'] }] })
     if (reply.canceled || !reply.filePath) return null
     const target = resolve(reply.filePath)
     if (target.toLowerCase() === resolve(bridge.databasePath).toLowerCase() || existsSync(`${target}-wal`) || existsSync(`${target}-shm`)) throw new Error('请选择不同于正在使用的数据库的备份路径')

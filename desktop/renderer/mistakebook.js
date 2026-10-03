@@ -88,12 +88,12 @@ export function mountMistakebook({ beforeEnter }) {
     sidebar.sync()
     renderSide(); renderList(); renderDetail()
   }
-  const switchButton = button([icon('vault'), '记忆库'], async () => {
+  const switchButton = button([icon('vault'), '数据库'], async () => {
     if (document.querySelector('dialog[open]') || !await discard()) return
     localStorage.setItem('alaya.mode', 'memory')
     state.draft = null; state.dirty = false; shell.hidden = true; memory.hidden = false; document.body.dataset.mode = 'memory'
     document.getElementById('mode-switch').focus()
-  }, false, { class: 'mode-switch', id: 'mb-mode-switch', title: '切换到记忆库', 'aria-label': '切换到记忆库', 'aria-pressed': 'true' })
+  }, false, { class: 'mode-switch', id: 'mb-mode-switch', title: '切换到数据库', 'aria-label': '切换到数据库', 'aria-pressed': 'true' })
   const search = h('input', { type: 'search', class: 'search', id: 'mb-query', placeholder: '搜索笔记、模型与单词', 'aria-label': '搜索笔记' })
   let searchTimer
   search.addEventListener('input', () => {
@@ -139,7 +139,7 @@ export function mountMistakebook({ beforeEnter }) {
   const allSideItems = () => [...viewItems(), ...typeItems(), ...subjectItems()]
   const itemFor = id => allSideItems().find(item => item.id === id) ?? null
   // 侧边栏配置存数据库（随 list 返回），写入走 sidebar.save；旧 localStorage
-  // 配置只在首次读取时迁移一次。与记忆库侧边栏同为数据驱动。
+  // 配置只在首次读取时迁移一次。与数据库侧边栏同为数据驱动。
   const sidebar = createSidebarController({
     read: () => state.data?.sidebar ?? null,
     write: next => void guard(async () => { await call('sidebar.save', { config: next }) }),

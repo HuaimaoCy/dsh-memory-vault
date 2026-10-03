@@ -1,6 +1,6 @@
 {
   "name": "dsh-memory-vault-desktop",
-  "version": "0.7.7",
+  "version": "0.7.8",
   "private": true,
   "description": "Desktop window for the DSH memory vault, built on the same host-free core as the plugin, the CLI and the RPC service.",
   "type": "module",
