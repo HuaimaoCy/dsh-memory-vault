@@ -1,6 +1,6 @@
 # Alaya
 
-This checkout is the independent `feat/notebook-mode` addon branch. **Alaya 0.7.3** opens into the study notebook by default; the top-right "记忆库" button switches both ways and remembers the last mode. It supports mistakes, structured physics models, methods, vocabulary, handwritten notes, plain notes, AI drafts, word quizzes, dictionary lookup (words auto-join the library; repeats count recitations), batch management, dictionary-style review and hosted PhET simulations. See [the addon guide](docs/notebook.zh.md). The addon is excluded from `main`.
+This checkout is the independent `feat/notebook-mode` addon branch. **Alaya 0.7.4** opens into the study notebook by default; the top-right "记忆库" button switches both ways and remembers the last mode. It supports mistakes, structured physics models, methods, vocabulary, handwritten notes, plain notes, AI drafts, word quizzes, dictionary lookup (words auto-join the library; repeats count recitations), word-relation trees (synonyms/antonyms/forms on a generic visualization), batch management, dictionary-style review and hosted PhET simulations. See [the addon guide](docs/notebook.zh.md). The addon is excluded from `main`.
 
 English | [中文](README.zh.md)
 

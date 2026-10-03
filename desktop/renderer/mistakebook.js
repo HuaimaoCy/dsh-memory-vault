@@ -3,6 +3,7 @@ import { createLoadingStatus } from './loading.js'
 import { NOTE_TYPES, STRUCTURED_FIELDS, normalizeFields } from '../../addons/mistakebook/fields.mjs'
 import { SIMULATIONS } from '../../addons/mistakebook/simulations.mjs'
 import { extractWords, normalizeWord } from '../../addons/mistakebook/words.mjs'
+import { renderRelationTree, vocabularyGraph } from './relations.js'
 
 const h = (tag, props = {}, ...children) => {
   const node = document.createElement(tag)
@@ -285,7 +286,7 @@ export function mountMistakebook({ beforeEnter }) {
       if (STRUCTURED_FIELDS[draft.type]) {
         const headwordKeys = draft.type === 'vocabulary' ? ['word', 'phonetic', 'partOfSpeech', 'meaning'] : []
         const fields = STRUCTURED_FIELDS[draft.type].filter(([key]) => !headwordKeys.includes(key))
-        const renderField = ([key, label]) => field(label, control(`${draft.type}.${key}`, draft.type === 'vocabulary' && ['derivation', 'steps', 'examples'].includes(key) ? 5 : 3))
+        const renderField = ([key, label]) => field(label, control(`${draft.type}.${key}`, draft.type === 'vocabulary' && ['synonyms', 'antonyms'].includes(key) ? 1 : draft.type === 'vocabulary' && ['derivation', 'steps', 'examples'].includes(key) ? 5 : 3))
         const filled = [], empty = []
         for (const entry of fields) (String(draft[draft.type]?.[entry[0]] ?? '').trim() ? filled : empty).push(entry)
         if (!draft.id || !empty.length) form.append(h('div', { class: 'mb-structured-fields' }, [...filled, ...empty].map(renderField)))
@@ -315,6 +316,7 @@ export function mountMistakebook({ beforeEnter }) {
       if (draft.isSoftDeleted) tools.append(button('恢复', () => perform('restore')), button('永久删除', () => perform('purge'), false, { class: 'btn danger' }))
       else {
         tools.append(button(state.review ? '退出复习' : '开始复习', async () => { if (await discard()) { state.draft = await call('read',{id:draft.id}); state.dirty=false; state.review=!state.review; state.showAnswer=false; renderDetail() } }, false, { id: 'mb-start-review' }),
+          draft.type === 'vocabulary' ? button('关联树', () => { if (state.dirty) throw new Error('请先保存修改，再查看关联树'); void openRelationTree(draft) }, false, { id: 'mb-relations', title: '按近义词、反义词与词形变化展开这棵词库关系树' }) : null,
           button(draft.isArchived ? '取消归档' : '归档', () => perform(draft.isArchived ? 'unarchive' : 'archive')), button('移到回收站', () => perform('delete'), false, { class: 'btn ghost danger', id: 'mb-delete' }))
         if (!draft.isArchived && draft.type==='mistake') tools.append(button('辅助分析错因', async () => {
           if (state.dirty) throw new Error('请先保存题目再分析')
@@ -448,6 +450,41 @@ export function mountMistakebook({ beforeEnter }) {
     pane.controller = controller
     return pane
   }
+  async function openRelationTree(draft) {
+    const rootKey = normalizeWord(draft.vocabulary.word)
+    const expanded = new Set([rootKey])
+    const node = dialog('词语关联树', h('div', { class: 'mb-tree-wrap', id: 'mb-relation-tree' }), true)
+    const fetchRecords = async () => {
+      const rows = []
+      for (const view of ['all', 'archived', 'trash']) rows.push(...(await call('list', { view, type: 'vocabulary' })).records)
+      return rows
+    }
+    let running = false
+    const draw = async action => {
+      if (running) return
+      running = true
+      try { await action() } catch (error) { notify(error.message || String(error), true) } finally { running = false }
+    }
+    const paint = records => node.querySelector('#mb-relation-tree').replaceChildren(renderRelationTree(vocabularyGraph(records, rootKey, expanded), {
+      expanded,
+      onToggle: key => void draw(async () => {
+        if (key !== rootKey) expanded.has(key) ? expanded.delete(key) : expanded.add(key)
+        paint(await fetchRecords())
+      }),
+      onOpen: id => void draw(async () => {
+        node.close()
+        Object.assign(state, { type: 'vocabulary', view: 'all', subjectID: '', nodeID: '', query: '' }); search.value = ''
+        await load(); await select(id)
+      }),
+      onLookup: word => void draw(async () => {
+        const outcome = await call('lookup', { word })
+        expanded.add(normalizeWord(word))
+        notify(outcome.created ? `已存入单词库：${word}，关联树已生长` : `「${word}」已在词库，背诵次数 +1`)
+        paint(await fetchRecords())
+      }),
+    }))
+    void draw(async () => paint(await fetchRecords()))
+  }
   async function openLookup() {
     if (!await discard()) return
     const input = h('input', { class: 'input', id: 'mb-lookup-word', autocomplete: 'off', spellcheck: 'false', placeholder: '输入英语单词或短语，如 conserve、give up', 'aria-label': '要查询的单词或短语' })
@@ -507,7 +544,7 @@ export function mountMistakebook({ beforeEnter }) {
         vocab.partOfSpeech ? h('span', { class: 'mb-dict-pos', text: vocab.partOfSpeech }) : null),
       h('p', { class: 'mb-dict-sense', text: vocab.meaning || '尚未填写释义' }),
       vocab.examples?.trim() ? h('div', { class: 'mb-dict-examples' }, vocab.examples.split(/\n+/).filter(Boolean).map((line, index) => h('p', { text: `${index + 1}. ${line}` }))) : null,
-      section('常用搭配', vocab.collocations), section('词形变化', vocab.forms), section('用法与辨析', vocab.usage))
+      section('近义词', vocab.synonyms), section('反义词', vocab.antonyms), section('常用搭配', vocab.collocations), section('词形变化', vocab.forms), section('用法与辨析', vocab.usage))
   }
   function addHandwritingPage(draft) {
     const page = handwritingDrafts.get(draft)

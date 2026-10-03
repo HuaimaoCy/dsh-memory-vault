@@ -69,3 +69,35 @@ export function extractWords(text) {
   if (entries.length > 1000) throw new Error('一次最多识别 1000 个词条，请分批上传')
   return entries
 }
+
+// 关联词语解析：从自由文本（近义词/反义词/词形变化字段）里提取英语单词或
+// 短语。支持逗号、顿号、分号分隔，可夹中文注释；单个词性缩写与单字母视为
+// 注释丢弃。输出经 normalizeWord 归一，去重且每字段最多 12 个。
+const RELATED_RUN = /[A-Za-z][A-Za-z'’\-]*(?: [A-Za-z][A-Za-z'’\-]*){0,5}/g
+const RELATED_STOP = new Set(['vt', 'vi', 'adj', 'adv', 'abbr', 'pl', 'sb', 'sth', 'etc'])
+export function parseRelatedWords(text) {
+  const source = String(text ?? '')
+  if (!source.trim() || source.length > 20000) return []
+  const found = [], seen = new Set()
+  for (const match of source.normalize('NFKC').matchAll(RELATED_RUN)) {
+    const word = normalizeWord(match[0])
+    if (!word || word.length < 2 || RELATED_STOP.has(word) || seen.has(word)) continue
+    seen.add(word)
+    found.push(word)
+    if (found.length >= 12) break
+  }
+  return found
+}
+// 词条的类型化关联边：近义/反义/词形三类，供通用关系树消费。
+export function relationsOf(vocabulary = {}) {
+  const self = normalizeWord(vocabulary.word)
+  const output = []
+  for (const [type, field] of [['synonym', 'synonyms'], ['antonym', 'antonyms'], ['form', 'forms']]) {
+    for (const word of parseRelatedWords(vocabulary[field])) {
+      if (word === self) continue
+      output.push({ type, word })
+      if (output.length >= 30) return output
+    }
+  }
+  return output
+}

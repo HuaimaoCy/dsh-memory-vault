@@ -10,7 +10,7 @@ export const NOTE_TYPES = {
 export const STRUCTURED_FIELDS = {
   physics: [['object', '研究对象与系统边界'], ['assumptions', '建模假设'], ['variables', '变量、单位与坐标约定'], ['equations', '控制方程与守恒关系'], ['derivation', '推导与求解过程'], ['conditions', '适用条件与边界'], ['pitfalls', '易错点与模型检验'], ['example', '应用例题']],
   method: [['prerequisites', '适用题型与前提'], ['steps', '解题步骤'], ['reasoning', '每一步的依据'], ['examples', '完整例题与过程'], ['pitfalls', '常见误区与替代方法']],
-  vocabulary: [['word', '单词或短语'], ['phonetic', '音标'], ['partOfSpeech', '词性'], ['meaning', '中文释义'], ['examples', '例句与翻译'], ['collocations', '常用搭配'], ['forms', '词形变化'], ['usage', '用法与辨析']],
+  vocabulary: [['word', '单词或短语'], ['phonetic', '音标'], ['partOfSpeech', '词性'], ['meaning', '中文释义'], ['synonyms', '近义词（逗号分隔）'], ['antonyms', '反义词（逗号分隔）'], ['examples', '例句与翻译'], ['collocations', '常用搭配'], ['forms', '词形变化'], ['usage', '用法与辨析']],
 }
 export function normalizeFields(type, raw = {}) {
   return Object.fromEntries((STRUCTURED_FIELDS[type] ?? []).map(([key]) => {

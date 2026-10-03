@@ -6,7 +6,8 @@ import { DatabaseSync } from 'node:sqlite'
 import { createServer } from 'node:http'
 import { MistakebookStore, taxonomy, evaluate } from '../addons/mistakebook/store.mjs'
 import { solve, createCloze, extractWordsWithAI, lookupWord } from '../addons/mistakebook/services.mjs'
-import { extractWords } from '../addons/mistakebook/words.mjs'
+import { extractWords, parseRelatedWords, relationsOf } from '../addons/mistakebook/words.mjs'
+import { buildGraph, vocabularyGraph, RELATION_TYPES } from '../desktop/renderer/relations.js'
 import { SIMULATIONS, simulationURL } from '../addons/mistakebook/simulations.mjs'
 import { createModelAdapter } from '../src/model.js'
 
@@ -98,9 +99,10 @@ try {
   await assert.rejects(()=>lookupWord('resilient',{resolveRoute:()=>undefined}),/配置/)
   await assert.rejects(()=>lookupWord('   ',adapter),/单词/)
   await assert.rejects(()=>lookupWord('紧急情况',adapter),/有效的英语单词或短语/)
-  response.choices[0].message.content=JSON.stringify({phonetic:'/rɪˈzɪliənt/',partOfSpeech:'adj.',meaning:'有弹性的；适应力强的',examples:'1. a resilient material 有弹性的材料',collocations:'resilient material',forms:'',usage:''})
+  response.choices[0].message.content=JSON.stringify({phonetic:'/rɪˈzɪliənt/',partOfSpeech:'adj.',meaning:'有弹性的；适应力强的',synonyms:'hardworking, adaptable',antonyms:'fragile',examples:'1. a resilient material 有弹性的材料',collocations:'resilient material',forms:'resilience（名词）',usage:''})
   const entry=await lookupWord('  Resilient ',adapter)
   assert.equal(entry.word,'Resilient');assert.equal(entry.phonetic,'/rɪˈzɪliənt/');assert.equal(entry.meaning,'有弹性的；适应力强的')
+  assert.equal(entry.synonyms,'hardworking, adaptable');assert.equal(entry.antonyms,'fragile');assert.equal(entry.forms,'resilience（名词）')
   assert.equal(request.body.messages[1].content,'Resilient')
   response.choices[0].message.content='not JSON'
   await assert.rejects(()=>lookupWord('resilient',adapter),/结构化|格式/)
@@ -108,6 +110,7 @@ try {
   try {
     const first=lookupStore.recordLookup(entry)
     assert.equal(first.created,true);assert.equal(first.record.reciteCount,1);assert.equal(first.record.subjectID,'english');assert.equal(first.record.title,'Resilient')
+    assert.equal(first.record.vocabulary.synonyms,'hardworking, adaptable');assert.equal(first.record.vocabulary.antonyms,'fragile')
     const again=lookupStore.recordLookup({word:'  RESILIENT  ',meaning:'试图覆盖人工内容'})
     assert.equal(again.created,false);assert.equal(again.record.id,first.record.id);assert.equal(again.record.reciteCount,2)
     assert.equal(again.record.vocabulary.meaning,'有弹性的；适应力强的')
@@ -117,10 +120,29 @@ try {
     assert.throws(()=>lookupStore.save({...bumped.record,reciteCount:-1}),/背诵/)
     assert.equal(lookupStore.list({type:'vocabulary'}).records.length,1)
   } finally { lookupStore.close() }
+  // 词语关联：解析、类型化边与通用关系树（纯函数）
+  assert.deepEqual(parseRelatedWords('hardworking, industrious；protect'),['hardworking','industrious','protect'])
+  assert.deepEqual(parseRelatedWords('preserve（保存）、n. 保护 vt. 保存'),['preserve'])
+  assert.deepEqual(parseRelatedWords('give up; take in'),['give up','take in'])
+  assert.deepEqual(parseRelatedWords(''),[])
+  assert.deepEqual(parseRelatedWords(Array.from({length:15},(_,index)=>'w'.repeat(index+2)).join(',')),Array.from({length:12},(_,index)=>'w'.repeat(index+2)))
+  assert.deepEqual(relationsOf({word:'conserve',synonyms:'conserve, preserve',antonyms:'abandon',forms:'conservation（名词）'}),[{type:'synonym',word:'preserve'},{type:'antonym',word:'abandon'},{type:'form',word:'conservation'}])
+  assert.equal(RELATION_TYPES.length,3)
+  const graphRecords=[{id:'a',vocabulary:{word:'conserve',synonyms:'preserve'}},{id:'b',vocabulary:{word:'preserve',antonyms:'abandon',synonyms:'conserve'}}]
+  let graph=vocabularyGraph(graphRecords,'Conserve',new Set(['conserve']))
+  assert.equal(graph.root.word,'conserve');assert.equal(graph.nodes.size,2);assert.equal(graph.edges.length,1)
+  assert.equal(graph.nodes.get('preserve').record.id,'b');assert.equal(graph.children.get('conserve')[0].type,'synonym')
+  graph=vocabularyGraph(graphRecords,'conserve',['conserve','preserve'])
+  assert.equal(graph.nodes.size,3);assert.equal(graph.nodes.get('abandon').record,null)
+  assert.deepEqual(graph.edges.map(edge=>edge.type).sort(),['antonym','synonym','synonym'])
+  assert.equal(graph.truncated,false)
+  const generic=buildGraph([{key:'m',word:'模型',edges:[{type:'similar',key:'n',word:'类似题'}]}],'m',['m'])
+  assert.equal(generic.edges.length,1);assert.equal(generic.nodes.get('n').record,null)
+  assert.equal(buildGraph([],'missing',new Set()).root,null)
   const db=new DatabaseSync(path);const old={...legacy};for(const field of ['type','title','physics','method','vocabulary','simulationId','aiResult','contentHash','aiStale','images','value'])delete old[field]
   db.prepare('UPDATE questions SET payload=? WHERE id=?').run(JSON.stringify(old),old.id);db.prepare("UPDATE addon_meta SET value='1' WHERE key='schema'").run();db.close()
   store=new MistakebookStore(path);assert.ok(existsSync(store.migrationBackup));const migrated=store.read(old.id)
   assert.equal(migrated.type,'mistake');assert.equal(migrated.updatedAt,old.updatedAt);assert.equal(migrated.createdAt,old.createdAt);assert.equal(migrated.revision,old.revision);assert.equal(migrated.images[0].data,image.data)
   const before=store.records().length, restored=new MistakebookStore(join(folder,'restored.sqlite'));try{restored.import(store.export());assert.equal(restored.records().length,before)}finally{restored.close()}
-  console.log('Notebook: five types, structure/search, v1 backup/migration, vision API, AI validation/cancel/provenance, manual preservation, word capture from OCR pages and HTML tables with dedupe/limits, AI page-level word extraction, word dedup, dictionary lookup with auto-save and recite counting, private quizzes/scoring/review/stale/deleted entries, cloze and simulation allowlist passed')
-} finally {store.close();server.close();server.closeAllConnections();rmSync(folder,{recursive:true,force:true})}
+  console.log('Notebook: five types, structure/search, v1 backup/migration, vision API, AI validation/cancel/provenance, manual preservation, word capture from OCR pages and HTML tables with dedupe/limits, AI page-level word extraction, word dedup, dictionary lookup with auto-save/recite counting/related words, word relations and the generic relation tree, private quizzes/scoring/review/stale/deleted entries, cloze and simulation allowlist passed')
+} finally {try{store.close()}catch{/* 已关闭时保留原始断言错误 */}server.close();server.closeAllConnections();rmSync(folder,{recursive:true,force:true})}
