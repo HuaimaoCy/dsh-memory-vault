@@ -266,3 +266,17 @@ body[data-mb-dragging] { cursor:col-resize; user-select:none; }
 .mb-settings-form { padding-bottom:24px; }
 .mb-dialog-head { position:sticky; top:0; z-index:3; background:#fff; }
 @media(max-width:900px) { .mb-bar .toolbar-actions { flex:1; }.mb-bar .search-wrap { flex:1; min-width:120px; }.mb-bar .mode-switch { padding:0 9px; }.mb-dialog .mb-import-layout { grid-template-columns:230px minmax(0,1fr); }.mb-word-row { grid-template-columns:auto 1fr .8fr 1fr 1fr auto; gap:5px; } }
+.brand .mode-switch { margin-left:auto; height:34px; padding:0 11px; flex:0 0 auto; }
+.brand { display:flex; align-items:center; gap:10px; }
+.mb-shell.detail-full .mb-main { display:none; }
+.mb-shell.detail-full .mb-detail { flex:1 !important; width:auto !important; max-width:none; }
+.mb-shell.detail-full .mb-splitter { display:none !important; }
+.mb-ai-side { position:fixed; top:0; right:0; bottom:0; width:min(420px,92vw); z-index:45; background:#fdfefd; border-left:1px solid #e2e7e1; box-shadow:-18px 0 44px #20232714; display:flex; flex-direction:column; }
+.mb-ai-head { display:flex; align-items:center; gap:10px; padding:16px 20px; border-bottom:1px solid #eaece3; }
+.mb-ai-head strong { font-size:14px; }
+.mb-ai-messages { flex:1; min-height:0; overflow:auto; padding:18px 20px; display:flex; flex-direction:column; gap:10px; }
+.mb-ai-msg { max-width:86%; padding:10px 14px; border-radius:12px; font-size:12.5px; line-height:1.8; white-space:pre-wrap; overflow-wrap:anywhere; }
+.mb-ai-msg.user { align-self:flex-end; background:#47796d; color:#fff; }
+.mb-ai-msg.assistant { align-self:flex-start; background:#f1f4ec; color:#3a453b; }
+.mb-ai-form { display:flex; gap:8px; padding:14px 20px 18px; border-top:1px solid #eaece3; align-items:flex-end; }
+.mb-ai-form .area { flex:1; min-height:64px; max-height:180px; resize:vertical; }

@@ -4,3 +4,15 @@
 .loading-label { margin:0; font-size:13px; line-height:1.6; text-align:left; }
 .loading-status.compact { margin:10px 0; padding:10px 12px; }
 .loading-status.compact .loading-label { font-size:12px; }
+#alaya-startup { position:fixed; inset:0; z-index:100; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:18px; background:#f8f9f7; animation:startup-fade .35s ease 1.45s forwards; }
+#alaya-startup .startup-mark { display:flex; gap:10px; }
+#alaya-startup .startup-mark span { width:16px; height:16px; background:#47796d; border-radius:4px; transform:rotate(45deg); animation:startup-pop 1.2s ease infinite; }
+#alaya-startup .startup-mark span:nth-child(2) { background:#6f8f83; animation-delay:.15s; }
+#alaya-startup .startup-mark span:nth-child(3) { background:#a1bfab; animation-delay:.3s; }
+#alaya-startup .startup-name { font-size:15px; letter-spacing:6px; color:#47584c; font-weight:600; }
+#alaya-startup .startup-bar { width:150px; height:3px; border-radius:2px; background:#e4e8de; overflow:hidden; }
+#alaya-startup .startup-bar i { display:block; height:100%; width:40%; border-radius:2px; background:#47796d; animation:startup-slide 1.1s ease-in-out infinite; }
+@keyframes startup-pop { 0%,100% { transform:rotate(45deg) scale(.72); opacity:.55; } 50% { transform:rotate(45deg) scale(1); opacity:1; } }
+@keyframes startup-slide { 0% { margin-left:-40%; } 100% { margin-left:100%; } }
+@keyframes startup-fade { to { opacity:0; visibility:hidden; } }
+@media (prefers-reduced-motion: reduce) { #alaya-startup { display:none; } }

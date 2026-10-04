@@ -1,7 +1,9 @@
 import { ownTags, section, subsection } from './grouping.js'
 import { icon, installIcons } from './icons.js'
 import { mountMistakebook } from './mistakebook.js'
-import { createLoadingStatus } from './loading.js'
+import { createLoadingStatus, dismissStartup } from './loading.js'
+
+dismissStartup()
 
 const el = id => document.getElementById(id)
 const state = { data: null, info: null, view: { kind: 'all' }, query: '', selected: null, draft: null, dirty: false, busy: false, open: new Set(), collapsed: new Set(), nextOffset: null, cure: null, layout: localStorage.getItem('memory-vault.layout') === 'rows' ? 'rows' : 'grid', settingsTab: 'general' }

@@ -222,19 +222,65 @@ export function mountMistakebook({ beforeEnter }) {
       })
     })
   }
+  // —— AI 侧边栏：右缘滑出，多轮对话直通已配置模型（会话仅存本界面） ——
+  const aiChat = { messages: [], running: false }
+  const aiSide = h('aside', { class: 'mb-ai-side', id: 'mb-ai-side', hidden: true, 'aria-label': 'AI 助手' })
+  const paintAI = () => {
+    const list = aiSide.querySelector('#mb-ai-messages')
+    if (!list) return
+    list.replaceChildren(...aiChat.messages.map(message => h('div', { class: `mb-ai-msg ${message.role}`, text: message.content })))
+    list.scrollTop = list.scrollHeight
+  }
+  const sendAI = async () => {
+    if (aiChat.running) return
+    const input = aiSide.querySelector('#mb-ai-input')
+    const content = input.value.trim()
+    if (!content) return
+    input.value = ''
+    aiChat.messages.push({ role: 'user', content })
+    aiChat.running = true
+    aiSide.querySelector('#mb-ai-send').disabled = true
+    paintAI()
+    try {
+      const result = await call('chat', { messages: aiChat.messages })
+      aiChat.messages.push({ role: 'assistant', content: result.text })
+    } catch (error) {
+      notify(error.message || String(error), true)
+    } finally {
+      aiChat.running = false
+      const send = aiSide.querySelector('#mb-ai-send'); if (send) send.disabled = false
+      paintAI()
+      aiSide.querySelector('#mb-ai-input')?.focus()
+    }
+  }
+  function buildAISide() {
+    aiSide.append(
+      h('div', { class: 'mb-ai-head' }, h('strong', { text: 'AI 学习助手' }), h('span', { class: 'cap', text: '对话不写入笔记数据库' }), h('span', { class: 'spacer' }),
+        h('button', { type: 'button', class: 'icon-button', 'aria-label': '收起 AI 助手', title: '收起', onClick: () => { aiSide.hidden = true } }, icon('close'))),
+      h('div', { class: 'mb-ai-messages', id: 'mb-ai-messages' }),
+      h('form', { class: 'mb-ai-form', onSubmit: event => { event.preventDefault(); void sendAI() } },
+        h('textarea', { class: 'area', id: 'mb-ai-input', rows: 3, placeholder: '问问题、要思路、核对要点…（Enter 发送，Shift+Enter 换行）', onKeydown: event => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); void sendAI() } } }),
+        h('button', { type: 'button', class: 'btn primary', id: 'mb-ai-send', text: '发送', onClick: () => void sendAI() })))
+    paintAI()
+  }
+  const toggleAISide = () => {
+    if (aiSide.hidden) { if (!aiSide.childElementCount) buildAISide(); aiSide.hidden = false; aiSide.querySelector('#mb-ai-input')?.focus() }
+    else aiSide.hidden = true
+  }
   shell.append(h('aside', { class: 'mb-side' },
-    h('div', { class: 'brand' }, h('div', { class: 'mb-book-mark' }, icon('book')), h('div', {}, h('div', { class: 'brand-name', text: '笔记本' }), h('div', { class: 'brand-caption', text: 'ALAYA NOTEBOOK' }))),
+    h('div', { class: 'brand' }, h('div', { class: 'mb-book-mark' }, icon('book')), h('div', {}, h('div', { class: 'brand-name', text: '笔记本' }), h('div', { class: 'brand-caption', text: 'ALAYA NOTEBOOK' })), switchButton),
     sideScroll,
     h('div', { class: 'mb-side-bottom' }, h('div', { class: 'mb-local' }, h('span', { class: 'library-dot' }), h('span', { text: '独立保存在本机' })),
       button([icon('grid'), '自定义侧边栏'], () => openSidebarConfig(), false, { class: 'nav', id: 'mb-sidebar-config', title: '调整侧边栏区块的顺序与显隐' }),
       button([icon('settings'), '笔记本设置'], openSettings, false, { class: 'nav', id: 'mb-settings' }))),
     sideSplitter,
     h('div', { class: 'mb-workspace' }, h('header', { class: 'mb-bar' }, h('div', { class: 'breadcrumb' }, icon('book'), h('span', { text: '笔记本' })),
-      h('div', { class: 'toolbar-actions' }, h('label', { class: 'search-wrap' }, icon('search'), search), button('录入', () => openImport(), false, { id: 'mb-import', title: '识别或粘贴，导入错题、笔记与词汇' }), button([icon('plus'), '新建笔记'], openCreate, true, { id: 'mb-new' }), switchButton)),
+      h('div', { class: 'toolbar-actions' }, h('label', { class: 'search-wrap' }, icon('search'), search), button('录入', () => openImport(), false, { id: 'mb-import', title: '识别或粘贴，导入错题、笔记与词汇' }), button([icon('plus'), '新建笔记'], openCreate, true, { id: 'mb-new' }))),
       h('div', { class: 'mb-body' }, h('main', { class: 'mb-main' }, h('div', { class: 'mb-page-heading' }, h('div', {}, heading, subtitle), h('div', { class: 'mb-total', id: 'mb-total' })),
-        h('div', { class: 'mb-board' }, order, h('span', { class: 'spacer' }), button('查词典', openLookup, false, { class: 'btn soft', id: 'mb-lookup', title: '查一个单词，自动存入单词库；重复查询累计背诵次数' }), button('单词检测', openQuiz, false, { class: 'btn soft', id: 'mb-quiz' }), pickButton, moreMenu), searchFilter, list), detailSplitter, detail),
+        h('div', { class: 'mb-board' }, order, h('span', { class: 'spacer' }), button('AI 助手', toggleAISide, false, { class: 'btn soft', id: 'mb-ai-toggle', title: '打开 AI 学习助手侧边栏' }), button('查词典', openLookup, false, { class: 'btn soft', id: 'mb-lookup', title: '查一个单词，自动存入单词库；重复查询累计背诵次数' }), button('单词检测', openQuiz, false, { class: 'btn soft', id: 'mb-quiz' }), pickButton, moreMenu), searchFilter, list), detailSplitter, detail),
       h('footer', { class: 'mb-foot' }, h('span', { text: '笔记本 · 本地保存' }), h('span', { class: 'spacer' }))), jsonPicker, h('div', { id: 'mb-status', class: 'mb-status', role: 'status', 'aria-live': 'polite' }))
   document.body.append(shell)
+  document.body.append(aiSide)
   applyLayout()
   document.getElementById('mode-switch').addEventListener('click', () => void guard(async () => {
     if (!await beforeEnter()) return
@@ -421,7 +467,8 @@ export function mountMistakebook({ beforeEnter }) {
     const errorType = h('select', { class: 'select', 'data-mb-field': 'errorType', onChange: event => { draft.errorType = event.target.value; dirty() } }, errors.map(label => h('option', { value: label === '未记录' ? '' : label, text: label, selected: (label === '未记录' ? '' : label) === draft.errorType ? 'selected' : undefined })))
     const target = h('select', { class: 'select', 'data-mb-field': 'target', onChange: event => { draft.target = event.target.value; dirty() } }, [['gaokao','高考'],['huige','合格考']].map(([value, text]) => h('option', { value, text, selected: value === draft.target ? 'selected' : undefined })))
     const close = button('', async () => { if (await discard()) { state.draft = null; state.dirty = false; renderList(); renderDetail() } }, false, { class: 'icon-button', 'aria-label': '关闭题目' }); close.append(icon('close'))
-    const head = h('div', { class: 'mb-detail-head' }, h('div', {}, h('span', { class: 'eyebrow', text: state.review ? '复习' : NOTE_TYPES[draft.type].label }), h('h2', { text: draft.id ? state.review ? '独立回忆，再核对' : draft.title || draft.vocabulary?.word || '笔记详情' : `新建${NOTE_TYPES[draft.type].label}` })), close)
+    const fullscreen = button('', () => { shell.classList.toggle('detail-full'); renderDetail() }, false, { class: 'icon-button', id: 'mb-fullscreen', title: '全屏编辑（Esc 退出）', 'aria-label': '全屏编辑', 'aria-pressed': String(shell.classList.contains('detail-full')) }); fullscreen.append(icon('grid'))
+    const head = h('div', { class: 'mb-detail-head' }, h('div', {}, h('span', { class: 'eyebrow', text: state.review ? '复习' : NOTE_TYPES[draft.type].label }), h('h2', { text: draft.id ? state.review ? '独立回忆，再核对' : draft.title || draft.vocabulary?.word || '笔记详情' : `新建${NOTE_TYPES[draft.type].label}` })), fullscreen, close)
     const actions = h('div', { class: 'row mb-save-actions' }, h('span', { id: 'mb-save-state', class: state.dirty ? 'cap dirty' : 'cap', role: 'status', 'aria-live': 'polite', text: state.dirty ? '有未保存的修改' : draft.id ? '已保存' : '尚未保存' }), h('span', { class: 'spacer' }), button('保存笔记', save, true, { id: 'mb-save', disabled: !state.dirty && Boolean(draft.id), title: '保存笔记 · Ctrl / ⌘ S' }),button(draft.type==='physics'?'AI 构建与推导':draft.type==='vocabulary'?'AI 补全词条':'AI 自动解答', solveAI,false,{id:'mb-ai-solve'}))
     const form = h('form', { class: 'mb-editor-form', onSubmit: event => { event.preventDefault(); void guard(save) } })
     if (state.review) {
@@ -958,6 +1005,7 @@ export function mountMistakebook({ beforeEnter }) {
   document.addEventListener('keydown', event => {
     if (document.body.dataset.mode !== 'mistakebook' || document.querySelector('dialog[open]')) return
     if (event.key === 'Escape' && state.picking) { state.picking = false; state.selection.clear(); renderList(); return }
+    if (event.key === 'Escape' && shell.classList.contains('detail-full')) { shell.classList.remove('detail-full'); renderDetail(); return }
     if (event.ctrlKey || event.metaKey) {
       if (event.key.toLowerCase() === 'f') { event.preventDefault(); search.focus(); search.select() }
       if (event.key.toLowerCase() === 'n') { event.preventDefault(); void guard(openCreate) }

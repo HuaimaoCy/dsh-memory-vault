@@ -367,3 +367,5 @@ h1 { margin:0; font-size:29px; font-weight:650; letter-spacing:-.6px; line-heigh
   .editor-scroll { padding-inline:22px; }
   .body.with-inspector .main { padding-inline:21px; }
 }
+.brand { display:flex; align-items:center; gap:10px; }
+.brand .mode-switch { margin-left:auto; height:34px; padding:0 11px; flex:0 0 auto; }
