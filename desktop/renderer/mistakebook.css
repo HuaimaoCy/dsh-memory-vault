@@ -295,3 +295,6 @@ button.brand-mark { border:1px solid #dfded6; border-radius:12px; background:#fb
 .mb-md .mb-math-block { text-align:center; font-family:'Cambria Math','Times New Roman',serif; font-style:italic; font-size:14px; padding:10px 6px; margin:8px 0; background:#fafbf7; border-radius:8px; }
 .mb-md .mb-md-hr { border:none; border-top:1px solid #e4e8de; margin:12px 0; }
 .mb-ai-msg.assistant .mb-md p:last-child { margin-bottom:0; }
+.mb-ai-msg-actions { display:flex; gap:6px; margin-top:6px; }
+.mb-ai-msg-actions .btn { min-height:22px; padding:2px 9px; font-size:10.5px; }
+.mb-ai-head .cap { flex:0 0 auto; }

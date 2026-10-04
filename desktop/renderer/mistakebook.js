@@ -224,14 +224,38 @@ export function mountMistakebook({ beforeEnter }) {
       })
     })
   }
-  // —— AI 侧边栏：右缘滑出，多轮对话直通已配置模型（会话仅存本界面） ——
-  const aiChat = { messages: [], running: false }
+  // —— AI 侧边栏：右缘滑出；问答记录持久化在笔记本数据库，可整理成笔记 ——
+  const aiChat = { messages: [], running: false, loaded: false }
   const aiSide = h('aside', { class: 'mb-ai-side', id: 'mb-ai-side', hidden: true, 'aria-label': 'AI 助手' })
   const paintAI = () => {
     const list = aiSide.querySelector('#mb-ai-messages')
     if (!list) return
-    list.replaceChildren(...aiChat.messages.map(message => message.role === 'assistant' ? h('div', { class: 'mb-ai-msg assistant' }, renderRich(message.content)) : h('div', { class: `mb-ai-msg ${message.role}`, text: message.content })))
+    if (!aiChat.messages.length) { list.replaceChildren(h('p', { class: 'cap', text: '还没有查询记录。问一个问题，记录会保存在本机数据库里，可随时整理成笔记。' })); return }
+    list.replaceChildren(...aiChat.messages.map(message => message.role === 'assistant'
+      ? h('div', { class: 'mb-ai-msg assistant' }, renderRich(message.content),
+          h('div', { class: 'mb-ai-msg-actions' }, h('button', { type: 'button', class: 'btn ghost mb-ai-to-note', 'data-ai-to-note': message.questionId ?? '', title: '把这一轮问答整理成一篇笔记', onClick: event => { event.stopPropagation(); void toNote(message) } }, '存为笔记')))
+      : h('div', { class: `mb-ai-msg ${message.role}`, text: message.content })))
     list.scrollTop = list.scrollHeight
+  }
+  const loadAIHistory = async () => {
+    const result = await call('ai.history', { limit: 60 })
+    aiChat.messages = result.messages
+    aiChat.loaded = true
+    paintAI()
+  }
+  const toNote = async message => {
+    if (!message.questionId) throw new Error('这条记录缺少关联问题，无法整理')
+    const note = await call('ai.toNote', { questionId: message.questionId })
+    await load()
+    notify(`已整理成笔记：${note.title}`)
+    return note
+  }
+  const clearAIHistory = async () => {
+    if (!await confirm('清空全部 AI 查询记录？整理好的笔记不受影响。')) return
+    const result = await call('ai.clear')
+    aiChat.messages = []
+    paintAI()
+    notify(`已清空 ${result.removed} 条 AI 记录`)
   }
   const sendAI = async () => {
     if (aiChat.running) return
@@ -244,8 +268,8 @@ export function mountMistakebook({ beforeEnter }) {
     aiSide.querySelector('#mb-ai-send').disabled = true
     paintAI()
     try {
-      const result = await call('chat', { messages: aiChat.messages })
-      aiChat.messages.push({ role: 'assistant', content: result.text })
+      const result = await call('chat', { content })
+      aiChat.messages.push({ role: 'assistant', content: result.text, questionId: result.questionId })
     } catch (error) {
       notify(error.message || String(error), true)
     } finally {
@@ -257,7 +281,8 @@ export function mountMistakebook({ beforeEnter }) {
   }
   function buildAISide() {
     aiSide.append(
-      h('div', { class: 'mb-ai-head' }, h('strong', { text: 'AI 学习助手' }), h('span', { class: 'cap', text: '对话不写入笔记数据库' }), h('span', { class: 'spacer' }),
+      h('div', { class: 'mb-ai-head' }, h('strong', { text: 'AI 学习助手' }), h('span', { class: 'cap', text: '记录保存在本机数据库' }), h('span', { class: 'spacer' }),
+        h('button', { type: 'button', class: 'btn ghost', id: 'mb-ai-clear', text: '清空记录', title: '清空全部 AI 查询记录', onClick: () => void guard(clearAIHistory) }),
         h('button', { type: 'button', class: 'icon-button', 'aria-label': '收起 AI 助手', title: '收起', onClick: () => { aiSide.hidden = true } }, icon('close'))),
       h('div', { class: 'mb-ai-messages', id: 'mb-ai-messages' }),
       h('form', { class: 'mb-ai-form', onSubmit: event => { event.preventDefault(); void sendAI() } },
@@ -266,8 +291,12 @@ export function mountMistakebook({ beforeEnter }) {
     paintAI()
   }
   const toggleAISide = () => {
-    if (aiSide.hidden) { if (!aiSide.childElementCount) buildAISide(); aiSide.hidden = false; aiSide.querySelector('#mb-ai-input')?.focus() }
-    else aiSide.hidden = true
+    if (aiSide.hidden) {
+      if (!aiSide.childElementCount) buildAISide()
+      aiSide.hidden = false
+      aiSide.querySelector('#mb-ai-input')?.focus()
+      if (!aiChat.loaded) void guard(loadAIHistory)
+    } else aiSide.hidden = true
   }
   shell.append(h('aside', { class: 'mb-side' },
     h('div', { class: 'brand' }, switchButton, h('div', {}, h('div', { class: 'brand-name', text: '笔记本' }), h('div', { class: 'brand-caption', text: 'ALAYA NOTEBOOK' }))),

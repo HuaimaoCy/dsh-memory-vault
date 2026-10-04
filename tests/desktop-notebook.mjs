@@ -23,6 +23,7 @@ export async function run(window,bridge) {
     let result
     if(request.messages[0].content.includes('例句填空检测')) {const words=JSON.parse(request.messages[1].content);result={exercises:words.map(row=>({id:row.id,prompt:'The lesson explains the idea of ___.',hint:row.meaning}))}}
     else if(request.messages[0].content.includes('积累本识别')) {result={entries:[{word:'abandon',phonetic:'/əˈbændən/',meaning:'放弃',examples:''},{word:'conserve',phonetic:'',meaning:'保存；守恒',examples:''},{word:'resilient',phonetic:'',meaning:'适应力强的',examples:''},{word:'momentum',phonetic:'',meaning:'动量',examples:''}]}}
+    else if(request.messages[0].content.includes('学习助手')) {const ask=request.messages.at(-1).content;result={text:`**${ask.slice(0,12)}** 的要点：\n\n1. 先看条件\n2. 再写方程\n\n$$p = mv$$`}}
     else if(request.messages[0].content.includes('英语词典')) {const word=request.messages[1].content;result={phonetic:'/ˈdɪlɪdʒənt/',partOfSpeech:'adj.',meaning:'【词典】勤奋的',synonyms:'hardworking, industrious',antonyms:'lazy',examples:`1. a ${word} student 一名勤奋的学生`,collocations:`a ${word} worker`,forms:'diligence',usage:''}}
     else { const input=JSON.parse(request.messages[1].content[0].text)
       result=input.type==='物理模型'?{answer:'设质量为 m，劲度系数为 k。\n弹力 F=−kx，由牛顿第二定律 m x″=−kx。\n角频率 ω=√(k/m)，周期 T=2π√(m/k)。\n忽略摩擦且弹簧满足胡克定律时适用。',fields:{referenceAnswer:'T=2π√(m/k)',notes:'核对周期的单位为秒',physics:{object:'质量块与轻弹簧',assumptions:'AI 假设，不应覆盖人工设定',variables:'m：kg；k：N/m；x：m',equations:'m x″ + kx = 0',derivation:'x=A cos(ωt+φ)，ω=√(k/m)',conditions:'线性弹性范围；忽略阻尼',pitfalls:'先确定平衡位置，再定义位移'}}}: {answer:'先写出条件，再逐步推导。',fields:{referenceAnswer:'示例解答',notes:'检查适用前提'}}
@@ -274,7 +275,21 @@ export async function run(window,bridge) {
     await js(`(()=>{const card=document.querySelector('[data-question-id="${looseNote.id}"]');const target=document.querySelector('[data-mb-subject=physics]');card.dispatchEvent(new Event('dragstart',{bubbles:true}));target.dispatchEvent(new Event('dragover',{bubbles:true}));target.dispatchEvent(new Event('drop',{bubbles:true}));card.dispatchEvent(new Event('dragend',{bubbles:true}));return true})()`)
     await idle()
     assert.equal((await api('read',{id:looseNote.id})).result.subjectID,'physics')
+    // AI 查询记录：问答入库、可整理成笔记、可清空
+    await click('#mb-ai-toggle');await until("document.querySelector('#mb-ai-side')&&!document.querySelector('#mb-ai-side').hidden")
+    await until("document.querySelector('#mb-ai-messages')!==null")
+    await fill('#mb-ai-input','动量守恒的条件是什么？');await click('#mb-ai-send')
+    await until("document.querySelectorAll('#mb-ai-messages .mb-ai-msg').length>=2");await idle()
+    const aiHistory=(await api('ai.history',{})).result.messages
+    assert.equal(aiHistory.length,2);assert.equal(aiHistory[0].role,'user');assert.equal(aiHistory[1].role,'assistant')
+    assert.match(await js("document.querySelector('#mb-ai-messages .mb-ai-msg.assistant .mb-md')?.textContent"),/要点/)
+    await click('[data-ai-to-note]');await idle()
+    const aiNote=(await api('list',{tag:'AI 问答'})).result.records[0]
+    assert.equal(Boolean(aiNote),true);assert.match(aiNote.stem,/问：动量守恒的条件是什么？/);assert.match(aiNote.stem,/答：/)
+    await click('#mb-ai-clear');await idle()
+    assert.equal((await api('ai.history',{})).result.messages.length,0)
+    await js("document.querySelector('[aria-label=\"收起 AI 助手\"]').click()")
     await click('#mb-mode-switch');await until("document.body.dataset.mode==='memory'");await idle();assert.equal(await js("document.querySelectorAll('#views button').length"),4)
-    console.log('Desktop notebook: five-type UI, structure, image AI input, encrypted settings, safe AI acceptance/cancel, manual word import, photo word capture with duplicate marking/row deletion/AI extraction, dictionary lookup with auto-save and recite counting, word relations and the generic relation tree, custom tags with cloud filtering, drag-splitters and detail-side layout, fully customizable DB-backed sidebar (rename/add/cross-section items), note drag reclassification, freely draggable note cards, general OCR entry into notes, spelling/cloze scores/history, handwriting canvas inside notes, multi-select delete/restore, dictionary review cards, word tile compaction, differentiated review scores, mode switch and memory isolation passed')
+    console.log('Desktop notebook: five-type UI, structure, image AI input, encrypted settings, safe AI acceptance/cancel, manual word import, photo word capture with duplicate marking/row deletion/AI extraction, dictionary lookup with auto-save and recite counting, word relations and the generic relation tree, custom tags with cloud filtering, drag-splitters and detail-side layout, fully customizable DB-backed sidebar (rename/add/cross-section items), note drag reclassification, freely draggable note cards, general OCR entry into notes, spelling/cloze scores/history, handwriting canvas inside notes, multi-select delete/restore, dictionary review cards, word tile compaction, differentiated review scores, AI query history with note export, mode switch and memory isolation passed')
   } finally {for(const w of BrowserWindow.getAllWindows())if(w!==window)w.destroy();dialog.showMessageBox=previousConfirm;server.close();server.closeAllConnections()}
 }

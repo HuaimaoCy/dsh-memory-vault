@@ -201,6 +201,23 @@ try {
     assert.throws(()=>sideStore.assign(note.id,{}),/指明/)
     assert.equal(sideStore.export().sidebar.sections[0].label,'快速')
   } finally { sideStore.close() }
+  // AI 查询记录：持久化、成对关联、整理成笔记、清空
+  const aiStore=new MistakebookStore(join(folder,'ai.sqlite'))
+  try {
+    assert.equal(aiStore.aiHistory(10).length,0)
+    const question=aiStore.aiAppend({role:'user',content:'动量守恒的条件是什么？'})
+    aiStore.aiAppend({role:'assistant',content:'**合外力为零**时动量守恒。',questionId:question.id})
+    const history=aiStore.aiHistory(10)
+    assert.equal(history.length,2);assert.equal(history[0].role,'user');assert.equal(history[1].role,'assistant')
+    assert.equal(history[1].questionId,question.id)
+    const note=aiStore.aiToNote(question.id)
+    assert.equal(note.type,'note');assert.equal(note.title,'动量守恒的条件是什么？')
+    assert.deepEqual(note.tags,['AI 问答']);assert.match(note.stem,/问：动量守恒/);assert.match(note.stem,/答：\*\*合外力为零\*\*/)
+    assert.throws(()=>aiStore.aiToNote('不存在的 id'),/找不到/)
+    assert.throws(()=>aiStore.aiAppend({role:'user',content:'   '}),/为空/)
+    assert.equal(aiStore.list({tag:'AI 问答'}).records.length,1)
+    assert.deepEqual(aiStore.aiClear(),{removed:2});assert.equal(aiStore.aiHistory(10).length,0)
+  } finally { aiStore.close() }
   const db=new DatabaseSync(path);const old={...legacy};for(const field of ['type','title','physics','method','vocabulary','simulationId','aiResult','contentHash','aiStale','images','value'])delete old[field]
   db.prepare('UPDATE questions SET payload=? WHERE id=?').run(JSON.stringify(old),old.id);db.prepare("UPDATE addon_meta SET value='1' WHERE key='schema'").run();db.close()
   store=new MistakebookStore(path);assert.ok(existsSync(store.migrationBackup));const migrated=store.read(old.id)

@@ -108,20 +108,20 @@ export class MistakebookStore {
       this.db = options.database
       this.path = options.path ?? null
       this.ownsDb = false
-      this.tables = { meta: 'notebook_meta', questions: 'notebook_questions', images: 'notebook_images' }
+      this.tables = { meta: 'notebook_meta', questions: 'notebook_questions', images: 'notebook_images', ai: 'notebook_ai_messages' }
       this.quizzes = new Map()
     } else {
       const path = typeof options === 'string' ? options : options?.path
       if (!path) throw new Error('MistakebookStore 需要文件路径或 { database }')
       this.path = path
       this.ownsDb = true
-      this.tables = { meta: 'addon_meta', questions: 'questions', images: 'question_images' }
+      this.tables = { meta: 'addon_meta', questions: 'questions', images: 'question_images', ai: 'ai_messages' }
       this.quizzes = new Map()
       mkdirSync(dirname(path), { recursive: true })
       this.db = new DatabaseSync(path)
     }
     this.db.exec('PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000;')
-    const { meta, questions, images } = this.tables
+    const { meta, questions, images, ai } = this.tables
     const hasMeta = this.db.prepare(`SELECT 1 FROM sqlite_master WHERE type='table' AND name='${meta}'`).get()
     const version = hasMeta ? this.db.prepare(`SELECT value FROM ${meta} WHERE key='schema'`).get()?.value : null
     if (version && !['1','2'].includes(version)) { if (this.ownsDb) this.db.close(); throw new Error('笔记本数据库版本较新，请使用对应版本') }
@@ -134,7 +134,9 @@ export class MistakebookStore {
       CREATE TABLE IF NOT EXISTS ${questions}(id TEXT PRIMARY KEY, payload TEXT NOT NULL, fingerprint TEXT NOT NULL);
       CREATE INDEX IF NOT EXISTS ${questions}_fingerprint ON ${questions}(fingerprint);
       CREATE TABLE IF NOT EXISTS ${images}(id TEXT PRIMARY KEY, question_id TEXT NOT NULL REFERENCES ${questions}(id) ON DELETE CASCADE,
-        name TEXT NOT NULL, mime_type TEXT NOT NULL, width INTEGER NOT NULL, height INTEGER NOT NULL, sha256 TEXT NOT NULL, data BLOB NOT NULL, UNIQUE(question_id,sha256));`)
+        name TEXT NOT NULL, mime_type TEXT NOT NULL, width INTEGER NOT NULL, height INTEGER NOT NULL, sha256 TEXT NOT NULL, data BLOB NOT NULL, UNIQUE(question_id,sha256));
+      CREATE TABLE IF NOT EXISTS ${ai}(id TEXT PRIMARY KEY, role TEXT NOT NULL, content TEXT NOT NULL, question_id TEXT, created_at TEXT NOT NULL);
+      CREATE INDEX IF NOT EXISTS ${ai}_created ON ${ai}(created_at);`)
     try { this.transaction(() => {
       if (version === '1') for (const previous of this.records()) {
         const converted = { ...normalize(previous, previous), updatedAt: previous.updatedAt, revision: previous.revision, classificationSuggested: previous.classificationSuggested }
@@ -279,6 +281,39 @@ export class MistakebookStore {
         record.reviewHistory = record.reviewHistory.slice(-200)
       } else throw new Error('未知题目操作')
       return this.saveInside({ ...record })
+    })
+  }
+  // —— AI 查询记录：与笔记数据同库、独立表域，可整理成笔记 ——
+  aiAppend({ role, content, questionId = null } = {}) {
+    const who = role === 'assistant' ? 'assistant' : 'user'
+    const body = bounded(content, 40000).trim()
+    if (!body) throw new Error('AI 记录内容为空')
+    const id = randomUUID()
+    this.db.prepare(`INSERT INTO ${this.tables.ai}(id,role,content,question_id,created_at) VALUES(?,?,?,?,?)`)
+      .run(id, who, body, questionId ? String(questionId) : null, new Date().toISOString())
+    return { id, role: who, content: body, questionId: questionId ? String(questionId) : null }
+  }
+  aiHistory(limit = 60) {
+    const size = Math.max(1, Math.min(500, Number(limit) || 60))
+    return this.db.prepare(`SELECT id, role, content, question_id, created_at FROM ${this.tables.ai} ORDER BY created_at DESC, rowid DESC LIMIT ?`)
+      .all(size).reverse().map(row => ({ id: row.id, role: row.role, content: row.content, questionId: row.question_id, createdAt: row.created_at }))
+  }
+  aiClear() {
+    const before = this.db.prepare(`SELECT COUNT(*) AS n FROM ${this.tables.ai}`).get().n
+    this.db.prepare(`DELETE FROM ${this.tables.ai}`).run()
+    return { removed: Number(before) }
+  }
+  // 把一轮问答整理成一篇笔记（类型 note），标题取问题首行，正文含问与答。
+  aiToNote(questionId, title = '') {
+    return this.transaction(() => {
+      const rows = this.db.prepare(`SELECT id, role, content FROM ${this.tables.ai} WHERE id=? OR question_id=? ORDER BY created_at, rowid`).all(String(questionId), String(questionId))
+      if (!rows.length) throw new Error('找不到这条 AI 记录')
+      const question = rows.find(row => row.role === 'user')?.content ?? ''
+      const answer = rows.filter(row => row.role === 'assistant').map(row => row.content).join('\n\n')
+      const text = [question && `问：${question}`, answer && `答：${answer}`].filter(Boolean).join('\n\n')
+      if (!text.trim()) throw new Error('这条记录没有可整理的内容')
+      const heading = bounded(title, 500).trim() || question.split('\n').map(line => line.trim()).find(Boolean)?.slice(0, 60) || 'AI 问答'
+      return this.saveInside({ type: 'note', title: heading, stem: text, tags: ['AI 问答'] })
     })
   }
   // —— 侧边栏配置：存 addon_meta（数据库），与记忆库侧边栏同为数据驱动 ——
