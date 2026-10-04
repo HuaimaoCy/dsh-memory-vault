@@ -71,8 +71,8 @@ Codex 的 MCP 配置格式依据 [OpenAI 官方说明](https://learn.chatgpt.com
 原插件入口 `index.js`、浏览器面板 `client.js`、bundle 配置以及模型工具均保留，仍可按原方式安装。原来已经安装此目录时，更新文件后重启 `dsh web` 即可加载新代码。
 
 ```powershell
-# 在 DSH 源码目录执行
-pnpm dsh plugin --profile web add 'C:\Users\mdorn\Documents\deepseek-harness\default-workspace\dsh-memory-vault'
+# 在 DSH 源码目录执行；路径替换为本机上该插件的实际位置
+pnpm dsh plugin --profile web add '<本机路径>\dsh-memory-vault'
 ```
 
 在 DSH 的 `cordis.patch.yml` 中保留原插件行，并让 `databasePath` 指向桌面软件正在使用的数据库。「设置与连接」也会提供该段配置。
