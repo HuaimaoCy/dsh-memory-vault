@@ -1,9 +1,7 @@
 import { ownTags, section, subsection } from './grouping.js'
 import { icon, installIcons } from './icons.js'
 import { mountMistakebook } from './mistakebook.js'
-import { createLoadingStatus, dismissStartup } from './loading.js'
-
-dismissStartup()
+import { createLoadingStatus, runAlayaStartup } from './loading.js'
 
 const el = id => document.getElementById(id)
 const state = { data: null, info: null, view: { kind: 'all' }, query: '', selected: null, draft: null, dirty: false, busy: false, open: new Set(), collapsed: new Set(), nextOffset: null, cure: null, layout: localStorage.getItem('memory-vault.layout') === 'rows' ? 'rows' : 'grid', settingsTab: 'general' }
@@ -558,7 +556,7 @@ mountMistakebook({ beforeEnter: async () => {
   state.dirty = false; state.selected = null; state.draft = null; render(); return true
 } })
 void guard(async () => {
-  await load()
+  await runAlayaStartup(load)
 }).then(() => {
   // Open where the user left off; the notebook is this app's primary face.
   if ((localStorage.getItem('alaya.mode') ?? 'notebook') === 'notebook') document.getElementById('mode-switch').click()

@@ -280,3 +280,6 @@ body[data-mb-dragging] { cursor:col-resize; user-select:none; }
 .mb-ai-msg.assistant { align-self:flex-start; background:#f1f4ec; color:#3a453b; }
 .mb-ai-form { display:flex; gap:8px; padding:14px 20px 18px; border-top:1px solid #eaece3; align-items:flex-end; }
 .mb-ai-form .area { flex:1; min-height:64px; max-height:180px; resize:vertical; }
+button.mb-book-mark, button.brand-mark { cursor:pointer; font:inherit; color:inherit; }
+button.mb-book-mark:hover, button.brand-mark:hover { border-color:#b9cfbd; background:#f0f4ec; }
+button.brand-mark { border:1px solid #dfded6; border-radius:12px; background:#fbfaf7; }

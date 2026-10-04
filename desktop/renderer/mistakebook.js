@@ -96,12 +96,13 @@ export function mountMistakebook({ beforeEnter }) {
     sidebar.sync()
     renderSide(); renderList(); renderDetail()
   }
-  const switchButton = button([icon('vault'), '数据库'], async () => {
+  // 图标即切换：品牌图标本身是模式切换按钮（与数据库侧一致）。
+  const switchButton = button([icon('vault')], async () => {
     if (document.querySelector('dialog[open]') || !await discard()) return
     localStorage.setItem('alaya.mode', 'memory')
     state.draft = null; state.dirty = false; shell.hidden = true; memory.hidden = false; document.body.dataset.mode = 'memory'
     document.getElementById('mode-switch').focus()
-  }, false, { class: 'mode-switch', id: 'mb-mode-switch', title: '切换到数据库', 'aria-label': '切换到数据库', 'aria-pressed': 'true' })
+  }, false, { class: 'mb-book-mark', id: 'mb-mode-switch', title: '切换到数据库', 'aria-label': '切换到数据库', 'aria-pressed': 'true' })
   const search = h('input', { type: 'search', class: 'search', id: 'mb-query', placeholder: '搜索笔记、模型与单词', 'aria-label': '搜索笔记' })
   let searchTimer
   search.addEventListener('input', () => {
@@ -268,7 +269,7 @@ export function mountMistakebook({ beforeEnter }) {
     else aiSide.hidden = true
   }
   shell.append(h('aside', { class: 'mb-side' },
-    h('div', { class: 'brand' }, h('div', { class: 'mb-book-mark' }, icon('book')), h('div', {}, h('div', { class: 'brand-name', text: '笔记本' }), h('div', { class: 'brand-caption', text: 'ALAYA NOTEBOOK' })), switchButton),
+    h('div', { class: 'brand' }, switchButton, h('div', {}, h('div', { class: 'brand-name', text: '笔记本' }), h('div', { class: 'brand-caption', text: 'ALAYA NOTEBOOK' }))),
     sideScroll,
     h('div', { class: 'mb-side-bottom' }, h('div', { class: 'mb-local' }, h('span', { class: 'library-dot' }), h('span', { text: '独立保存在本机' })),
       button([icon('grid'), '自定义侧边栏'], () => openSidebarConfig(), false, { class: 'nav', id: 'mb-sidebar-config', title: '调整侧边栏区块的顺序与显隐' }),

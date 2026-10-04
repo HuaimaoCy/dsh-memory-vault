@@ -369,3 +369,7 @@ h1 { margin:0; font-size:29px; font-weight:650; letter-spacing:-.6px; line-heigh
 }
 .brand { display:flex; align-items:center; gap:10px; }
 .brand .mode-switch { margin-left:auto; height:34px; padding:0 11px; flex:0 0 auto; }
+
+button.brand-mark { cursor:pointer; font:inherit; }
+button.brand-mark:hover { border-color:#c9d4c4; }
+

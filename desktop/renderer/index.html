@@ -9,10 +9,10 @@
   <link rel="stylesheet" href="loading.css" />
 </head>
 <body data-mode="memory">
-  <div id="alaya-startup" aria-hidden="true"><div class="startup-mark"><span></span><span></span><span></span></div><div class="startup-name">ALAYA</div><div class="startup-bar"><i></i></div></div>
+  <div id="alaya-startup" class="alaya-startup" aria-label="Alaya 正在启动"><div class="alaya-loader"><div class="alaya-stage" aria-hidden="true"></div></div></div>
   <div class="app-shell">
     <aside class="side" aria-label="数据库导航">
-      <div class="brand"><div class="brand-mark" aria-hidden="true"><span data-icon="vault"></span></div><div><div class="brand-name">Alaya</div><div class="brand-caption">数据库</div></div><button id="mode-switch" class="mode-switch" title="切换到笔记本" aria-label="切换到笔记本" aria-pressed="false"><span data-icon="book"></span><span class="mode-switch-label">笔记本</span></button></div>
+      <div class="brand"><button id="mode-switch" class="brand-mark" title="切换到笔记本" aria-label="切换到笔记本" aria-pressed="false"><span data-icon="book"></span></button><div><div class="brand-name">Alaya</div><div class="brand-caption">数据库</div></div></div>
       <div class="side-scroll">
         <div class="side-head">资料库</div><nav id="views" class="views" aria-label="记忆视图"></nav>
         <div class="side-head groups-head"><span>记忆组</span><button id="manage-groups" class="icon-button" title="管理记忆组" aria-label="管理记忆组"><span data-icon="plus"></span></button></div>
