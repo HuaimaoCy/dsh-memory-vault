@@ -6,7 +6,7 @@ Memory Vault 0.6.2 支持 GitHub Releases 更新。软件启动后检查一次�
 
 默认更新清单：
 
-`https://github.com/HuaimaoCy/dsh-memory-vault/releases/latest/download/latest.json`
+`https://github.com/HuaimaoCy/Alaya-Database/releases/latest/download/latest.json`
 
 更新清单尚未发布（404）会显示「发布源尚未提供更新清单」，不会误报为最新版本。网络错误、无效清单、下载中断和校验失败都可以重试。
 

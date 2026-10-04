@@ -3,7 +3,7 @@ import { dirname, join, resolve } from 'node:path'
 import { createRequire } from 'node:module'
 import { fileURLToPath } from 'node:url'
 import { build } from 'electron-builder'
-import { VERSION } from '../src/version.js'
+import { CORE_VERSION, NOTEBOOK_VERSION } from '../src/version.js'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const root = resolve(here, '..')
@@ -14,7 +14,10 @@ mkdirSync(join(runtime, 'desktop'), { recursive: true })
 for (const name of ['src', 'bin', 'addons', 'index.js', 'client.js', 'cordis.patch.yml']) cpSync(join(root, name), join(runtime, name), { recursive: true })
 for (const name of ['main.mjs', 'preload.cjs', 'renderer', 'lib', 'assets']) cpSync(join(here, name), join(runtime, 'desktop', name), { recursive: true })
 const pkg = JSON.parse(readFileSync(join(here, 'package.json'), 'utf8'))
-if (pkg.version !== VERSION || JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')).version !== VERSION) throw new Error('Release versions must match')
+// 两条版本线各自与自己的 package.json 对齐：桌面产品 = NOTEBOOK_VERSION，
+// 核心包（仓库根 package.json）= CORE_VERSION；两者不再要求同号。
+if (pkg.version !== NOTEBOOK_VERSION) throw new Error(`Notebook version mismatch: desktop ${pkg.version} != ${NOTEBOOK_VERSION}`)
+if (JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')).version !== CORE_VERSION) throw new Error(`Core version mismatch: root != ${CORE_VERSION}`)
 writeFileSync(join(runtime, 'package.json'), JSON.stringify({
   name: 'memory-vault-mistakebook', version: pkg.version, description: 'Alaya memory and study notebook',
   type: 'module', main: 'desktop/main.mjs', author: 'Memory Vault contributors',

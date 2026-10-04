@@ -1,6 +1,9 @@
 import { VERSION } from './version.js'
 
-export const RELEASE_REPOSITORY = 'HuaimaoCy/dsh-memory-vault'
+// 发布与更新源统一在 Alaya 仓库：笔记本版本打 notebook-vX.Y.Z 标签、安装包与
+// latest.json 随该 release 发布；数据库核心版本打 database-vX.Y.Z 标签。为了让
+// releases/latest 始终可用，仓库里的每份 release 都会附带 latest.json。
+export const RELEASE_REPOSITORY = 'HuaimaoCy/Alaya-Database'
 export const DEFAULT_UPDATE_URL = `https://github.com/${RELEASE_REPOSITORY}/releases/latest/download/latest.json`
 export const MAX_INSTALLER_BYTES = 1024 * 1024 * 1024
 
