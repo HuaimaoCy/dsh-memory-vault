@@ -61,9 +61,9 @@ export async function run(window, bridge) {
     await until("document.body.dataset.mode === 'mistakebook'")
     await idle()
 
-    // A hand-drawn page remains a draft through editor reconstruction and saves directly.
+    // A hand-drawn page remains a draft through editor reconstruction and saves directly (note type, 0.7.13 merge).
     await click('#mb-new'); await idle()
-    await click('[data-create-type="handwriting"]'); await idle()
+    await click('[data-create-type="note"]'); await idle()
     await click('[data-hw-width="8"]'); await idle()
     assert.equal(await js("document.querySelector('[data-hw-width=\"8\"]').getAttribute('aria-pressed')"), 'true')
     assert.equal(await js("document.querySelectorAll('.mb-hw-width[aria-pressed=\"true\"]').length"), 1)
@@ -85,7 +85,7 @@ export async function run(window, bridge) {
     await fill('#mb-sort', 'updated', 'change'); await idle()
     assert.equal(await js("document.querySelector('#mb-handwrite-canvas').toDataURL('image/png')"), drawing, 'Sorting must preserve hand-drawn strokes')
     await click('#mb-save'); await idle()
-    const handwriting = (await notebook('list', { type: 'handwriting' })).records.find(row => row.title === `${token}-handwriting`)
+    const handwriting = (await notebook('list', { type: 'note' })).records.find(row => row.title === `${token}-handwriting`)
     assert.ok(handwriting, 'Directly saving a hand-drawn note must create a record')
     notebookIds.push(handwriting.id)
     const written = await notebook('read', { id: handwriting.id })

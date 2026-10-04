@@ -7,6 +7,7 @@ import { renderRelationTree, vocabularyGraph } from './relations.js'
 import { attachSplitter } from './layout.js'
 import { renderTagEditor, renderTagCloud } from './tags.js'
 import { createSidebarController, renderSidebarConfig, migrateLegacySidebar } from './sidebar.js'
+import { renderRich } from './markdown.js'
 
 const h = (tag, props = {}, ...children) => {
   const node = document.createElement(tag)
@@ -229,7 +230,7 @@ export function mountMistakebook({ beforeEnter }) {
   const paintAI = () => {
     const list = aiSide.querySelector('#mb-ai-messages')
     if (!list) return
-    list.replaceChildren(...aiChat.messages.map(message => h('div', { class: `mb-ai-msg ${message.role}`, text: message.content })))
+    list.replaceChildren(...aiChat.messages.map(message => message.role === 'assistant' ? h('div', { class: 'mb-ai-msg assistant' }, renderRich(message.content)) : h('div', { class: `mb-ai-msg ${message.role}`, text: message.content })))
     list.scrollTop = list.scrollHeight
   }
   const sendAI = async () => {
@@ -401,9 +402,9 @@ export function mountMistakebook({ beforeEnter }) {
         const score = row.value.overallScore
         const card = button([check,
           h('div', { class: 'mb-card-head' }, h('span', { class: `mb-type-label ${row.type}`, text: NOTE_TYPES[row.type]?.label || '错题' }), h('span', { class: 'spacer' }), h('span', { class: `mb-state ${row.reviewState}`, text: labelStates[row.reviewState] })),
-          h('h2', { text: row.title || row.vocabulary?.word || row.stem.split('\n')[0].slice(0,90) || (row.type === 'handwriting' ? '手写笔记' : '图片笔记') }),
-          h('p', { class: 'mb-card-stem', text: (row.type==='handwriting' ? (row.imageCount ? `${row.imageCount} 页手写` : row.stem) : row.type==='vocabulary'?row.vocabulary.meaning:row.stem||row.physics?.object||row.method?.prerequisites||'打开笔记补充内容。').replace(/\s+/g,' ').slice(0,180) }),
-          h('div', { class: 'mb-card-tags' }, row.subjectID ? h('span',{text:dictionary.get(row.subjectID)}) : null, row.nodeID ? h('span', { text: dictionary.get(row.nodeID) }) : null, row.tags.slice(0, 3).map(tag => h('span', { class: 'mb-card-tag', text: `# ${tag}` })), row.imageCount ? h('span', { text: row.type === 'handwriting' ? `${row.imageCount} 页手写` : `${row.imageCount} 张原图` }) : null, row.errorType ? h('span', { text: row.errorType }) : null),
+          h('h2', { text: row.title || row.vocabulary?.word || row.stem.split('\n')[0].slice(0,90) || (row.imageCount ? '手写页' : '图片笔记') }),
+          h('p', { class: 'mb-card-stem', text: (row.type==='note' ? (row.imageCount ? (row.stem ? `${row.imageCount} 页手写 · ${row.stem.replace(/\s+/g,' ').slice(0,60)}` : `${row.imageCount} 页手写`) : row.stem||row.physics?.object||row.method?.prerequisites||'打开笔记补充内容。') : row.type==='vocabulary'?row.vocabulary.meaning:row.stem||row.physics?.object||row.method?.prerequisites||'打开笔记补充内容。').replace(/\s+/g,' ').slice(0,180) }),
+          h('div', { class: 'mb-card-tags' }, row.subjectID ? h('span',{text:dictionary.get(row.subjectID)}) : null, row.nodeID ? h('span', { text: dictionary.get(row.nodeID) }) : null, row.tags.slice(0, 3).map(tag => h('span', { class: 'mb-card-tag', text: `# ${tag}` })), row.imageCount ? h('span', { text: `${row.imageCount} 页手写` }) : null, row.errorType ? h('span', { text: row.errorType }) : null),
           h('div', { class: 'mb-card-foot' }, h('span', { class: `mb-score ${row.value.level}`, text: `复习优先 ${score}` }), h('span', { text: `更新于 ${date(row.updatedAt)}` })),
         ], click, false, props)
         makeDraggable(card, row); list.append(card)
@@ -478,9 +479,9 @@ export function mountMistakebook({ beforeEnter }) {
       form.append(h('div', { class: 'row mb-review-actions' }, button(state.showAnswer ? '收起答案' : '展开答案核对', () => { state.showAnswer = !state.showAnswer; renderDetail() }, false, { id: 'mb-reveal' }), button('编辑题目', () => { state.review = false; renderDetail() }, false)))
       if (state.showAnswer) form.append(h('div', { class: 'row' }, button('还不会', () => perform('fail'), false, { id: 'mb-review-fail' }), button('做对了', () => perform('pass'), true, { id: 'mb-review-pass' })))
     } else {
-      append(form,field('标题',control('title',1)), field(draft.type==='mistake'?'题干':draft.type==='physics'?'问题情境与建模目标':draft.type==='method'?'方法概述与问题背景':draft.type==='vocabulary'?'语境与补充（可选）':draft.type==='handwriting'?'补充文字（可选）':'笔记内容与问题', control('stem', draft.type==='vocabulary'||draft.type==='handwriting'?2:5)), h('div', { class: 'mb-fields-row' }, field('学科', subject), field('知识点', nodeSelect)),
+      append(form,field('标题',control('title',1)), field(draft.type==='mistake'?'题干':draft.type==='physics'?'问题情境与建模目标':draft.type==='method'?'方法概述与问题背景':draft.type==='vocabulary'?'语境与补充（可选）':'笔记内容与问题', control('stem', draft.type==='vocabulary'?2:5)), h('div', { class: 'mb-fields-row' }, field('学科', subject), field('知识点', nodeSelect)),
         h('div', { class: 'mb-tags-panel' }, renderTagEditor({ tags: draft.tags ?? [], onChange: next => { draft.tags = next; dirty(); renderDetail() }, onInvalid: message => notify(message, true) })),
-        draft.type === 'handwriting' ? handwritingPanel(draft) : null,
+        draft.type === 'note' ? handwritingPanel(draft) : null,
         draft.classificationSuggested ? h('p', { class: 'cap', text: '知识点由关键词建议，请确认后保存。' }) : null,
         draft.legacyNodeID ? h('p', { class: 'cap', text: `旧知识点「${draft.legacyNodeID}」需重新选择，原标识已保留。` }) : null,
         draft.type==='mistake'?field('我的作答', control('studentWork')):null, draft.type==='mistake'?field('参考答案', control('referenceAnswer')):null, draft.type==='mistake'?h('div', { class: 'mb-fields-row' }, field('错因类型', errorType), field('考试目标', target)):null, draft.type==='mistake'?field('错因与复盘', control('cause')):null)
@@ -512,7 +513,7 @@ export function mountMistakebook({ beforeEnter }) {
       form.querySelector('.mb-images').dispatchEvent(new ClipboardEvent('paste', { clipboardData: event.clipboardData, bubbles: false, cancelable: true }))
     })
     if (draft.id) {
-      if(draft.aiResult) form.append(h('div',{class:'mb-ai-result',id:'mb-ai-result'},h('div',{class:'row'},h('strong',{text:'AI 学习草稿'}),h('span',{class:'spacer'}),h('span',{class:'cap',text:draft.aiStale?'资料已修改，建议重新生成':date(draft.aiResult.generatedAt)})),h('div',{class:'mb-ai-text',text:draft.aiResult.text}),h('p',{class:'cap',text:'解答与模型仍需核对。补充空白字段会保留已有的人工内容。'}),button('补充到空白字段',async()=>{if(state.dirty)throw new Error('请先保存修改');state.draft=await call('ai.accept',{id:draft.id});state.dirty=false;await load();notify('AI 草稿已补充，人工内容保留')},false,{id:'mb-ai-accept',disabled:draft.aiStale})))
+      if(draft.aiResult) form.append(h('div',{class:'mb-ai-result',id:'mb-ai-result'},h('div',{class:'row'},h('strong',{text:'AI 学习草稿'}),h('span',{class:'spacer'}),h('span',{class:'cap',text:draft.aiStale?'资料已修改，建议重新生成':date(draft.aiResult.generatedAt)})),h('div',{class:'mb-ai-text'},renderRich(draft.aiResult.text)),h('p',{class:'cap',text:'解答与模型仍需核对。补充空白字段会保留已有的人工内容。'}),button('补充到空白字段',async()=>{if(state.dirty)throw new Error('请先保存修改');state.draft=await call('ai.accept',{id:draft.id});state.dirty=false;await load();notify('AI 草稿已补充，人工内容保留')},false,{id:'mb-ai-accept',disabled:draft.aiStale})))
       const value = draft.value
       form.append(h('div', { class: 'mb-priority' }, h('div', { class: 'row' }, h('strong', { text: `复习优先 ${value.overallScore}` }), h('span', { class: 'spacer' }), h('span', { text: labelStates[draft.reviewState] })),
         h('p', { class: 'cap', text: `再次出错 ${draft.repeatCount} 次${draft.reciteCount ? ` · 背诵 ${draft.reciteCount} 次` : ''} · 下次复习 ${date(draft.nextReviewAt)}` }), h('details', {}, h('summary', { text: '查看评分依据' }), h('p', { class: 'cap', text: value.reason }), h('p', { class: 'cap', text: '按到期紧迫、掌握薄弱、重复出错与久未复习加权；课标权重仅作微调。' }))))

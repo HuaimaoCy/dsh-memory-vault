@@ -1,0 +1,11 @@
+{
+  "model": {
+    "baseUrl": "http://127.0.0.1:8302",
+    "model": "fixture-model"
+  },
+  "encryptedKey": "djEwvmmhRyXmMq0oW3A4M8LQkTcqGO0pRiBATCWZsgNObGYAYLYE0er/Nrpb+SlYJ+d8j/VQ",
+  "ocr": {
+    "endpoint": "http://127.0.0.1:8302/layout_parsing"
+  },
+  "encryptedOCRKey": "djEwZjrB8QF5zERiOt3zl28sH4ERhlUIF/PnDoTlfuXMbj/oZJcNiwvXPCpZyM022LoE"
+}

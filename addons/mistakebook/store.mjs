@@ -2,7 +2,7 @@ import { DatabaseSync } from 'node:sqlite'
 import { mkdirSync, readFileSync, existsSync, rmSync } from 'node:fs'
 import { dirname } from 'node:path'
 import { randomUUID, createHash, randomInt } from 'node:crypto'
-import { NOTE_TYPES, normalizeFields, contentOf } from './fields.mjs'
+import { NOTE_TYPES, normalizeFields, contentOf, typeAlias } from './fields.mjs'
 import { SIMULATIONS } from './simulations.mjs'
 import curriculum from './lib/curriculum.cjs'
 import { normalizeImage, IMAGE_MAX_COUNT, IMAGE_TOTAL_BYTES } from '../../src/images.js'
@@ -56,9 +56,11 @@ export function evaluate(record) {
     lastReviewAt: record.reviewHistory?.at(-1)?.at ?? record.updatedAt ?? null,
   })
 }
+// 手写/普通笔记合并：旧 handwriting 记录一律按 note 处理。
+const merged_type = (raw, previous) => raw?.type ?? previous?.type ?? 'mistake'
 function normalize(raw, previous = {}) {
-  const merged = { ...previous, ...raw }
-  const type = merged.type ?? 'mistake'
+  const merged = { ...previous, ...raw, type: typeAlias(merged_type(raw, previous)) }
+  const type = merged.type
   if (!Object.hasOwn(NOTE_TYPES, type)) throw new Error('无效的笔记类型')
   const physics = normalizeFields('physics', merged.physics), method = normalizeFields('method', merged.method), vocabulary = normalizeFields('vocabulary', merged.vocabulary)
   const simulationId = String(merged.simulationId ?? '')

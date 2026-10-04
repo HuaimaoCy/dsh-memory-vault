@@ -111,16 +111,16 @@ export async function run(window,bridge) {
     assert.equal(bridge.vault.store.listEntries({limit:100}).length,initial)
     const bad=await api('simulation.open',{id:'evil'});assert.equal(bad.ok,false)
     if(process.argv.includes('--test-simulation')) await testSimulation(window)
-    // 手写笔记：画布书写 → 保存手写页 → 图片入库
+    // 笔记（0.7.13 起内置手写画布）：画布书写 → 保存手写页 → 图片入库
     await click('[data-mb-view=all]');await idle()
-    await create('handwriting')
+    await create('note')
     await fill(field('title'),'电磁学手写')
     const draw=`(()=>{const c=document.querySelector('#mb-handwrite-canvas');const r=c.getBoundingClientRect();const p=(x,y)=>new PointerEvent('pointerdown',{pointerId:1,clientX:r.left+x,clientY:r.top+y,bubbles:true});const m=(x,y)=>new PointerEvent('pointermove',{pointerId:1,clientX:r.left+x,clientY:r.top+y,bubbles:true});c.dispatchEvent(p(60,60));for(let i=0;i<=30;i++)c.dispatchEvent(m(60+i*8,60+Math.sin(i/4)*30));c.dispatchEvent(new PointerEvent('pointerup',{pointerId:1,bubbles:true}));return true})()`
     await js(draw)
     await click('#mb-hw-save');await idle()
     assert.equal(await js("document.querySelectorAll('.mb-image-thumb').length"),1)
     await click('#mb-save');await idle()
-    const written=(await api('list',{type:'handwriting'})).result.records
+    const written=(await api('list',{type:'note'})).result.records.filter(row=>row.title==='电磁学手写')
     assert.equal(written.length,1);assert.equal(written[0].imageCount,1);assert.equal(written[0].title,'电磁学手写')
     // 多选删除：勾选两篇移入回收站，再恢复
     const beforeTrash=(await api('list',{view:'trash'})).result.records.length
@@ -275,6 +275,6 @@ export async function run(window,bridge) {
     await idle()
     assert.equal((await api('read',{id:looseNote.id})).result.subjectID,'physics')
     await click('#mb-mode-switch');await until("document.body.dataset.mode==='memory'");await idle();assert.equal(await js("document.querySelectorAll('#views button').length"),4)
-    console.log('Desktop notebook: six-category UI, structure, image AI input, encrypted settings, safe AI acceptance/cancel, manual word import, photo word capture with duplicate marking/row deletion/AI extraction, dictionary lookup with auto-save and recite counting, word relations and the generic relation tree, custom tags with cloud filtering, drag-splitters and detail-side layout, fully customizable DB-backed sidebar (rename/add/cross-section items), note drag reclassification, freely draggable note cards, general OCR entry into notes, spelling/cloze scores/history, handwriting canvas, multi-select delete/restore, dictionary review cards, word tile compaction, differentiated review scores, mode switch and memory isolation passed')
+    console.log('Desktop notebook: five-type UI, structure, image AI input, encrypted settings, safe AI acceptance/cancel, manual word import, photo word capture with duplicate marking/row deletion/AI extraction, dictionary lookup with auto-save and recite counting, word relations and the generic relation tree, custom tags with cloud filtering, drag-splitters and detail-side layout, fully customizable DB-backed sidebar (rename/add/cross-section items), note drag reclassification, freely draggable note cards, general OCR entry into notes, spelling/cloze scores/history, handwriting canvas inside notes, multi-select delete/restore, dictionary review cards, word tile compaction, differentiated review scores, mode switch and memory isolation passed')
   } finally {for(const w of BrowserWindow.getAllWindows())if(w!==window)w.destroy();dialog.showMessageBox=previousConfirm;server.close();server.closeAllConnections()}
 }
