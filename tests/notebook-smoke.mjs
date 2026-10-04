@@ -20,6 +20,25 @@ const server=createServer(async(req,res)=>{let body='';for await(const chunk of 
 await new Promise(r=>server.listen(0,'127.0.0.1',r))
 try {
   for(const node of taxonomy.nodes)assert.ok(Number.isFinite(evaluate({nodeID:node.id,mastery:0,repeatCount:0}).overallScore))
+  // 高考考频权重：同样行为下，高频知识点优先分高于低频；合格考权重更小；未匹配取中性
+  const behaviorSignals={mastery:0,repeatCount:0,dueState:'unplanned'}
+  const highFreq=evaluate({...behaviorSignals,nodeID:'chinese/writing'})
+  const lowFreq=evaluate({...behaviorSignals,nodeID:'math/reasoning'})
+  const noNode=evaluate({...behaviorSignals,nodeID:''})
+  assert.equal(highFreq.engineVersion,'behavior-3.0')
+  assert.equal(highFreq.detail.frequencyLabel,'高频');assert.equal(lowFreq.detail.frequencyLabel,'极低频')
+  assert.equal(highFreq.detail.frequencyWeight,0.18);assert.equal(noNode.detail.frequencyWeight,0)
+  assert.ok(highFreq.overallScore>lowFreq.overallScore,`高频应高于低频：${highFreq.overallScore} vs ${lowFreq.overallScore}`)
+  assert.ok(noNode.overallScore>lowFreq.overallScore&&noNode.overallScore<highFreq.overallScore,`未匹配应居中：${noNode.overallScore}`)
+  assert.match(highFreq.reason,/高考考频 高频/)
+  const highHuige=evaluate({...behaviorSignals,nodeID:'chinese/writing',target:'huige'})
+  const lowHuige=evaluate({...behaviorSignals,nodeID:'math/reasoning',target:'huige'})
+  assert.equal(highHuige.detail.frequencyWeight,0.06)
+  assert.ok(highHuige.overallScore-lowHuige.overallScore<highFreq.overallScore-lowFreq.overallScore,'合格考的考频影响应小于高考')
+  // 行为仍是主导：同一高频知识点，逾期反复出错明显高于刚复习且已掌握
+  const urgent=evaluate({nodeID:'chinese/writing',mastery:0,repeatCount:3,dueState:'overdueLong',daysOverdue:20,lastReviewAt:new Date(Date.now()-40*86400000).toISOString()})
+  const calm=evaluate({nodeID:'chinese/writing',mastery:1,repeatCount:0,dueState:'notDue',daysUntil:18,reviewState:'mastered',lastReviewAt:new Date().toISOString()})
+  assert.ok(urgent.overallScore-calm.overallScore>=30,`行为应主导：${urgent.overallScore} vs ${calm.overallScore}`)
   const mistake=store.save({stem:'质量 2 kg，合力 6 N，求加速度。',images:[image]})
   const physics=store.save({type:'physics',title:'水平弹簧振子',physics:{object:'质量块与轻弹簧',assumptions:'人工设定：无摩擦'},simulationId:'masses-and-springs',images:[image]})
   store.save({type:'method',title:'配方法',method:{steps:'配成完全平方',reasoning:'恒等变形'}})

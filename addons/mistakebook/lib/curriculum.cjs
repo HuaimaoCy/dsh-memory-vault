@@ -64,10 +64,22 @@ function propagationBoost(nodeID, allNodeIDs, attrs) {
   return Math.min(boost, P.propagation.cap);
 }
 
+// 高考考频：按知识点的考频先验 examWeightPrior 分档（高频/中高频/中频/低频/极低频）。
+function frequencyOf(attr) {
+  const P = params();
+  const config = P.examFrequency || {};
+  if (!attr) return { value: config.neutral ?? 0.5, label: '未匹配知识点', prior: null }
+  const prior = Number(attr.examWeightPrior ?? 0)
+  const tiers = Array.isArray(config.tiers) ? config.tiers : []
+  const tier = tiers.find(item => prior >= item.min) ?? tiers[tiers.length - 1]
+  return { value: tier ? tier.value : 0.5, label: tier ? tier.label : '中频', prior }
+}
+
 /// 计算一篇笔记的复习重要性（0..100）与级别，返回可解释明细。
-// 行为信号为主：到期紧迫 44%、掌握薄弱 28%、重复出错 16%、久未复习 12%。
-// 课标静态权重只在匹配到知识点时作 ±15% 微调；未匹配保持中性，
-// 避免旧版模型里所有无知识点笔记塌缩到同一分数（如恒为 42）。
+// 行为为主 + 高考考频显式计权：行为（到期 44% / 薄弱 28% / 重复出错 16% /
+// 久未复习 12%，合计 1）按 (1-考频权重) 缩放，考频再按知识点分档计入
+// （高考目标 0.18、合格考 0.06、未匹配知识点权重为 0 取中性）；课标静态
+// 特征仍作 ±15% 微调。考频从课标微调里移出单列，避免同一信号计两次。
 function evaluate({ nodeID, target = 'gaokao', repeatCount = 0, mastery = 0, dueState = 'unplanned',
                     daysOverdue = 0, daysUntil = 0, lastReviewAt = null, reviewState = '' } = {}) {
   const P = params();
@@ -98,8 +110,14 @@ function evaluate({ nodeID, target = 'gaokao', repeatCount = 0, mastery = 0, due
 
   const behavior = 0.44 * dueScore + 0.28 * weakness + 0.16 * repeat + 0.12 * staleness;
 
-  // 5) 课标微调：匹配到知识点时 0.85..1.15，未匹配为 1。
+  // 5) 高考考频：知识点考频先验分档计权；高考目标权重高于合格考；未匹配不参与。
+  const freqConfig = P.examFrequency || {};
   const { features, attr } = staticFeatures(nodeID, target);
+  const frequency = frequencyOf(attr);
+  const frequencyWeight = attr ? (target === 'huige' ? (freqConfig.weightHuige ?? 0.06) : (freqConfig.weightGaokao ?? 0.18)) : 0;
+  const weighted = (1 - frequencyWeight) * behavior + frequencyWeight * frequency.value;
+
+  // 6) 课标微调：匹配到知识点时 0.85..1.15，未匹配为 1。
   let base = null;
   if (features) {
     const w = { ...P.staticWeights };
@@ -113,7 +131,7 @@ function evaluate({ nodeID, target = 'gaokao', repeatCount = 0, mastery = 0, due
   }
   const curriculumFactor = base === null ? 1 : 0.85 + 0.3 * base;
 
-  const priority = clamp(behavior * curriculumFactor);
+  const priority = clamp(weighted * curriculumFactor);
   const overall = Math.round(priority * 100);
   const level = overall >= P.levels.high ? 'high' : overall >= P.levels.medium ? 'medium' : 'low';
 
@@ -122,17 +140,18 @@ function evaluate({ nodeID, target = 'gaokao', repeatCount = 0, mastery = 0, due
   reasonBits.push(`掌握度 ${(1 - weakness).toFixed(2)}，薄弱 ${weakness.toFixed(2)}`);
   reasonBits.push(`重复出错 ${repeatCount || 0} 次（强度 ${repeat.toFixed(2)}）`);
   reasonBits.push(`距上次复习约 ${Math.round(staleDays)} 天`);
-  reasonBits.push(attr ? `课标权重 ×${curriculumFactor.toFixed(2)}（${attr.citation || nodeID}）` : '未匹配课标知识点，权重中性');
+  reasonBits.push(attr ? `高考考频 ${frequency.label}（先验 ${frequency.prior}，权重 ${frequencyWeight.toFixed(2)}）` : '未匹配知识点，考频中性')
+  reasonBits.push(attr ? `课标微调 ×${curriculumFactor.toFixed(2)}（${attr.citation || nodeID}）` : '未匹配课标知识点，权重中性');
   return {
     dimensions: { knowledgeValue: +(base ?? 0.5).toFixed(3), representativeness: +(features?.examWeight ?? 0.4).toFixed(3),
       recurrenceRisk: +repeat.toFixed(3), reasoningValue: +(features?.cognitive ?? 0.3).toFixed(3),
-      examValue: +(features?.scope ?? 0.5).toFixed(3), reviewPriority: +priority.toFixed(3) },
+      examValue: +(features?.scope ?? 0.5).toFixed(3), examFrequency: +frequency.value.toFixed(3), reviewPriority: +priority.toFixed(3) },
     overallScore: overall,
     level,
     reason: reasonBits.join('；'),
-    detail: { dueScore, weakness, repeat, staleness, behavior, curriculumFactor },
+    detail: { dueScore, weakness, repeat, staleness, behavior, frequency: frequency.value, frequencyLabel: frequency.label, frequencyPrior: frequency.prior, frequencyWeight, weighted, curriculumFactor },
     engineID: 'curriculum-quantification.web',
-    engineVersion: 'behavior-2.0',
+    engineVersion: 'behavior-3.0',
   };
 }
 
