@@ -4,8 +4,8 @@
 // - NOTEBOOK_VERSION：Alaya Notebook 桌面产品（Electron 应用与笔记本扩充），
 //   独立演进，发布标签 notebook-vX.Y.Z，安装包与更新清单随它走。
 // 两者可以长期不同号；构建守卫只要求各自与自己的 package.json 一致。
-export const CORE_VERSION = '0.7.20'
-export const NOTEBOOK_VERSION = '0.7.20'
+export const CORE_VERSION = '0.7.21'
+export const NOTEBOOK_VERSION = '0.7.21'
 
 // 兼容别名：核心侧（MCP serverInfo、CLI）沿用 VERSION。
 export const VERSION = CORE_VERSION
