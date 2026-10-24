@@ -45,7 +45,22 @@ window.__ModuleLoader__.load({
     /** Entries requested per load. */
     const PAGE_LIMIT = 120
     /** The two system tags, in display order. */
-    const AUTO_TAGS = ['AI自动总结', '人工输入']
+    const AUTO_TAGS = ['AI 生成', '人工输入']
+    /**
+     * The name 「AI 生成」 replaced. Rows carrying it are rewritten by the Host's
+     * migration, but this half may talk to a Host that has not run it yet, and a
+     * retired name must never be shown or offered as a tag of its own.
+     */
+    const RETIRED_AUTO_TAGS = ['AI自动总结']
+    /**
+     * Curation scopes, by origin. This is the axis the panel must not blur:
+     * 「人工输入」 says who wrote a memory, 「AI 整理」 says what is being run.
+     */
+    const CURATE_SCOPES = [
+      ['generated', 'curateScopeGenerated'],
+      ['manual', 'curateScopeManual'],
+      ['all', 'curateScopeAll'],
+    ]
     /** Entry kinds offered by the editor. */
     const KINDS = [
       ['summary', '摘要'], ['fact', '事实'], ['preference', '偏好'],
@@ -78,6 +93,9 @@ window.__ModuleLoader__.load({
         scopeShortKnowledge: '知识',
         newEntry: '新建记忆',
         newGroup: '新建记忆组',
+        parentLabel: '父组',
+        parentTop: '顶层（无父组）',
+        parentHint: '子记忆组最多三层。应用父组时会连它的所有子组一起应用；按组检索默认也连带子组。',
         groupName: '记忆组名称',
         create: '创建',
         cancel: '取消',
@@ -164,6 +182,23 @@ window.__ModuleLoader__.load({
         curateApply: '按建议归类',
         curateApplied: '已归类',
         curateDismiss: '收起',
+        curateNow: 'AI 整理',
+        curateScope: '范围',
+        curateScopeGenerated: '仅 AI 生成',
+        curateScopeManual: '仅人工输入',
+        curateScopeAll: '全部',
+        curateScopeHint: '来源不是操作：AI 整理默认只处理模型写的记忆（自动总结与会话中写入），人特意写下的默认不动。',
+        originManual: '人工输入',
+        originGenerated: 'AI 生成',
+        editTags: '标签',
+        editTagsDone: '收起标签',
+        addTagHint: '输入标签后回车',
+        removeTag: '移除这个标签',
+        untagged: '未打标签',
+        tagSplitHint: '组内按各自的标签细分',
+        curateTags: '标签合并',
+        tagDropped: '删除该标签',
+        curateDefaultModel: '用部署默认模型整理',
         curateBusy: '整理中…',
         curateHint: '用一次模型调用判断每条记忆是可复用还是单次性，并给出归类建议。',
         curateEmpty: '模型没有给出可用的判断。',
@@ -213,6 +248,9 @@ window.__ModuleLoader__.load({
         scopeShortKnowledge: 'Knowledge',
         newEntry: 'New memory',
         newGroup: 'New group',
+        parentLabel: 'parent',
+        parentTop: 'top level',
+        parentHint: 'Sub-groups nest up to three deep. Applying a parent applies its whole subtree, and reading a group reads its sub-groups.',
         groupName: 'Group name',
         create: 'Create',
         cancel: 'Cancel',
@@ -299,6 +337,23 @@ window.__ModuleLoader__.load({
         curateApply: 'Apply verdicts',
         curateApplied: 'Filed',
         curateDismiss: 'Dismiss',
+        curateNow: 'AI curation',
+        curateScope: 'Scope',
+        curateScopeGenerated: 'AI-written only',
+        curateScopeManual: 'Human-written only',
+        curateScopeAll: 'Both',
+        curateScopeHint: 'Origin is not the operation: AI curation judges model-written memories (summaries and in-conversation writes) and leaves what a person typed alone.',
+        originManual: 'human input',
+        originGenerated: 'AI-written',
+        editTags: 'Tags',
+        editTagsDone: 'Hide tags',
+        addTagHint: 'type a tag, press Enter',
+        removeTag: 'Remove this tag',
+        untagged: 'untagged',
+        tagSplitHint: 'split inside a group by its own tags',
+        curateTags: 'Label merges',
+        tagDropped: 'delete this label',
+        curateDefaultModel: 'curate on the deployment default model',
         curateBusy: 'Reviewing…',
         curateHint: 'One model call decides whether each memory is reusable or one-off, and suggests where it belongs.',
         curateEmpty: 'The model returned no usable verdicts.',
@@ -367,6 +422,93 @@ window.__ModuleLoader__.load({
 .dsmv-sub { font-size: var(--dsmv-fs-small); line-height: var(--dsmv-lh-body); color: var(--dsw-alias-label-tertiary); }
 .dsmv-meta { font-size: var(--dsmv-fs-small); line-height: var(--dsmv-lh-small); color: var(--dsw-alias-label-tertiary); }
 .dsmv-cap { font-size: var(--dsmv-fs-cap); line-height: var(--dsmv-lh-small); letter-spacing: .012em; color: var(--dsw-alias-label-caption); }
+.dsmv-select {
+  font: inherit;
+  font-size: var(--dsmv-fs-small);
+  color: var(--dsw-alias-label-primary);
+  background: var(--dsw-alias-bg-layer-2);
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: var(--dsmv-radius-sm, 6px);
+  padding: 4px 6px;
+  max-width: 220px;
+}
+.dsmv-select--sm { padding: 2px 4px; max-width: 160px; }
+.dsmv-select:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: 1px; }
+/* In-place tag editing on a tile. Kept small: it lives inside a control. */
+.dsmv-tag-edit {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  align-items: center;
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px dashed var(--dsw-alias-border-l2);
+}
+.dsmv-tag-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  font-size: var(--dsmv-fs-cap);
+  line-height: 1.6;
+  padding: 0 4px;
+  border-radius: 6px;
+  background: var(--dsw-alias-bg-layer-2);
+  border: 1px solid var(--dsw-alias-border-l2);
+  color: var(--dsw-alias-label-secondary);
+}
+.dsmv-tag-x {
+  border: 0;
+  background: transparent;
+  color: var(--dsw-alias-label-tertiary);
+  font: inherit;
+  line-height: 1;
+  padding: 0 2px;
+  cursor: pointer;
+  border-radius: 4px;
+}
+.dsmv-tag-x:hover { color: var(--dsw-alias-label-primary); background: var(--dsw-alias-bg-layer-3); }
+.dsmv-tag-input {
+  font: inherit;
+  font-size: var(--dsmv-fs-cap);
+  min-width: 96px;
+  flex: 1 1 96px;
+  background: transparent;
+  border: 0;
+  border-bottom: 1px dashed var(--dsw-alias-border-l2);
+  color: var(--dsw-alias-label-primary);
+  padding: 1px 2px;
+  outline: none;
+}
+.dsmv-tag-input:focus-visible { border-bottom-color: var(--dsw-alias-brand-primary); }
+/* The second level of the board: a sub-heading per label inside a group. */
+.dsmv-subsec { display: flex; flex-direction: column; gap: 6px; }
+.dsmv-subhead {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--dsmv-fs-small);
+  font-weight: 600;
+  color: var(--dsw-alias-label-secondary);
+  padding: 2px 0 0;
+  border-bottom: 1px solid var(--dsw-alias-border-l2);
+}
+.dsmv-subhead-count {
+  font-weight: 400;
+  font-size: var(--dsmv-fs-cap);
+  color: var(--dsw-alias-label-tertiary);
+}
+.dsmv-tag-toggle {
+  font: inherit;
+  font-size: var(--dsmv-fs-cap);
+  color: var(--dsw-alias-label-tertiary);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  padding: 0 4px;
+  cursor: pointer;
+}
+.dsmv-tag-toggle:hover { color: var(--dsw-alias-label-primary); border-color: var(--dsw-alias-border-l2); }
+.dsmv-tag-toggle--on { color: var(--dsw-alias-brand-primary); border-color: var(--dsw-alias-border-l2); }
 .dsmv-col { display: flex; flex-direction: column; gap: 10px; }
 .dsmv-bar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .dsmv-facets { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
@@ -586,7 +728,13 @@ window.__ModuleLoader__.load({
      * @returns {string} The system tag.
      */
     function autoTagOf(entry) {
-      return entry.autoTag ?? (entry.source === 'auto-summary' ? 'AI自动总结' : '人工输入')
+      // The Host sends `autoTag`; this is the fallback for an older Host half,
+      // and it has to agree with the store's own rule: anything a model wrote —
+      // a summary or an in-conversation write — is generated, not human input.
+      return entry.autoTag
+        ?? (entry.modelWritten === true || entry.source === 'auto-summary' || entry.source === 'model-summary' || entry.source === 'model-write'
+          ? 'AI 生成'
+          : '人工输入')
     }
 
     /**
@@ -596,7 +744,7 @@ window.__ModuleLoader__.load({
      */
     function tagsOf(entry) {
       const system = autoTagOf(entry)
-      return [system, ...entry.tags.filter(tag => !AUTO_TAGS.includes(tag))]
+      return [system, ...entry.tags.filter(tag => !AUTO_TAGS.includes(tag) && !RETIRED_AUTO_TAGS.includes(tag))]
     }
 
     /**
@@ -745,7 +893,8 @@ window.__ModuleLoader__.load({
      */
     function Tile({
       entry, terms, activeTags, onTag, onOpen, onScope, onHide, onRestore, onDelete,
-      selecting, selected, onSelect, canHide, t,
+      selecting, selected, onSelect, canHide, t, groupLabel,
+      tagEditing, onToggleTagEdit, onAddTag, onRemoveTag, tagDraft, onTagDraft,
     }) {
       const title = entry.title === '' ? plainPreview(entry.content, 60) : entry.title
       const classes = ['dsmv-tile']
@@ -755,7 +904,8 @@ window.__ModuleLoader__.load({
       const activate = () => { if (selecting === true) onSelect(entry.id); else onOpen(entry.id) }
       return h('div', {
         className: classes.join(' '),
-        draggable: selecting !== true,
+        // A tile being edited must not start a drag, or the caret never lands.
+        draggable: selecting !== true && tagEditing !== true,
         // A tile is a control, so it has to be reachable and operable without a
         // pointer: a role, a tab stop, and the keys a button answers to.
         role: 'button',
@@ -780,7 +930,54 @@ window.__ModuleLoader__.load({
         h('div', { className: 'dsmv-tile-title' }, highlighted(title, terms)),
         h('div', { className: 'dsmv-tile-body' }, highlighted(plainPreview(entry.content, 220), terms)),
         h(TagRow, { entry, activeTags, onTag, max: 4 }),
+        // In-place tag editing: no trip to the detail screen for a one-word
+        // change. Every event stays inside this block — the tile itself is a
+        // button, and a stray click would open the memory instead.
+        tagEditing === true
+          ? h('div', {
+              className: 'dsmv-tag-edit',
+              onClick: (event) => { event.stopPropagation() },
+              onKeyDown: (event) => { event.stopPropagation() },
+            },
+              ...entry.tags
+                .filter(tag => !AUTO_TAGS.includes(tag) && !RETIRED_AUTO_TAGS.includes(tag))
+                .map(tag => h('span', { key: tag, className: 'dsmv-tag-chip' },
+                  tag,
+                  h('button', {
+                    type: 'button',
+                    className: 'dsmv-tag-x',
+                    title: t('removeTag'),
+                    onClick: () => { onRemoveTag(entry, tag) },
+                  }, '×'),
+                )),
+              h('input', {
+                className: 'dsmv-tag-input',
+                value: tagDraft ?? '',
+                placeholder: t('addTagHint'),
+                'aria-label': t('addTagHint'),
+                onChange: (event) => { onTagDraft(entry.id, event.target.value) },
+                onKeyDown: (event) => {
+                  if (event.key === 'Enter') {
+                    event.preventDefault()
+                    onAddTag(entry, tagDraft)
+                  }
+                  if (event.key === 'Escape') onTagDraft(entry.id, '')
+                },
+              }),
+            )
+          : null,
         h('div', { className: 'dsmv-tile-foot' },
+          selecting === true
+            ? null
+            : h('button', {
+                type: 'button',
+                className: tagEditing === true ? 'dsmv-tag-toggle dsmv-tag-toggle--on' : 'dsmv-tag-toggle',
+                title: t('editTags'),
+                onClick: (event) => { event.stopPropagation(); onToggleTagEdit(entry.id) },
+              }, tagEditing === true ? t('editTagsDone') : t('editTags')),
+          // The section names the root group; a tile that came from a sub-group
+          // says which one, so merging the tree into few sections loses nothing.
+          groupLabel === undefined || groupLabel === '' ? null : h(Tag, null, groupLabel),
           entry.hidden === true ? h(Tag, { tone: 'warning' }, t('hidden')) : null,
           Number(entry.priority ?? 0) > 0
             ? h(Tag, { tone: 'info', title: t('priorityHint') }, `${t('priorityShort')}${String(entry.priority)}`)
@@ -878,6 +1075,12 @@ window.__ModuleLoader__.load({
       // The vault-wide curation pass: its verdicts, and whether one is running.
       const [cure, setCure] = React.useState(null)
       const [curating, setCurating] = React.useState(false)
+      // Which tile is editing its tags in place, and the draft being typed.
+      const [tagEditFor, setTagEditFor] = React.useState(null)
+      const [tagDraft, setTagDraft] = React.useState('')
+      // Which origin the pass judges. Generated by default: a memory a person
+      // deliberately typed in has already been curated by them.
+      const [scope, setScope] = React.useState('generated')
 
       /**
        * Ask the model to sort the vault into reusable knowledge and one-off
@@ -892,7 +1095,7 @@ window.__ModuleLoader__.load({
         setCurating(true)
         setError(null)
         try {
-          const result = await call('curate', undefined, { apply, limit: 20 })
+          const result = await call('curate', undefined, { apply, limit: 20, origin: scope })
           setCure(result)
           if (apply) await load()
         } catch (failure) {
@@ -1098,6 +1301,35 @@ window.__ModuleLoader__.load({
       }
 
       /**
+       * Commit one tag typed into a tile's in-place editor.
+       *
+       * The system tag is left to the Host: it re-derives it from the entry's
+       * source, so only the user's own tags are sent.
+       * @param {Record<string, any>} entry - Entry being edited.
+       * @param {string} draft - What was typed.
+       * @returns {void}
+       */
+      const commitTagDraft = (entry, draft) => {
+        const tag = String(draft ?? '').trim()
+        if (tag === '' || AUTO_TAGS.includes(tag) || RETIRED_AUTO_TAGS.includes(tag)) return
+        setTagDraft('')
+        const current = entry.tags.filter(item => !AUTO_TAGS.includes(item) && !RETIRED_AUTO_TAGS.includes(item))
+        if (current.some(item => item.toLowerCase() === tag.toLowerCase())) return
+        void mutate(() => call('entry.update', undefined, { id: entry.id, tags: [...current, tag] }), t('saved'))
+      }
+
+      /**
+       * Drop one user tag from a memory, in place.
+       * @param {Record<string, any>} entry - Entry being edited.
+       * @param {string} tag - Tag to remove.
+       * @returns {void}
+       */
+      const dropTag = (entry, tag) => {
+        const next = entry.tags.filter(item => item.toLowerCase() !== String(tag).toLowerCase())
+        void mutate(() => call('entry.update', undefined, { id: entry.id, tags: next }), t('saved'))
+      }
+
+      /**
        * Route one drop onto a facet: a scope facet reassigns, a tag facet labels.
        * @param {DragEvent} event - Drop event.
        * @param {Record<string, any>} target - Drop target description.
@@ -1155,26 +1387,83 @@ window.__ModuleLoader__.load({
 
       /**
        * Group the visible tiles for display.
+       *
+       * The board has one top-level dimension and it is the group: a section is
+       * a **root** group and swallows its whole subtree, so a dozen groups read
+       * as a few headings instead of a wall of peers. Tags are not a competing
+       * top-level view — they subdivide a group from the inside (see
+       * `subSectionsFor`), which is the hierarchy this board is meant to show.
        * @param {Record<string, any>[]} rows - Tiles of the board.
        * @returns {{ key: string, label: string, rows: Record<string, any>[] }[]} Sections in display order.
        */
       const sectionsFor = (rows) => {
-        if (groupBy === 'none') return [{ key: 'all', label: t('entries'), rows }]
-        /** @type {Map<string, Record<string, any>[]>} */
-        const buckets = new Map()
-        for (const row of rows) {
-          const keys = groupBy === 'tag' ? tagsOf(row) : [row.groupName ?? row.groupId]
-          for (const key of keys) {
+        // Hidden memories are quarantined into a section of their own rather
+        // than interleaved with live ones: with 显示隐藏 on, the point of the
+        // toggle is to find them, not to lose them among everything else.
+        const hidden = rows.filter(row => row.hidden === true)
+        const live = rows.filter(row => row.hidden !== true)
+        /** @type {{ key: string, label: string, rows: Record<string, any>[] }[]} */
+        const sections = []
+        if (groupBy === 'none') {
+          if (live.length > 0) sections.push({ key: 'all', label: t('entries'), rows: live })
+        } else {
+          /** @type {Map<string, Record<string, any>[]>} */
+          const buckets = new Map()
+          for (const row of live) {
+            const key = rootNameOf(row)
             if (!buckets.has(key)) buckets.set(key, [])
             buckets.get(key).push(row)
           }
+          for (const key of [...buckets.keys()].sort((left, right) => (left < right ? -1 : 1))) {
+            sections.push({ key, label: key, rows: buckets.get(key) })
+          }
         }
-        const rank = new Map(allTags.map((item, index) => [item.tag, index]))
-        const order = groupBy === 'tag'
-          ? [...buckets.keys()].sort((left, right) =>
-              (rank.get(left) ?? Number.MAX_SAFE_INTEGER) - (rank.get(right) ?? Number.MAX_SAFE_INTEGER))
-          : [...buckets.keys()].sort((left, right) => (left < right ? -1 : 1))
-        return order.map(key => ({ key, label: key, rows: buckets.get(key) }))
+        if (hidden.length > 0) sections.push({ key: '__hidden__', label: t('hidden'), rows: hidden })
+        return sections
+      }
+
+      /**
+       * Split one group's tiles by the label they carry themselves.
+       *
+       * A tile lands in the bucket of its **first** user tag, so it appears
+       * exactly once; its other tags stay visible on the tile. Anything with no
+       * user tag collects under 未分类.
+       * @param {Record<string, any>[]} rows - Tiles of one section.
+       * @returns {{ key: string, label: string, rows: Record<string, any>[] }[]} Sub-sections, biggest first.
+       */
+      const subSectionsFor = (rows) => {
+        /** @type {Map<string, Record<string, any>[]>} */
+        const buckets = new Map()
+        for (const row of rows) {
+          const own = tagsOf(row).filter(tag => !AUTO_TAGS.includes(tag) && !RETIRED_AUTO_TAGS.includes(tag))
+          const key = own.length === 0 ? t('untagged') : String(own[0])
+          if (!buckets.has(key)) buckets.set(key, [])
+          buckets.get(key).push(row)
+        }
+        const untagged = t('untagged')
+        return [...buckets.entries()]
+          .sort(([leftKey, leftRows], [rightKey, rightRows]) => {
+            // 未分类 last, then by size, then by name: the biggest label in a
+            // group is the one worth reading first.
+            if ((leftKey === untagged) !== (rightKey === untagged)) return leftKey === untagged ? 1 : -1
+            return rightRows.length - leftRows.length || (leftKey < rightKey ? -1 : 1)
+          })
+          .map(([key, bucket]) => ({ key, label: key, rows: bucket }))
+      }
+
+      /**
+       * The top-level group a tile belongs to: a sub-group files under its root.
+       * @param {Record<string, any>} row - Entry tile.
+       * @returns {string} Root group name, or the entry's own group at the top level.
+       */
+      const rootNameOf = (row) => {
+        const group = groups.find(item => item.id === row.groupId)
+        if (group === undefined) return row.groupName ?? row.groupId
+        // `path` only exists once the Host half that knows about sub-groups is
+        // running, and this half reloads without a restart — so an older Host
+        // must simply read as a flat list rather than crash the board.
+        const path = Array.isArray(group.path) ? group.path : []
+        return path.length > 0 ? path[0] : group.name
       }
 
       const sections = sectionsFor(visible)
@@ -1236,11 +1525,25 @@ window.__ModuleLoader__.load({
               disabled: busy,
               onClick: () => { void load() },
             }, t('refresh')),
+            h('span', { className: 'dsmv-cap' }, `${t('curateScope')}：`),
+            ...CURATE_SCOPES.map(item => h(Pill, {
+              key: item[0],
+              active: scope === item[0],
+              title: t('curateScopeHint'),
+              onClick: () => { setScope(item[0]) },
+            }, t(item[1]))),
+            // One press files the verdicts; 预览 is the careful path, not the
+            // only path.
             h(Button, {
               disabled: busy || curating,
-              title: t('curateHint'),
+              title: t('curateScopeHint'),
+              onClick: () => { void runCurate(true) },
+            }, curating ? t('curateBusy') : t('curateNow')),
+            h(Button, {
+              variant: 'ghost',
+              disabled: busy || curating,
               onClick: () => { void runCurate(false) },
-            }, curating ? t('curateBusy') : t('curateReview')),
+            }, t('curateReview')),
             h(Button, {
               icon: h(IconChecklistOutlineMedium, null),
               variant: selecting ? 'outline' : 'ghost',
@@ -1272,11 +1575,35 @@ window.__ModuleLoader__.load({
                   ...cureItems.map(item => h('div', { key: item.id, className: 'dsmv-row' },
                     h(Tag, { tone: item.verdict === 'reusable' ? 'success' : 'quiet' },
                       item.verdict === 'reusable' ? t('curateReusable') : t('curateOneoff')),
+                    // Which side of the origin line this one sits on.
+                    h(Tag, { tone: item.modelWritten === true || item.origin === 'AI 生成' ? 'info' : 'quiet' },
+                      item.origin ?? (item.modelWritten === true ? t('originGenerated') : t('originManual'))),
                     h('span', { className: 'dsmv-cap' }, item.reason),
                     item.verdict !== 'reusable' || item.group === '' || item.group === undefined
                       ? null
                       : h(Tag, null, String(item.group)),
                   )),
+                ),
+            // Labels are curated alongside the memories, so the merges the
+            // answer asked for are shown here with what each one actually
+            // touched — a merge that matched nothing is worth seeing too.
+            (cure.tagMap ?? []).length === 0
+              ? null
+              : h('div', { className: 'dsmv-col' },
+                  h('div', { className: 'dsmv-cap' }, t('curateTags')),
+                  ...(cure.tagMap ?? []).map((change) => {
+                    const done = (cure.tagChanges ?? []).find(entry => entry.from === change.from)
+                    return h('div', { key: change.from, className: 'dsmv-row' },
+                      h(Tag, { tone: 'quiet' }, String(change.from)),
+                      h('span', { className: 'dsmv-cap' }, '→'),
+                      h(Tag, change.to === '' ? { tone: 'warning' } : { tone: 'info' },
+                        change.to === '' ? t('tagDropped') : String(change.to)),
+                      h('span', { className: 'dsmv-cap' },
+                        done === undefined
+                          ? String(change.reason)
+                          : `${String(done.updated)} ${t('entries')}`),
+                    )
+                  }),
                 ),
           ),
 
@@ -1316,8 +1643,8 @@ window.__ModuleLoader__.load({
             }),
             h('span', { className: 'dsmv-cap' }, t('groupBy')),
             h(Pill, { active: groupBy === 'group', onClick: () => { setGroupBy('group') } }, t('groupByGroup')),
-            h(Pill, { active: groupBy === 'tag', onClick: () => { setGroupBy('tag') } }, t('groupByTag')),
             h(Pill, { active: groupBy === 'none', onClick: () => { setGroupBy('none') } }, t('groupByNone')),
+            h('span', { className: 'dsmv-cap' }, t('tagSplitHint')),
           ),
 
           h('details', { className: 'dsmv-sec' },
@@ -1385,8 +1712,24 @@ window.__ModuleLoader__.load({
                     }
                   },
                 }, t('remove')),
+                // Moving an existing group is what turns a flat list into a
+                // tree without deleting and recreating anything.
+                h('select', {
+                  className: 'dsmv-select dsmv-select--sm',
+                  value: group.parentId ?? '',
+                  title: t('parentHint'),
+                  onChange: (event) => {
+                    void mutate(() => call('group.update', undefined, { id: group.id, parent: event.target.value }))
+                  },
+                },
+                  h('option', { value: '' }, t('parentTop')),
+                  ...groups
+                    .filter(candidate => candidate.id !== group.id && Number(candidate.depth ?? 1) < 3)
+                    .map(candidate => h('option', { key: candidate.id, value: candidate.id },
+                      `${'　'.repeat(Math.max(0, Number(candidate.depth ?? 1) - 1))}${candidate.name}`)),
+                ),
               )),
-              h(GroupCreator, { t, busy, mutate }),
+              h(GroupCreator, { t, busy, mutate, groups }),
             ),
           ),
 
@@ -1395,32 +1738,58 @@ window.__ModuleLoader__.load({
 
           sections.length === 0 || visible.length === 0
             ? h('div', { className: 'dsmv-empty' }, entries.length === 0 ? t('boardEmpty') : t('emptyFiltered'))
-            : sections.map(section => h(Section, {
-                key: section.key,
-                label: section.label,
-                count: section.rows.length,
-                unit: t('entries'),
-                open: groupBy !== 'group' || sections.length <= 3,
-              }, h('div', { className: 'dsmv-board' }, section.rows.map(entry => h(Tile, {
-                key: entry.id,
-                entry,
-                terms,
-                activeTags,
-                t,
-                selecting,
-                selected: selected.includes(entry.id),
-                canHide,
-                onSelect: toggleSelected,
-                onTag: toggleTag,
-                onScope: (target, scope) => { void assign([target.id], scope) },
-                onHide: (id) => { void setHidden([id], true) },
-                onRestore: (id) => { void setHidden([id], false) },
-                onDelete: (target) => {
-                  if (!window.confirm(t('removeEntryConfirm'))) return
-                  void mutate(() => call('entry.delete', undefined, { id: target.id }))
-                },
-                onOpen: (id) => { setNotice(null); setView({ kind: 'detail', id }) },
-              }))))),
+            : sections.map((section) => {
+                // Within a group, the tiles are split by the label they carry:
+                // the group is the heading, its tags are the sub-headings.
+                const parts = groupBy === 'group'
+                  ? subSectionsFor(section.rows)
+                  : [{ key: section.key, label: section.label, rows: section.rows }]
+                const showSubHeads = groupBy === 'group' && parts.length > 1
+                return h(Section, {
+                  key: section.key,
+                  label: section.label,
+                  count: section.rows.length,
+                  unit: t('entries'),
+                  // Sections are roots now, so there are few of them and hiding
+                  // the content by default would only add a second click.
+                  open: groupBy !== 'group' || sections.length <= 6,
+                }, ...parts.map(part => h('div', { key: part.key, className: 'dsmv-subsec' },
+                  showSubHeads
+                    ? h('div', { className: 'dsmv-subhead' },
+                        h('span', null, part.label),
+                        h('span', { className: 'dsmv-subhead-count' }, String(part.rows.length)),
+                      )
+                    : null,
+                  h('div', { className: 'dsmv-board' }, part.rows.map(entry => h(Tile, {
+                    key: entry.id,
+                    entry,
+                    terms,
+                    activeTags,
+                    t,
+                    selecting,
+                    selected: selected.includes(entry.id),
+                    canHide,
+                    // Only worth showing when the section is a parent heading.
+                    groupLabel: groupBy === 'group' && entry.groupName !== section.key ? entry.groupName : undefined,
+                    tagEditing: tagEditFor === entry.id,
+                    onToggleTagEdit: (id) => { setTagEditFor(current => (current === id ? null : id)); setTagDraft('') },
+                    onAddTag: commitTagDraft,
+                    onRemoveTag: dropTag,
+                    tagDraft: tagEditFor === entry.id ? tagDraft : '',
+                    onTagDraft: (id, value) => { setTagEditFor(id); setTagDraft(value) },
+                    onSelect: toggleSelected,
+                    onTag: toggleTag,
+                    onScope: (target, scope) => { void assign([target.id], scope) },
+                    onHide: (id) => { void setHidden([id], true) },
+                    onRestore: (id) => { void setHidden([id], false) },
+                    onDelete: (target) => {
+                      if (!window.confirm(t('removeEntryConfirm'))) return
+                      void mutate(() => call('entry.delete', undefined, { id: target.id }))
+                    },
+                    onOpen: (id) => { setNotice(null); setView({ kind: 'detail', id }) },
+                  }))),
+                )))
+              }),
 
           hasMore
             ? h('div', { className: 'dsmv-row' },
@@ -1501,15 +1870,19 @@ window.__ModuleLoader__.load({
      * @param {Record<string, any>} props - Creator props.
      * @returns {unknown} React element.
      */
-    function GroupCreator({ t, busy, mutate }) {
+    function GroupCreator({ t, busy, mutate, groups = [] }) {
       const [open, setOpen] = React.useState(false)
       const [name, setName] = React.useState('')
       const [scope, setScope] = React.useState('conversation')
+      const [parent, setParent] = React.useState('')
       if (!open) {
         return h('div', { className: 'dsmv-row' },
           h(Button, { size: 'sm', icon: h(IconPlusOutlineMedium, null), onClick: () => { setOpen(true) } }, t('newGroup')),
         )
       }
+      // Only groups that can still take a child: the depth ceiling is what keeps
+      // the tree readable, which is the point of having one.
+      const candidates = groups.filter(group => Number(group.depth ?? 1) < 3)
       return h('div', { className: 'dsmv-row' },
         h('div', { style: { width: '180px' } },
           h(Input, {
@@ -1520,16 +1893,30 @@ window.__ModuleLoader__.load({
         ),
         h(Pill, { active: scope === 'conversation', onClick: () => { setScope('conversation') } }, t('conversation')),
         h(Pill, { active: scope === 'knowledge', onClick: () => { setScope('knowledge') } }, t('knowledge')),
+        h('span', { className: 'dsmv-cap' }, t('parentLabel')),
+        h('select', {
+          className: 'dsmv-select',
+          value: parent,
+          title: t('parentHint'),
+          onChange: (event) => { setParent(event.target.value) },
+        },
+          h('option', { value: '' }, t('parentTop')),
+          ...candidates.map(group => h('option', { key: group.id, value: group.id },
+            `${'　'.repeat(Math.max(0, Number(group.depth ?? 1) - 1))}${group.name}`)),
+        ),
         h(Button, {
           variant: 'primary',
           size: 'sm',
           disabled: busy || name.trim() === '',
           onClick: () => {
-            void mutate(() => call('group.create', undefined, { name: name.trim(), scope }))
-              .then((ok) => { if (ok) { setName(''); setOpen(false) } })
+            void mutate(() => call('group.create', undefined, {
+              name: name.trim(),
+              scope,
+              ...(parent === '' ? {} : { parent }),
+            })).then((ok) => { if (ok) { setName(''); setParent(''); setOpen(false) } })
           },
         }, t('create')),
-        h(Button, { size: 'sm', onClick: () => { setOpen(false); setName('') } }, t('cancel')),
+        h(Button, { size: 'sm', onClick: () => { setOpen(false); setName(''); setParent('') } }, t('cancel')),
       )
     }
 
@@ -1552,10 +1939,24 @@ window.__ModuleLoader__.load({
       const [tags, setTags] = React.useState([])
       const [scope, setScope] = React.useState('conversation')
       const [groupRef, setGroupRef] = React.useState('')
+      const [images, setImages] = React.useState(creating ? [] : null)
+      const [imageError, setImageError] = React.useState(null)
+      const picker = React.useRef(null)
+      const [previewImage, setPreviewImage] = React.useState(null)
+      const previewDialog = React.useRef(null)
+      React.useEffect(() => { if (previewImage && previewDialog.current && !previewDialog.current.open) previewDialog.current.showModal() }, [previewImage])
 
       // The row can be replaced by a poll between renders; re-seed the editor
       // only when the identity or the stored revision changes.
       const revision = entry === undefined ? `new:${String(view.kind)}` : `${entry.id}:${String(entry.updatedAt)}`
+      React.useEffect(() => {
+        let active = true
+        setImageError(null)
+        if (!entry?.id) { setImages([]); return }
+        setImages(null)
+        void call('image.list', { entryId: entry.id }).then(result => Promise.all(result.images.map(async image => (await call('image.read', { id: image.id })).image))).then(result => { if (active) setImages(result) }).catch(error => { if (active) setImageError(error.message) })
+        return () => { active = false }
+      }, [revision])
       const [seeded, setSeeded] = React.useState(null)
       if (seeded !== revision) {
         setSeeded(revision)
@@ -1570,7 +1971,24 @@ window.__ModuleLoader__.load({
       }
 
       const back = () => { setView({ kind: 'list' }) }
+      const importImages = async files => {
+        try {
+          if (!images) throw new Error('请等待图片加载完成')
+          if (images.length + files.length > 16) throw new Error('每条记忆最多 16 张图片')
+          const added = []
+          for (const file of files) {
+            if (!['image/png', 'image/jpeg', 'image/webp', 'image/gif'].includes(file.type) || file.size > 10 * 1048576) throw new Error('支持 PNG、JPEG、WebP、GIF，每张最多 10 MB')
+            const dataUrl = await new Promise((resolve, reject) => { const reader = new FileReader(); reader.onload = () => resolve(reader.result); reader.onerror = () => reject(new Error('图片读取失败')); reader.readAsDataURL(file) })
+            const decoded = new Image(); decoded.src = dataUrl
+            await decoded.decode()
+            added.push({ name: file.name || '粘贴的图片.png', mimeType: file.type, size: file.size, width: decoded.naturalWidth, height: decoded.naturalHeight, data: dataUrl.slice(dataUrl.indexOf(',') + 1) })
+          }
+          if ([...images, ...added].reduce((total, image) => total + image.size, 0) > 20 * 1048576) throw new Error('每条记忆的图片总大小不能超过 20 MB')
+          setImages(current => [...current, ...added]); setImageError(null)
+        } catch (error) { setImageError(error.message) }
+      }
       const commit = async () => {
+        if (!images) return
         // The system tag rides along so an older Host half — one that has not
         // been restarted since system tags were introduced — stores it too
         // instead of dropping a tag it does not yet manage itself.
@@ -1582,6 +2000,7 @@ window.__ModuleLoader__.load({
               kind,
               tags: [...tags, '人工输入'],
               scope,
+              images: images.map(image => image.id ? { id: image.id } : { name: image.name, data: image.data, mimeType: image.mimeType }),
             }), t('created'))
           : await mutate(() => call('entry.update', undefined, {
               id: entry.id,
@@ -1589,6 +2008,7 @@ window.__ModuleLoader__.load({
               content,
               kind,
               tags: [...tags, autoTagOf(entry)],
+              images: images.map(image => image.id ? { id: image.id } : { name: image.name, data: image.data, mimeType: image.mimeType }),
             }), t('saved'))
         if (ok) setEditing(false)
       }
@@ -1610,7 +2030,7 @@ window.__ModuleLoader__.load({
             `${t('title')} / ${creating ? t('newEntry') : (entry.groupName ?? entry.groupId)} / ${headerTitle}`),
           h('span', { className: 'dsmv-spacer' }),
           creating || editing
-            ? h(Button, { variant: 'primary', disabled: busy || content.trim() === '', onClick: () => { void commit() } }, t('save'))
+            ? h(Button, { variant: 'primary', disabled: busy || !images || (content.trim() === '' && !images.length), onClick: () => { void commit() } }, t('save'))
             : h(Button, { onClick: () => { setEditing(true) } }, t('edit')),
           creating || editing
             ? h(Button, { onClick: () => { if (creating) back(); else setEditing(false) } }, t('cancel'))
@@ -1722,6 +2142,7 @@ window.__ModuleLoader__.load({
                   value: content,
                   placeholder: t('content'),
                   onChange: (event) => { setContent(event.target.value) },
+                  onPaste: event => { const files = [...(event.clipboardData?.files ?? [])].filter(file => file.type.startsWith('image/')); if (files.length) { event.preventDefault(); void importImages(files) } },
                   style: {
                     width: '100%', minHeight: '220px', resize: 'vertical', font: 'inherit', fontSize: '13px',
                     lineHeight: '22px', padding: '10px 12px', color: 'inherit', borderRadius: 'var(--dsw-radius-md)',
@@ -1738,6 +2159,18 @@ window.__ModuleLoader__.load({
                   }, entry.content)
                 : h(MarkdownText, { text: entry.content, labels: markdownLabels }),
           ),
+          h('div', { className: 'dsmv-col', style: { marginTop: '18px', gap: '10px' }, onDragOver: event => event.preventDefault(), onDrop: event => { event.preventDefault(); if (creating || editing) void importImages([...event.dataTransfer.files]) } },
+            h('div', { className: 'dsmv-row' }, h('strong', null, `图片${images ? ` · ${images.length}` : ''}`), h('span', { className: 'dsmv-spacer' }),
+              creating || editing ? h(Button, { disabled: !images || busy, onClick: () => picker.current?.click() }, '添加图片') : null),
+            h('input', { ref: picker, type: 'file', multiple: true, accept: 'image/png,image/jpeg,image/webp,image/gif', style: { display: 'none' }, onChange: event => { const files = [...event.target.files]; event.target.value = ''; void importImages(files) } }),
+            imageError ? h('div', { className: 'dsmv-error' }, imageError) : null,
+            images === null ? h('span', { className: 'dsmv-cap' }, '正在加载图片…') : h('div', { style: { display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(160px,1fr))', gap: '12px' } }, images.map((image, index) => h('div', { key: image.id ?? `${index}:${image.name}`, style: { minWidth: 0 } },
+              h('button', { type: 'button', onClick: () => setPreviewImage(image), title: image.name, style: { display: 'block', width: '100%', border: 0, padding: 0, background: 'transparent', cursor: 'pointer' } }, h('img', { src: `data:${image.mimeType};base64,${image.data}`, alt: image.name, style: { width: '100%', height: '130px', objectFit: 'contain', background: 'var(--dsw-alias-bg-base)', borderRadius: '8px' } })),
+              h('div', { className: 'dsmv-row' }, h('span', { className: 'dsmv-cap', style: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 } }, image.name), creating || editing ? h(Button, { size: 'sm', onClick: () => setImages(current => current.filter((_image, at) => at !== index)) }, '移除') : null)))),
+            creating || editing ? h('span', { className: 'dsmv-cap' }, '可拖入图片或粘贴截图，保存记忆后保留。') : null),
+          previewImage ? h('dialog', { ref: previewDialog, onClose: () => setPreviewImage(null), style: { maxWidth: '92vw', maxHeight: '92vh', border: 'none', borderRadius: '12px', padding: '16px', background: 'var(--dsw-alias-bg-base)', color: 'inherit' } },
+            h('div', { className: 'dsmv-row', style: { marginBottom: '12px' } }, previewImage.name, h('span', { className: 'dsmv-spacer' }), h(Button, { onClick: () => previewDialog.current.close() }, '关闭')),
+            h('img', { src: `data:${previewImage.mimeType};base64,${previewImage.data}`, alt: previewImage.name, style: { display: 'block', maxWidth: '85vw', maxHeight: '75vh', objectFit: 'contain' } })) : null,
         ),
 
         creating ? null : h('div', { className: 'dsmv-card' },

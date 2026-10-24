@@ -124,8 +124,83 @@ export function withDeadline(signal, timeoutMs) {
   }
 }
 
+/** Terminal-message wording per call purpose, kept so both surfaces stay verbatim-compatible. */
+const CALL_FAILURE_TEXT = {
+  summarize: {
+    aborted: 'summarization was cancelled or timed out',
+    empty: 'the model produced an empty memory record',
+  },
+  curate: {
+    aborted: '整理被取消或超时',
+    empty: '模型没有返回整理结果',
+  },
+}
+
+/**
+ * Drive one out-of-band model call against an `llm` service object.
+ *
+ * The whole DSH-specific half of a model call reduces to "hand me a service
+ * with a `stream` method": everything else — deadline handling, stream
+ * draining, terminal-reason classification — lives here, host-free, so the
+ * core (`src/core/vault.js`) can take the same call through any adapter: the
+ * DSH plugin's `ctx.get('llm')`, or a future non-DSH route.
+ *
+ * @param {{ stream: (options: Record<string, unknown>) => AsyncIterable<{ type: string, text?: string, usage?: unknown, reason?: { kind: string, failure?: { code?: string, message?: string } } }> }} llm - Model service.
+ * @param {object} call - Call description.
+ * @param {'summarize'|'curate'} call.purpose - Which vault call this is; selects the failure wording.
+ * @param {{ provider: string, model: string }} call.route - Provider and model to call.
+ * @param {string} call.system - System prompt.
+ * @param {{ role: string, content: unknown }[]} call.messages - Turn messages.
+ * @param {number} call.maxTokens - Output cap.
+ * @param {number} call.timeoutMs - Deadline in milliseconds.
+ * @param {AbortSignal} [call.signal] - Caller cancellation.
+ * @param {string|null} [call.sessionId] - Session the call is attributed to.
+ * @returns {Promise<{ text: string, usage: unknown, provider: string, model: string }>} The completed answer.
+ * @throws {Error} When the call fails, is cancelled, times out, or answers nothing.
+ */
+export async function callLlmStream(llm, call) {
+  const wording = CALL_FAILURE_TEXT[call.purpose] ?? CALL_FAILURE_TEXT.summarize
+  const deadline = withDeadline(call.signal, call.timeoutMs)
+  try {
+    /** @type {Record<string, unknown>} */
+    const options = {
+      provider: call.route.provider,
+      model: call.route.model,
+      // A one-shot caller owns the system slot; the agent-loop rule that keeps
+      // it undefined applies only to loop-built requests.
+      system: call.system,
+      messages: call.messages,
+      maxTokens: call.maxTokens,
+      signal: deadline.signal,
+      ...(call.sessionId === undefined || call.sessionId === null ? {} : { sessionId: call.sessionId }),
+    }
+    let text = ''
+    let usage
+    /** @type {{ kind: string, failure?: { code?: string, message?: string } }|undefined} */
+    let finish
+    for await (const chunk of llm.stream(options)) {
+      if (chunk.type === 'text-delta') text += chunk.text
+      else if (chunk.type === 'usage') usage = chunk.usage
+      else if (chunk.type === 'finish') finish = chunk.reason
+    }
+    if (deadline.signal.aborted) throw new Error(wording.aborted)
+    const failure = finishError(finish)
+    if (failure !== undefined) throw failure
+    const answer = text.trim()
+    if (answer === '') throw new Error(wording.empty)
+    return { text: answer, usage, provider: options.provider, model: options.model }
+  } finally {
+    deadline.dispose()
+  }
+}
+
 /**
  * Summarize one transcript slice with the session's routed model.
+ *
+ * Compatibility wrapper over {@link callLlmStream} for callers that hold a
+ * plugin context rather than an `llm` service; the vault core now goes through
+ * its own `callModel` adapter instead.
+ *
  * @param {object} ctx - Plugin context carrying the optional `llm` service.
  * @param {object} request - Call request.
  * @param {{ provider: string, model: string }} request.route - Provider and model to call.
@@ -145,49 +220,27 @@ export async function summarizeWithModel(ctx, request) {
   if (llm === undefined || llm === null || typeof llm.stream !== 'function') {
     throw new Error('no llm service is available for out-of-band summarization')
   }
-  const deadline = withDeadline(request.signal, request.timeoutMs)
-  try {
-    /** @type {Record<string, unknown>} */
-    const options = {
-      provider: request.route.provider,
-      model: request.route.model,
-      // A one-shot caller owns the system slot; the agent-loop rule that keeps
-      // it undefined applies only to loop-built requests.
-      system: SUMMARY_SYSTEM_PROMPT,
-      messages: [{
-        role: 'user',
-        content: [{
-          type: 'text',
-          text: buildSummaryRequest({
-            groupName: request.groupName,
-            scope: request.scope,
-            messages: request.messages,
-            instructions: request.instructions,
-          }),
-        }],
+  return callLlmStream(llm, {
+    purpose: 'summarize',
+    route: request.route,
+    system: SUMMARY_SYSTEM_PROMPT,
+    messages: [{
+      role: 'user',
+      content: [{
+        type: 'text',
+        text: buildSummaryRequest({
+          groupName: request.groupName,
+          scope: request.scope,
+          messages: request.messages,
+          instructions: request.instructions,
+        }),
       }],
-      maxTokens: request.maxTokens,
-      signal: deadline.signal,
-      ...(request.sessionId === undefined || request.sessionId === null ? {} : { sessionId: request.sessionId }),
-    }
-    let text = ''
-    let usage
-    /** @type {{ kind: string, failure?: { code?: string, message?: string } }|undefined} */
-    let finish
-    for await (const chunk of llm.stream(options)) {
-      if (chunk.type === 'text-delta') text += chunk.text
-      else if (chunk.type === 'usage') usage = chunk.usage
-      else if (chunk.type === 'finish') finish = chunk.reason
-    }
-    if (deadline.signal.aborted) throw new Error('summarization was cancelled or timed out')
-    const failure = finishError(finish)
-    if (failure !== undefined) throw failure
-    const record = text.trim()
-    if (record === '') throw new Error('the model produced an empty memory record')
-    return { text: record, usage, provider: options.provider, model: options.model }
-  } finally {
-    deadline.dispose()
-  }
+    }],
+    maxTokens: request.maxTokens,
+    timeoutMs: request.timeoutMs,
+    signal: request.signal,
+    sessionId: request.sessionId,
+  })
 }
 
 /**

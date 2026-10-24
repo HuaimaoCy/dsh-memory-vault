@@ -1,0 +1,79 @@
+{
+  "subjectID": "geography",
+  "name": "地理",
+  "attributesVersion": "geography-attrs-1.0.0",
+  "standard": {
+    "credits": { "required": 4, "selective": 6, "elective": 4 },
+    "classHours": { "required": 72, "selective": 108 },
+    "competencies": ["人地协调观", "综合思维", "区域认知", "地理实践力"],
+    "qualityLevels": 4,
+    "qualityLevelPass": 2,
+    "qualityLevelGaokao": 4,
+    "notes": [
+      "必修：地理1(2学分) / 地理2(2学分)；选必：自然地理基础 / 区域发展 / 资源、环境与国家安全",
+      "水平2=合格要求；水平4=等级性考试要求；水平1/3=阶段性评价"
+    ]
+  },
+  "attributes": {
+    "geography/earth-map": {
+      "courseType": "必修", "theme": "地理1·地球与地图基础", "hours": null, "hoursBasis": null,
+      "cognitiveLevel": 2, "competencies": ["地理实践力", "区域认知"], "qualityMax": 4, "examScope": "高考",
+      "examWeightPrior": 0.08, "prerequisites": [],
+      "citation": "课标 四·(一)必修 地理1"
+    },
+    "geography/earth-motion": {
+      "courseType": "必修+选择性必修", "theme": "地理1 / 自然地理基础·宇宙中的地球与地球运动", "hours": null, "hoursBasis": null,
+      "cognitiveLevel": 3, "competencies": ["综合思维"], "qualityMax": 4, "examScope": "高考",
+      "examWeightPrior": 0.10, "prerequisites": ["geography/earth-map"],
+      "citation": "课标 四·(一)地理1 / 四·(二)选必 自然地理基础"
+    },
+    "geography/atmosphere": {
+      "courseType": "必修+选择性必修", "theme": "地理1 / 自然地理基础·大气与气候", "hours": null, "hoursBasis": null,
+      "cognitiveLevel": 3, "competencies": ["综合思维", "区域认知"], "qualityMax": 4, "examScope": "高考",
+      "examWeightPrior": 0.14, "prerequisites": ["geography/earth-map"],
+      "citation": "课标 四·(一)地理1 / 四·(二)选必 自然地理基础"
+    },
+    "geography/water": {
+      "courseType": "必修+选择性必修", "theme": "地理1 / 自然地理基础·水循环与海洋", "hours": null, "hoursBasis": null,
+      "cognitiveLevel": 3, "competencies": ["综合思维"], "qualityMax": 4, "examScope": "高考",
+      "examWeightPrior": 0.12, "prerequisites": ["geography/atmosphere"],
+      "citation": "课标 四·(一)地理1 / 四·(二)选必 自然地理基础"
+    },
+    "geography/landform": {
+      "courseType": "必修", "theme": "地理1·地貌与植被土壤", "hours": null, "hoursBasis": null,
+      "cognitiveLevel": 2, "competencies": ["综合思维", "区域认知"], "qualityMax": 4, "examScope": "高考",
+      "examWeightPrior": 0.12, "prerequisites": ["geography/earth-map"],
+      "citation": "课标 四·(一)地理1"
+    },
+    "geography/disasters": {
+      "courseType": "必修", "theme": "地理1·自然灾害", "hours": null, "hoursBasis": null,
+      "cognitiveLevel": 2, "competencies": ["人地协调观", "地理实践力"], "qualityMax": 4, "examScope": "高考",
+      "examWeightPrior": 0.06, "prerequisites": ["geography/atmosphere", "geography/water", "geography/landform"],
+      "citation": "课标 四·(一)地理1"
+    },
+    "geography/population-urban": {
+      "courseType": "必修", "theme": "地理2·人口与城镇", "hours": null, "hoursBasis": null,
+      "cognitiveLevel": 2, "competencies": ["区域认知", "人地协调观"], "qualityMax": 4, "examScope": "高考",
+      "examWeightPrior": 0.10, "prerequisites": [],
+      "citation": "课标 四·(一)必修 地理2"
+    },
+    "geography/industry": {
+      "courseType": "必修+选择性必修", "theme": "地理2 / 区域发展·产业区位与交通", "hours": null, "hoursBasis": null,
+      "cognitiveLevel": 3, "competencies": ["综合思维", "区域认知"], "qualityMax": 4, "examScope": "高考",
+      "examWeightPrior": 0.12, "prerequisites": ["geography/population-urban"],
+      "citation": "课标 四·(一)地理2 / 四·(二)选必 区域发展"
+    },
+    "geography/sustainable": {
+      "courseType": "必修+选择性必修", "theme": "地理2 / 资源环境与国家安全·环境与发展", "hours": null, "hoursBasis": null,
+      "cognitiveLevel": 2, "competencies": ["人地协调观"], "qualityMax": 4, "examScope": "高考",
+      "examWeightPrior": 0.06, "prerequisites": ["geography/industry"],
+      "citation": "课标 四·(一)地理2 / 四·(二)选必 资源、环境与国家安全"
+    },
+    "geography/regional": {
+      "courseType": "选择性必修", "theme": "区域发展 / 资源、环境与国家安全", "hours": null, "hoursBasis": null,
+      "cognitiveLevel": 3, "competencies": ["区域认知", "综合思维", "人地协调观"], "qualityMax": 4, "examScope": "高考",
+      "examWeightPrior": 0.10, "prerequisites": ["geography/population-urban", "geography/industry"],
+      "citation": "课标 四·(二)选必 区域发展 / 资源、环境与国家安全"
+    }
+  }
+}

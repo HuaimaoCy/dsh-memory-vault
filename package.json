@@ -1,18 +1,31 @@
 {
   "name": "dsh-memory-vault",
-  "version": "0.2.1",
-  "description": "Knowledge and memory vault for DSH: memory groups with automatic summarization, free assignment between conversation memory and the knowledge base, priorities, a base-prompt layer, and AI curation.",
+  "version": "0.7.22",
+  "description": "Independent knowledge and memory vault with a desktop app, Codex MCP, a DSH plugin, CLI and local RPC sharing one SQLite database.",
   "type": "module",
   "main": "index.js",
   "exports": {
     ".": "./index.js",
     "./client": "./client.js",
+    "./core": "./src/core/vault.js",
+    "./core/ops": "./src/core/ops.js",
+    "./mcp": "./src/mcp.js",
     "./package.json": "./package.json"
+  },
+  "bin": {
+    "memory-vault": "bin/memory-vault.mjs"
   },
   "files": [
     "index.js",
     "client.js",
+    "bin",
     "src",
+    "docs",
+    "skills",
+    ".zcode-plugin",
+    ".codex-plugin",
+    ".mcp.json",
+    "marketplace.json",
     "cordis.patch.yml",
     "README.md",
     "README.zh.md"
@@ -32,10 +45,26 @@
   "peerDependencies": {
     "@deepseek-ai/cordis": "*"
   },
+  "peerDependenciesMeta": {
+    "@deepseek-ai/cordis": {
+      "optional": true
+    }
+  },
   "engines": {
     "node": ">=22.5.0"
   },
   "scripts": {
-    "test": "node --no-warnings tests/smoke.mjs"
+    "test": "node --no-warnings tests/plugin-manifests.mjs && node --no-warnings tests/smoke.mjs && node --no-warnings tests/core-smoke.mjs && node --no-warnings tests/serve-real.mjs && node --no-warnings tests/desktop-smoke.mjs && node --no-warnings tests/mcp-smoke.mjs && node --no-warnings tests/standalone-smoke.mjs && node --no-warnings tests/updates-smoke.mjs && node --no-warnings tests/images-smoke.mjs",
+    "desktop": "npm --prefix desktop start",
+    "build:desktop": "npm --prefix desktop run build",
+    "mcp": "node --no-warnings bin/memory-vault.mjs mcp",
+    "test:mistakebook": "node --no-warnings tests/mistakebook-smoke.mjs",
+    "test:notebook": "node --no-warnings tests/notebook-smoke.mjs",
+    "test:palette": "node tests/run-desktop-palette.mjs",
+    "test:palette:browser": "node tests/run-palette-browser.mjs",
+    "test:views": "node --no-warnings tests/views-smoke.mjs && node tests/run-desktop-views.mjs && node tests/run-desktop-views-scope.mjs",
+    "test:canvas": "node --no-warnings tests/canvas-smoke.mjs && node tests/run-desktop-canvas.mjs && node tests/run-desktop-canvas-undo.mjs",
+    "test:capture": "node --no-warnings tests/capture-smoke.mjs && node --no-warnings tests/run-desktop-capture-app.mjs",
+    "test:capture:module": "node --no-warnings tests/run-desktop-capture.mjs"
   }
 }

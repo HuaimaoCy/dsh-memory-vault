@@ -1,0 +1,125 @@
+/* 自由画布样式：浮在笔记本工作区上的一块世界坐标版面。
+   克制用色沿用笔记本的绿灰体系；动效只落在 transform / opacity 上，
+   并尊重 prefers-reduced-motion。由 mistakebook.css 顶部 @import 引入。 */
+
+.mb-shell.canvas-on .mb-bar,
+.mb-shell.canvas-on .mb-body { display:none; }
+
+.mb-canvas { position:relative; flex:1; min-height:0; display:flex; overflow:hidden; background:#f6f7f4; }
+.mb-canvas-surface { position:absolute; inset:0; overflow:hidden; cursor:grab; touch-action:none; outline:none;
+  background-color:#f7f8f5;
+  background-image:radial-gradient(circle at 1px 1px, #daded7 1px, transparent 0);
+  background-size:var(--mb-canvas-cell,26px) var(--mb-canvas-cell,26px);
+  background-position:var(--mb-canvas-x,0px) var(--mb-canvas-y,0px); }
+.mb-canvas-surface:focus-visible { box-shadow:inset 0 0 0 2px #47796d33; }
+.mb-canvas-surface.panning { cursor:grabbing; }
+.mb-canvas-surface.dragging { cursor:default; }
+.mb-canvas-world { position:absolute; top:0; left:0; transform-origin:0 0; will-change:transform; }
+
+.mb-canvas-bar { position:absolute; z-index:6; top:12px; left:12px; right:12px; display:flex; align-items:center; gap:5px;
+  padding:5px 9px; border-radius:13px; background:rgba(251,250,247,.84); border:1px solid #e2e5dc;
+  box-shadow:0 10px 26px #20232712; backdrop-filter:blur(18px) saturate(150%); }
+.mb-canvas-bar .select { width:auto; min-width:150px; max-width:230px; height:30px; font-size:12px; }
+.mb-canvas-bar .mb-canvas-hintline { color:#95a095; font-size:10px; letter-spacing:.2px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.mb-canvas-bar-sep { width:1px; height:18px; background:#e5e8e0; margin:0 3px; }
+.mb-canvas-back { display:inline-flex; align-items:center; gap:2px; padding-left:6px; }
+.mb-canvas-back .icon { width:15px; height:15px; transform:rotate(180deg); }
+.mb-canvas-icon { display:grid; place-items:center; width:30px; height:30px; padding:0; border:1px solid transparent; border-radius:9px;
+  background:transparent; color:#4f5a52; font-size:15px; line-height:1; cursor:pointer; transition:background-color 140ms ease-out, transform 140ms ease-out; }
+.mb-canvas-icon .icon { width:16px; height:16px; }
+.mb-canvas-icon:hover { background:#eef3ec; }
+.mb-canvas-icon:active { transform:scale(.94); }
+.mb-canvas-icon.danger:hover { background:#fbeeed; color:#a5453f; }
+.mb-canvas-icon:disabled { opacity:.35; cursor:default; }
+.mb-canvas-icon.flip .icon { transform:scaleX(-1); }
+.mb-canvas-save { border:1px solid #e2e5dc; background:#f8faf5; color:#5c6b60; border-radius:999px; padding:4px 10px; font-size:10px; cursor:pointer; }
+.mb-canvas-save.busy { color:#8a7546; border-color:#ece3cc; }
+.mb-canvas-save.failed { color:#a5453f; border-color:#edd6d3; background:#fdf3f2; }
+
+.mb-canvas-tools { position:absolute; z-index:6; left:12px; top:76px; display:flex; flex-direction:column; gap:3px; padding:5px;
+  border-radius:13px; background:rgba(251,250,247,.84); border:1px solid #e2e5dc; box-shadow:0 10px 26px #20232712;
+  backdrop-filter:blur(18px) saturate(150%); }
+.mb-canvas-tool { display:flex; flex-direction:column; align-items:center; gap:3px; width:52px; padding:7px 3px; border:0; border-radius:9px;
+  background:transparent; color:#4f5a52; font-size:10px; cursor:pointer; transition:background-color 140ms ease-out, transform 140ms ease-out; }
+.mb-canvas-tool:hover { background:#eef3ec; }
+.mb-canvas-tool:active { transform:scale(.97); }
+.mb-canvas-tool .icon { width:18px; height:18px; }
+
+.mb-canvas-zoom { position:absolute; z-index:6; right:12px; bottom:12px; display:flex; align-items:center; gap:3px; padding:4px 7px;
+  border-radius:12px; background:rgba(251,250,247,.84); border:1px solid #e2e5dc; box-shadow:0 10px 26px #20232712;
+  backdrop-filter:blur(18px) saturate(150%); }
+.mb-canvas-zoom .btn { padding:4px 8px; font-size:11px; }
+.mb-canvas-zoom-label { min-width:42px; text-align:center; font-size:11px; color:#6b776c; font-variant-numeric:tabular-nums; }
+
+.mb-canvas-card { position:absolute; top:0; left:0; display:flex; flex-direction:column; border-radius:12px; background:#fff;
+  border:1px solid #e3e6dc; box-shadow:0 6px 18px #2023270f; overflow:hidden; }
+.mb-canvas-card.selected { border-color:#47796d; box-shadow:0 0 0 2px #47796d33, 0 8px 22px #20232714; }
+.mb-canvas-card-head { display:flex; align-items:center; gap:6px; padding:5px 6px 5px 9px; border-bottom:1px solid #eef0e8;
+  background:#fbfbf8; font-size:9.5px; letter-spacing:.6px; text-transform:uppercase; color:#8a9387; cursor:grab; user-select:none; }
+.mb-canvas-card-head .mb-canvas-card-close { display:grid; place-items:center; width:18px; height:18px; padding:0; border:0; border-radius:6px;
+  background:transparent; color:#a3aca0; font-size:13px; cursor:pointer; }
+.mb-canvas-card-head .mb-canvas-card-close:hover { background:#f1f3ee; color:#7d3f3a; }
+.mb-canvas-tone { width:12px; height:12px; padding:0; border-radius:50%; border:1px solid #0000001a; cursor:pointer; background:#f4e7c4; }
+.mb-canvas-tone[data-tone="sand"] { background:#f0dfae; }
+.mb-canvas-tone[data-tone="mint"] { background:#cfe4d6; }
+.mb-canvas-tone[data-tone="sky"] { background:#cfdfec; }
+.mb-canvas-tone[data-tone="rose"] { background:#eed4d2; }
+.mb-canvas-text { flex:1; min-height:0; width:100%; resize:none; border:0; outline:none; padding:9px 11px;
+  background:transparent; color:#252e34; font:inherit; font-size:13px; line-height:1.55; }
+.mb-canvas-text::placeholder { color:#b0b8ac; }
+.mb-canvas-card.sticky { background:#fdf6e3; border-color:#eee1c2; }
+.mb-canvas-card.sticky .mb-canvas-card-head { background:transparent; border-bottom-color:#00000008; color:#a99772; }
+.mb-canvas-card.sticky .mb-canvas-text { color:#4a3f22; font-size:13.5px; }
+.mb-canvas-card.sticky.tone-sand { background:#fdf6e3; border-color:#eee1c2; }
+.mb-canvas-card.sticky.tone-mint { background:#e9f3ec; border-color:#cfe4d6; }
+.mb-canvas-card.sticky.tone-mint .mb-canvas-text { color:#274a37; }
+.mb-canvas-card.sticky.tone-sky { background:#e8f0f7; border-color:#cfdfec; }
+.mb-canvas-card.sticky.tone-sky .mb-canvas-text { color:#284355; }
+.mb-canvas-card.sticky.tone-rose { background:#fbeceb; border-color:#eed4d2; }
+.mb-canvas-card.sticky.tone-rose .mb-canvas-text { color:#5a3230; }
+.mb-canvas-resize { position:absolute; right:0; bottom:0; width:16px; height:16px; cursor:nwse-resize;
+  background:linear-gradient(135deg, transparent 46%, #c9d2c6 46%, #c9d2c6 58%, transparent 58%); border-bottom-right-radius:11px; }
+.mb-canvas-card.selected .mb-canvas-resize { background:linear-gradient(135deg, transparent 46%, #47796d88 46%, #47796d88 58%, transparent 58%); }
+
+.mb-canvas-ref { display:flex; flex-direction:column; gap:5px; padding:9px 11px; overflow:hidden; }
+.mb-canvas-ref-title { font-size:12.5px; color:#26302e; line-height:1.4; }
+.mb-canvas-ref-stem { margin:0; color:#66716a; font-size:11.5px; line-height:1.5; display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical; overflow:hidden; }
+.mb-canvas-ref-open { align-self:flex-start; padding:3px 8px; font-size:11px; }
+
+.mb-canvas-edge { position:absolute; top:0; left:0; height:14px; margin-top:-7px; transform-origin:0 50%; cursor:pointer; }
+.mb-canvas-edge::before { content:''; position:absolute; left:0; right:0; top:6px; height:2px; border-radius:2px; background:#c8d2c7; }
+.mb-canvas-edge:hover::before { background:#9fb3a4; }
+.mb-canvas-edge.selected::before { background:#47796d; }
+
+.mb-canvas-hint { position:absolute; z-index:5; inset:0; display:grid; place-items:center; pointer-events:none; padding:24px; }
+.mb-canvas-hint-card { pointer-events:auto; width:min(380px,88%); padding:18px 20px; border-radius:14px;
+  background:#fffdf9; border:1px dashed #d7ddd1; box-shadow:0 8px 24px #2023270d; }
+.mb-canvas-hint-card strong { display:block; font-size:13px; color:#33403a; margin-bottom:6px; }
+.mb-canvas-hint-card .cap { margin:0 0 12px; }
+.mb-canvas-hint-actions { display:flex; gap:6px; }
+.mb-canvas-load-error { border-style:solid; border-color:#edd6d3; background:#fff8f6; }
+.mb-canvas-load-error .cap { overflow-wrap:anywhere; }
+/* 读取失败时禁止会写库的入口；「重试读取 / 重建」在错误卡片里仍然可点。 */
+.mb-canvas.load-failed .mb-canvas-tools,
+.mb-canvas.load-failed .mb-canvas-zoom,
+.mb-canvas.load-failed #mb-canvas-new,
+.mb-canvas.load-failed #mb-canvas-rename,
+.mb-canvas.load-failed #mb-canvas-delete,
+.mb-canvas.load-failed #mb-canvas-picker { opacity:.45; pointer-events:none; }
+
+.mb-canvas-dialog { display:flex; flex-direction:column; gap:14px; padding:18px 24px 22px; }
+.mb-canvas-picker { display:flex; flex-direction:column; gap:10px; padding:16px 24px 20px; }
+.mb-canvas-note-list { display:flex; flex-direction:column; gap:3px; max-height:52vh; overflow:auto; }
+.mb-canvas-note-row { display:grid; grid-template-columns:auto 1fr; align-items:center; gap:3px 9px; padding:8px 10px;
+  border:1px solid transparent; border-radius:9px; background:transparent; cursor:pointer; text-align:left; font:inherit; }
+.mb-canvas-note-row:hover { background:#f3f6f1; border-color:#e6eae1; }
+.mb-canvas-note-row .mb-type-label { grid-row:1; }
+.mb-canvas-note-row strong { font-size:12.5px; color:#26302e; font-weight:600; }
+.mb-canvas-note-row .cap { grid-column:2; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+
+.mb-canvas-zoom .btn:active { transform:scale(.97); }
+
+@media (prefers-reduced-motion: reduce) {
+  .mb-canvas-icon, .mb-canvas-tool, .mb-canvas-zoom .btn { transition:none; }
+  .mb-canvas-icon:active, .mb-canvas-tool:active { transform:none; }
+}

@@ -1,0 +1,63 @@
+{
+  "subjectID": "chinese",
+  "name": "语文",
+  "attributesVersion": "chinese-attrs-1.0.0",
+  "standard": {
+    "credits": { "required": 8, "selective": 6, "elective": 12 },
+    "classHours": { "required": 144, "selective": 108 },
+    "competencies": ["语言建构与运用", "思维发展与提升", "审美鉴赏与创造", "文化传承与理解"],
+    "qualityLevels": 5,
+    "qualityLevelPass": 2,
+    "qualityLevelGaokao": 4,
+    "notes": [
+      "语文按18个学习任务群组织（能力型学科，无概念型知识树）",
+      "水平二=学业水平考试依据；水平四=高校考试招生录取依据（课标(三)学业质量水平与考试评价的关系）",
+      "权重主特征为高考卷面结构（150分）：现代文阅读I 19分 / II 16分 / 古代诗文35分 / 语言文字运用20分 / 写作60分",
+      "整本书阅读与研讨(1学分)、当代文化参与(0.5)、跨媒介阅读与交流(0.5)、语言积累梳理与探究(1)、文学阅读与写作(2)等任务群为必修学分结构"
+    ]
+  },
+  "attributes": {
+    "chinese/modern-reading/info": {
+      "courseType": "必修+选择性必修", "theme": "思辨性阅读与表达 / 实用性阅读与交流", "hours": null, "hoursBasis": null,
+      "cognitiveLevel": 3, "competencies": ["思维发展与提升", "语言建构与运用"], "qualityMax": 4, "examScope": "高考",
+      "examWeightPrior": 0.13, "prerequisites": [],
+      "citation": "课标 任务群+高考卷现代文阅读I(19分/150分)"
+    },
+    "chinese/modern-reading/literary": {
+      "courseType": "必修+选择性必修", "theme": "文学阅读与写作", "hours": null, "hoursBasis": null,
+      "cognitiveLevel": 3, "competencies": ["审美鉴赏与创造", "文化传承与理解"], "qualityMax": 4, "examScope": "高考",
+      "examWeightPrior": 0.11, "prerequisites": [],
+      "citation": "课标 任务群 文学阅读与写作(必修2学分)+高考卷现代文阅读II(16分/150分)"
+    },
+    "chinese/classical-reading/wenyan": {
+      "courseType": "必修+选择性必修", "theme": "中华传统文化经典研习", "hours": null, "hoursBasis": null,
+      "cognitiveLevel": 3, "competencies": ["文化传承与理解", "语言建构与运用"], "qualityMax": 4, "examScope": "高考",
+      "examWeightPrior": 0.13, "prerequisites": ["chinese/language-use"],
+      "citation": "课标 任务群 中华传统文化经典研习(选必)+高考卷文言文阅读(20分/150分)"
+    },
+    "chinese/classical-reading/poetry": {
+      "courseType": "必修+选择性必修", "theme": "中华传统文化经典研习", "hours": null, "hoursBasis": null,
+      "cognitiveLevel": 3, "competencies": ["审美鉴赏与创造", "文化传承与理解"], "qualityMax": 4, "examScope": "高考",
+      "examWeightPrior": 0.06, "prerequisites": ["chinese/classical-reading/wenyan"],
+      "citation": "课标 任务群+高考卷古代诗歌阅读(9分/150分)"
+    },
+    "chinese/classical-reading/recite": {
+      "courseType": "必修", "theme": "语言积累、梳理与探究", "hours": null, "hoursBasis": null,
+      "cognitiveLevel": 1, "competencies": ["文化传承与理解", "语言建构与运用"], "qualityMax": 4, "examScope": "高考",
+      "examWeightPrior": 0.04, "prerequisites": [],
+      "citation": "课标 附录 古诗文背诵推荐篇目+高考卷名篇名句默写(6分/150分)"
+    },
+    "chinese/language-use": {
+      "courseType": "必修+选择性必修", "theme": "语言积累、梳理与探究", "hours": null, "hoursBasis": null,
+      "cognitiveLevel": 2, "competencies": ["语言建构与运用"], "qualityMax": 4, "examScope": "高考",
+      "examWeightPrior": 0.13, "prerequisites": [],
+      "citation": "课标 任务群 语言积累、梳理与探究(必修1学分)+高考卷语言文字运用(20分/150分)"
+    },
+    "chinese/writing": {
+      "courseType": "必修+选择性必修", "theme": "文学阅读与写作 / 思辨性阅读与表达", "hours": null, "hoursBasis": null,
+      "cognitiveLevel": 4, "competencies": ["思维发展与提升", "语言建构与运用", "文化传承与理解"], "qualityMax": 4, "examScope": "高考",
+      "examWeightPrior": 0.40, "prerequisites": ["chinese/language-use"],
+      "citation": "课标 课程目标+高考卷写作(60分/150分)"
+    }
+  }
+}

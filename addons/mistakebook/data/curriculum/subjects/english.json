@@ -1,0 +1,56 @@
+{
+  "subjectID": "english",
+  "name": "英语",
+  "attributesVersion": "english-attrs-1.0.0",
+  "standard": {
+    "credits": { "required": 6, "selective": 8, "elective": 6 },
+    "classHours": { "required": 108, "selective": 144 },
+    "competencies": ["语言能力", "文化意识", "思维品质", "学习能力"],
+    "qualityLevels": 3,
+    "qualityLevelPass": 1,
+    "qualityLevelGaokao": 2,
+    "notes": [
+      "必修6学分(英语1-3)；选择性必修8学分；修满选必8学分方可参加高考（课标(三)学分与选课）",
+      "课程内容六要素：主题语境/语篇类型/语言知识/文化知识/语言技能/学习策略",
+      "权重主特征为高考卷面结构（150分）：听力30 / 阅读(含七选五)50 / 完形15 / 语法填空15 / 写作40"
+    ]
+  },
+  "attributes": {
+    "english/listening": {
+      "courseType": "必修+选择性必修", "theme": "语言技能·听（人与自我/社会/自然主题语境）", "hours": null, "hoursBasis": null,
+      "cognitiveLevel": 2, "competencies": ["语言能力"], "qualityMax": 2, "examScope": "高考",
+      "examWeightPrior": 0.20, "prerequisites": ["english/basics"],
+      "citation": "课标 六要素+高考卷听力(30分/150分)"
+    },
+    "english/reading": {
+      "courseType": "必修+选择性必修", "theme": "语言技能·读（语篇类型：应用文/记叙文/说明文/议论文）", "hours": null, "hoursBasis": null,
+      "cognitiveLevel": 3, "competencies": ["语言能力", "思维品质", "文化意识"], "qualityMax": 2, "examScope": "高考",
+      "examWeightPrior": 0.33, "prerequisites": ["english/basics"],
+      "citation": "课标 六要素+高考卷阅读理解含七选五(50分/150分)"
+    },
+    "english/cloze": {
+      "courseType": "必修+选择性必修", "theme": "语言知识·词汇与语篇（完形填空）", "hours": null, "hoursBasis": null,
+      "cognitiveLevel": 3, "competencies": ["语言能力", "思维品质"], "qualityMax": 2, "examScope": "高考",
+      "examWeightPrior": 0.10, "prerequisites": ["english/basics"],
+      "citation": "课标 六要素+高考卷完形填空(15分/150分)"
+    },
+    "english/grammar-fill": {
+      "courseType": "必修+选择性必修", "theme": "语言知识·语法（语法填空）", "hours": null, "hoursBasis": null,
+      "cognitiveLevel": 3, "competencies": ["语言能力", "学习能力"], "qualityMax": 2, "examScope": "高考",
+      "examWeightPrior": 0.10, "prerequisites": ["english/basics"],
+      "citation": "课标 附录 语法项目表+高考卷语法填空(15分/150分)"
+    },
+    "english/writing": {
+      "courseType": "必修+选择性必修", "theme": "语言技能·写（应用文写作/读后续写）", "hours": null, "hoursBasis": null,
+      "cognitiveLevel": 4, "competencies": ["语言能力", "思维品质", "文化意识"], "qualityMax": 2, "examScope": "高考",
+      "examWeightPrior": 0.27, "prerequisites": ["english/reading", "english/basics"],
+      "citation": "课标 六要素+高考卷书面表达含读后续写(40分/150分)"
+    },
+    "english/basics": {
+      "courseType": "跨主题", "theme": "语言知识·词汇语法（贯穿）", "hours": null, "hoursBasis": null,
+      "cognitiveLevel": 2, "competencies": ["学习能力", "语言能力"], "qualityMax": 2, "examScope": "高考",
+      "examWeightPrior": 0.05, "prerequisites": [],
+      "citation": "课标 附录 词汇表/语法项目表"
+    }
+  }
+}

@@ -1,0 +1,227 @@
+{
+  "subjectID": "math",
+  "name": "数学",
+  "attributesVersion": "math-attrs-1.0.0",
+  "standard": {
+    "credits": { "required": 8, "selective": 6, "elective": 6 },
+    "classHours": { "required": 144, "selective": 108 },
+    "competencies": ["数学抽象", "逻辑推理", "数学建模", "直观想象", "数学运算", "数据分析"],
+    "qualityLevels": 3,
+    "qualityLevelPass": 1,
+    "qualityLevelGaokao": 2,
+    "themeHours": {
+      "必修·预备知识": 18,
+      "必修·函数": 52,
+      "必修·几何与代数": 42,
+      "必修·概率与统计": 20,
+      "必修·建模与探究": 6,
+      "选必·函数": 30,
+      "选必·几何与代数": 44,
+      "选必·概率与统计": 26
+    },
+    "notes": [
+      "主题课时为课标表1/表2官方建议值（机动课时不计入考点）",
+      "高考=水平二；水平一为合格考；水平三为自主招生参考"
+    ]
+  },
+  "attributes": {
+    "math/set-logic/sets": {
+      "courseType": "必修", "theme": "预备知识", "hours": 6, "hoursBasis": "主题18课时分摊(估)",
+      "cognitiveLevel": 2, "competencies": ["数学抽象"], "qualityMax": 2, "examScope": "高考",
+      "examWeightPrior": 0.04, "prerequisites": [],
+      "citation": "课标 四·(一)必修 主题一 集合"
+    },
+    "math/set-logic/logic": {
+      "courseType": "必修", "theme": "预备知识", "hours": 5, "hoursBasis": "主题18课时分摊(估)",
+      "cognitiveLevel": 3, "competencies": ["逻辑推理", "数学抽象"], "qualityMax": 2, "examScope": "高考",
+      "examWeightPrior": 0.03, "prerequisites": ["math/set-logic/sets"],
+      "citation": "课标 四·(一)必修 主题一 常用逻辑用语"
+    },
+    "math/inequality/solving": {
+      "courseType": "必修", "theme": "预备知识", "hours": 4, "hoursBasis": "主题18课时分摊(估)",
+      "cognitiveLevel": 2, "competencies": ["数学运算"], "qualityMax": 2, "examScope": "高考",
+      "examWeightPrior": 0.03, "prerequisites": [],
+      "citation": "课标 四·(一)必修 主题一 相等关系与不等关系"
+    },
+    "math/inequality/amgm": {
+      "courseType": "必修", "theme": "预备知识", "hours": 3, "hoursBasis": "主题18课时分摊(估)",
+      "cognitiveLevel": 3, "competencies": ["逻辑推理", "数学运算"], "qualityMax": 2, "examScope": "高考",
+      "examWeightPrior": 0.02, "prerequisites": ["math/inequality/solving"],
+      "citation": "课标 四·(一)必修 主题一 基本不等式"
+    },
+    "math/function/concept": {
+      "courseType": "必修", "theme": "函数", "hours": 12, "hoursBasis": "主题52课时分摊(估)",
+      "cognitiveLevel": 3, "competencies": ["数学抽象", "直观想象"], "qualityMax": 2, "examScope": "高考",
+      "examWeightPrior": 0.05, "prerequisites": ["math/set-logic/sets"],
+      "citation": "课标 四·(一)必修 主题二 函数概念与性质"
+    },
+    "math/function/quad-power": {
+      "courseType": "必修", "theme": "函数", "hours": 8, "hoursBasis": "主题52课时分摊(估)",
+      "cognitiveLevel": 3, "competencies": ["直观想象", "数学运算"], "qualityMax": 2, "examScope": "高考",
+      "examWeightPrior": 0.03, "prerequisites": ["math/function/concept", "math/inequality/amgm"],
+      "citation": "课标 四·(一)必修 主题二 幂函数、指数函数、对数函数"
+    },
+    "math/function/exp-log": {
+      "courseType": "必修", "theme": "函数", "hours": 12, "hoursBasis": "主题52课时分摊(估)",
+      "cognitiveLevel": 3, "competencies": ["数学抽象", "直观想象", "数学运算"], "qualityMax": 2, "examScope": "高考",
+      "examWeightPrior": 0.05, "prerequisites": ["math/function/concept"],
+      "citation": "课标 四·(一)必修 主题二 幂函数、指数函数、对数函数"
+    },
+    "math/function/applications": {
+      "courseType": "必修", "theme": "函数", "hours": 6, "hoursBasis": "主题52课时分摊(估)",
+      "cognitiveLevel": 3, "competencies": ["数学建模", "数据分析"], "qualityMax": 2, "examScope": "高考",
+      "examWeightPrior": 0.03, "prerequisites": ["math/function/exp-log"],
+      "citation": "课标 四·(一)必修 主题二 函数应用"
+    },
+    "math/trig/functions": {
+      "courseType": "必修", "theme": "函数", "hours": 9, "hoursBasis": "主题52课时分摊(估)",
+      "cognitiveLevel": 2, "competencies": ["直观想象", "数学抽象"], "qualityMax": 2, "examScope": "高考",
+      "examWeightPrior": 0.05, "prerequisites": ["math/function/concept"],
+      "citation": "课标 四·(一)必修 主题二 三角函数"
+    },
+    "math/trig/identities": {
+      "courseType": "必修", "theme": "函数", "hours": 5, "hoursBasis": "主题52课时分摊(估)",
+      "cognitiveLevel": 3, "competencies": ["逻辑推理", "数学运算"], "qualityMax": 2, "examScope": "高考",
+      "examWeightPrior": 0.04, "prerequisites": ["math/trig/functions"],
+      "citation": "课标 四·(一)必修 主题二 三角函数(恒等变换)"
+    },
+    "math/vector/basics": {
+      "courseType": "必修", "theme": "几何与代数", "hours": 9, "hoursBasis": "主题42课时分摊(估)",
+      "cognitiveLevel": 2, "competencies": ["直观想象", "数学抽象"], "qualityMax": 2, "examScope": "高考",
+      "examWeightPrior": 0.04, "prerequisites": ["math/function/concept"],
+      "citation": "课标 四·(一)必修 主题三 平面向量及其应用"
+    },
+    "math/vector/dot-product": {
+      "courseType": "必修", "theme": "几何与代数", "hours": 8, "hoursBasis": "主题42课时分摊(估)",
+      "cognitiveLevel": 3, "competencies": ["数学运算", "直观想象"], "qualityMax": 2, "examScope": "高考",
+      "examWeightPrior": 0.03, "prerequisites": ["math/vector/basics"],
+      "citation": "课标 四·(一)必修 主题三 平面向量及其应用"
+    },
+    "math/trig/triangles": {
+      "courseType": "必修", "theme": "几何与代数", "hours": 7, "hoursBasis": "主题42课时分摊(估)",
+      "cognitiveLevel": 3, "competencies": ["数学运算", "数学建模"], "qualityMax": 2, "examScope": "高考",
+      "examWeightPrior": 0.05, "prerequisites": ["math/trig/identities", "math/vector/basics"],
+      "citation": "课标 四·(一)必修 主题三 平面向量及其应用(解三角形)"
+    },
+    "math/vector/complex": {
+      "courseType": "必修", "theme": "几何与代数", "hours": 5, "hoursBasis": "主题42课时分摊(估)",
+      "cognitiveLevel": 1, "competencies": ["数学运算"], "qualityMax": 2, "examScope": "高考",
+      "examWeightPrior": 0.02, "prerequisites": ["math/inequality/solving"],
+      "citation": "课标 四·(一)必修 主题三 复数"
+    },
+    "math/solid/solids": {
+      "courseType": "必修", "theme": "几何与代数", "hours": 5, "hoursBasis": "主题42课时分摊(估)",
+      "cognitiveLevel": 1, "competencies": ["直观想象"], "qualityMax": 2, "examScope": "高考",
+      "examWeightPrior": 0.04, "prerequisites": [],
+      "citation": "课标 四·(一)必修 主题三 立体几何初步"
+    },
+    "math/solid/position": {
+      "courseType": "必修", "theme": "几何与代数", "hours": 8, "hoursBasis": "主题42课时分摊(估)",
+      "cognitiveLevel": 3, "competencies": ["直观想象", "逻辑推理"], "qualityMax": 2, "examScope": "高考",
+      "examWeightPrior": 0.06, "prerequisites": ["math/solid/solids", "math/set-logic/logic"],
+      "citation": "课标 四·(一)必修 主题三 立体几何初步"
+    },
+    "math/sequence/concepts": {
+      "courseType": "选择性必修", "theme": "函数(选必)", "hours": 4, "hoursBasis": "主题30课时分摊(估)",
+      "cognitiveLevel": 2, "competencies": ["数学抽象", "逻辑推理"], "qualityMax": 2, "examScope": "高考",
+      "examWeightPrior": 0.02, "prerequisites": ["math/function/concept"],
+      "citation": "课标 四·(二)选择性必修 主题一 数列"
+    },
+    "math/sequence/arithmetic": {
+      "courseType": "选择性必修", "theme": "函数(选必)", "hours": 5, "hoursBasis": "主题30课时分摊(估)",
+      "cognitiveLevel": 2, "competencies": ["逻辑推理", "数学运算"], "qualityMax": 2, "examScope": "高考",
+      "examWeightPrior": 0.03, "prerequisites": ["math/sequence/concepts"],
+      "citation": "课标 四·(二)选择性必修 主题一 数列"
+    },
+    "math/sequence/geometric": {
+      "courseType": "选择性必修", "theme": "函数(选必)", "hours": 5, "hoursBasis": "主题30课时分摊(估)",
+      "cognitiveLevel": 2, "competencies": ["逻辑推理", "数学运算"], "qualityMax": 2, "examScope": "高考",
+      "examWeightPrior": 0.03, "prerequisites": ["math/sequence/concepts"],
+      "citation": "课标 四·(二)选择性必修 主题一 数列"
+    },
+    "math/sequence/summation": {
+      "courseType": "选择性必修", "theme": "函数(选必)", "hours": 6, "hoursBasis": "主题30课时分摊(估)",
+      "cognitiveLevel": 4, "competencies": ["逻辑推理", "数学运算"], "qualityMax": 2, "examScope": "高考",
+      "examWeightPrior": 0.05, "prerequisites": ["math/sequence/arithmetic", "math/sequence/geometric"],
+      "citation": "课标 四·(二)选择性必修 主题一 数列(方法综合)"
+    },
+    "math/solid/vectors": {
+      "courseType": "选择性必修", "theme": "几何与代数(选必)", "hours": 18, "hoursBasis": "主题44课时分摊(估)",
+      "cognitiveLevel": 3, "competencies": ["直观想象", "数学运算", "逻辑推理"], "qualityMax": 2, "examScope": "高考",
+      "examWeightPrior": 0.07, "prerequisites": ["math/vector/dot-product", "math/solid/position"],
+      "citation": "课标 四·(二)选择性必修 主题二 空间向量与立体几何"
+    },
+    "math/analytic/lines": {
+      "courseType": "选择性必修", "theme": "几何与代数(选必)", "hours": 6, "hoursBasis": "主题44课时分摊(估)",
+      "cognitiveLevel": 2, "competencies": ["直观想象", "数学运算"], "qualityMax": 2, "examScope": "高考",
+      "examWeightPrior": 0.03, "prerequisites": ["math/vector/basics"],
+      "citation": "课标 四·(二)选择性必修 主题二 平面解析几何"
+    },
+    "math/analytic/circles": {
+      "courseType": "选择性必修", "theme": "几何与代数(选必)", "hours": 6, "hoursBasis": "主题44课时分摊(估)",
+      "cognitiveLevel": 2, "competencies": ["直观想象", "数学运算"], "qualityMax": 2, "examScope": "高考",
+      "examWeightPrior": 0.04, "prerequisites": ["math/analytic/lines"],
+      "citation": "课标 四·(二)选择性必修 主题二 平面解析几何"
+    },
+    "math/analytic/conics": {
+      "courseType": "选择性必修", "theme": "几何与代数(选必)", "hours": 14, "hoursBasis": "主题44课时分摊(估)",
+      "cognitiveLevel": 4, "competencies": ["直观想象", "逻辑推理", "数学运算"], "qualityMax": 2, "examScope": "高考",
+      "examWeightPrior": 0.09, "prerequisites": ["math/analytic/circles", "math/vector/basics"],
+      "citation": "课标 四·(二)选择性必修 主题二 平面解析几何"
+    },
+    "math/derivative/concepts": {
+      "courseType": "选择性必修", "theme": "函数(选必)", "hours": 4, "hoursBasis": "主题30课时分摊(估)",
+      "cognitiveLevel": 2, "competencies": ["数学抽象", "直观想象"], "qualityMax": 2, "examScope": "高考",
+      "examWeightPrior": 0.03, "prerequisites": ["math/function/exp-log"],
+      "citation": "课标 四·(二)选择性必修 主题一 一元函数导数及其应用"
+    },
+    "math/derivative/applications": {
+      "courseType": "选择性必修", "theme": "函数(选必)", "hours": 6, "hoursBasis": "主题30课时分摊(估)",
+      "cognitiveLevel": 4, "competencies": ["逻辑推理", "直观想象", "数学运算"], "qualityMax": 2, "examScope": "高考",
+      "examWeightPrior": 0.09, "prerequisites": ["math/derivative/concepts", "math/function/quad-power"],
+      "citation": "课标 四·(二)选择性必修 主题一 一元函数导数及其应用"
+    },
+    "math/counting/arrangements": {
+      "courseType": "选择性必修", "theme": "概率与统计(选必)", "hours": 8, "hoursBasis": "主题26课时分摊(估)",
+      "cognitiveLevel": 3, "competencies": ["逻辑推理", "数学运算"], "qualityMax": 2, "examScope": "高考",
+      "examWeightPrior": 0.03, "prerequisites": ["math/set-logic/logic"],
+      "citation": "课标 四·(二)选择性必修 主题三 计数原理"
+    },
+    "math/probability/events": {
+      "courseType": "必修+选择性必修", "theme": "概率与统计", "hours": 10, "hoursBasis": "必修主题20+选必主题26分摊(估)",
+      "cognitiveLevel": 2, "competencies": ["数据分析", "数学建模"], "qualityMax": 2, "examScope": "高考",
+      "examWeightPrior": 0.03, "prerequisites": ["math/set-logic/sets"],
+      "citation": "课标 四·(一)主题四 / 四·(二)主题三 概率"
+    },
+    "math/probability/distributions": {
+      "courseType": "选择性必修", "theme": "概率与统计(选必)", "hours": 10, "hoursBasis": "主题26课时分摊(估)",
+      "cognitiveLevel": 3, "competencies": ["数据分析", "数学运算"], "qualityMax": 2, "examScope": "高考",
+      "examWeightPrior": 0.06, "prerequisites": ["math/probability/events", "math/counting/arrangements"],
+      "citation": "课标 四·(二)选择性必修 主题三 概率(随机变量及其分布)"
+    },
+    "math/statistics/sampling": {
+      "courseType": "必修", "theme": "概率与统计", "hours": 10, "hoursBasis": "必修主题20课时分摊(估)",
+      "cognitiveLevel": 2, "competencies": ["数据分析"], "qualityMax": 2, "examScope": "高考",
+      "examWeightPrior": 0.04, "prerequisites": [],
+      "citation": "课标 四·(一)必修 主题四 统计"
+    },
+    "math/statistics/paired": {
+      "courseType": "选择性必修", "theme": "概率与统计(选必)", "hours": 8, "hoursBasis": "主题26课时分摊(估)",
+      "cognitiveLevel": 3, "competencies": ["数据分析", "数学运算"], "qualityMax": 2, "examScope": "高考",
+      "examWeightPrior": 0.02, "prerequisites": ["math/statistics/sampling"],
+      "citation": "课标 四·(二)选择性必修 主题三 统计(成对数据)"
+    },
+    "math/reasoning": {
+      "courseType": "跨主题", "theme": "贯穿性能力线", "hours": null, "hoursBasis": null,
+      "cognitiveLevel": 3, "competencies": ["逻辑推理"], "qualityMax": 2, "examScope": "高考",
+      "examWeightPrior": 0.01, "prerequisites": ["math/set-logic/logic"],
+      "citation": "课标 核心素养'逻辑推理'的贯穿载体（无独立主题）"
+    },
+    "math/analytic/parametric": {
+      "courseType": "选修", "theme": "非课标主干", "hours": null, "hoursBasis": null,
+      "cognitiveLevel": 2, "competencies": ["直观想象", "数学运算"], "qualityMax": 1, "examScope": "非新高考主干",
+      "examWeightPrior": 0.005, "prerequisites": ["math/analytic/conics"],
+      "citation": "2017版课标已删去极坐标与参数方程(原选修4-4)，多数省份新高考不再单独设题"
+    }
+  }
+}

@@ -1,0 +1,131 @@
+{
+  "subjectID": "physics",
+  "name": "物理",
+  "attributesVersion": "physics-attrs-1.0.0",
+  "standard": {
+    "credits": { "required": 6, "selective": 6, "elective": 6 },
+    "classHours": { "required": 108, "selective": 108 },
+    "competencies": ["物理观念", "科学思维", "科学探究", "科学态度与责任"],
+    "qualityLevels": 4,
+    "qualityLevelPass": 2,
+    "qualityLevelGaokao": 4,
+    "notes": [
+      "必修1: 机械运动与物理模型 / 相互作用与运动定律",
+      "必修2: 机械能及其守恒定律 / 曲线运动与万有引力定律 / 牛顿力学的局限性与相对论初步",
+      "必修3: 静电场 / 电路及其应用 / 电磁场与电磁波初步 / 能源与可持续发展",
+      "选必1: 动量与动量守恒定律 / 机械振动与机械波 / 光及其应用",
+      "选必2: 磁场 / 电磁感应及其应用 / 电磁振荡与电磁波 / 传感器",
+      "选必3: 固体液体和气体 / 热力学定律 / 原子与原子核 / 波粒二象性"
+    ]
+  },
+  "attributes": {
+    "physics/kinematics": {
+      "courseType": "必修", "theme": "必修1·机械运动与物理模型", "hours": null, "hoursBasis": null,
+      "cognitiveLevel": 3, "competencies": ["物理观念", "科学思维"], "qualityMax": 4, "examScope": "高考",
+      "examWeightPrior": 0.08, "prerequisites": [],
+      "citation": "课标 四·(一) 必修1 主题1.1"
+    },
+    "physics/interactions": {
+      "courseType": "必修", "theme": "必修1·相互作用与运动定律", "hours": null, "hoursBasis": null,
+      "cognitiveLevel": 3, "competencies": ["物理观念", "科学思维"], "qualityMax": 4, "examScope": "高考",
+      "examWeightPrior": 0.08, "prerequisites": ["physics/kinematics"],
+      "citation": "课标 四·(一) 必修1 主题1.2"
+    },
+    "physics/newton": {
+      "courseType": "必修", "theme": "必修1·相互作用与运动定律", "hours": null, "hoursBasis": null,
+      "cognitiveLevel": 4, "competencies": ["物理观念", "科学思维"], "qualityMax": 4, "examScope": "高考",
+      "examWeightPrior": 0.10, "prerequisites": ["physics/interactions", "physics/kinematics"],
+      "citation": "课标 四·(一) 必修1 主题1.2"
+    },
+    "physics/curved": {
+      "courseType": "必修", "theme": "必修2·曲线运动与万有引力定律", "hours": null, "hoursBasis": null,
+      "cognitiveLevel": 3, "competencies": ["物理观念", "科学思维"], "qualityMax": 4, "examScope": "高考",
+      "examWeightPrior": 0.08, "prerequisites": ["physics/newton"],
+      "citation": "课标 四·(一) 必修2"
+    },
+    "physics/gravity": {
+      "courseType": "必修", "theme": "必修2·曲线运动与万有引力定律", "hours": null, "hoursBasis": null,
+      "cognitiveLevel": 3, "competencies": ["物理观念", "科学思维"], "qualityMax": 4, "examScope": "高考",
+      "examWeightPrior": 0.06, "prerequisites": ["physics/curved"],
+      "citation": "课标 四·(一) 必修2"
+    },
+    "physics/energy": {
+      "courseType": "必修", "theme": "必修2·机械能及其守恒定律", "hours": null, "hoursBasis": null,
+      "cognitiveLevel": 4, "competencies": ["物理观念", "科学思维"], "qualityMax": 4, "examScope": "高考",
+      "examWeightPrior": 0.12, "prerequisites": ["physics/newton"],
+      "citation": "课标 四·(一) 必修2"
+    },
+    "physics/momentum": {
+      "courseType": "选择性必修", "theme": "选必1·动量与动量守恒定律", "hours": null, "hoursBasis": null,
+      "cognitiveLevel": 4, "competencies": ["物理观念", "科学思维"], "qualityMax": 4, "examScope": "高考",
+      "examWeightPrior": 0.10, "prerequisites": ["physics/newton", "physics/energy"],
+      "citation": "课标 四·(二) 选择性必修1"
+    },
+    "physics/oscillation": {
+      "courseType": "选择性必修", "theme": "选必1·机械振动与机械波", "hours": null, "hoursBasis": null,
+      "cognitiveLevel": 3, "competencies": ["物理观念", "科学思维"], "qualityMax": 4, "examScope": "高考",
+      "examWeightPrior": 0.04, "prerequisites": ["physics/newton"],
+      "citation": "课标 四·(二) 选择性必修1"
+    },
+    "physics/mech-wave": {
+      "courseType": "选择性必修", "theme": "选必1·机械振动与机械波", "hours": null, "hoursBasis": null,
+      "cognitiveLevel": 3, "competencies": ["物理观念"], "qualityMax": 4, "examScope": "高考",
+      "examWeightPrior": 0.05, "prerequisites": ["physics/oscillation"],
+      "citation": "课标 四·(二) 选择性必修1"
+    },
+    "physics/optics": {
+      "courseType": "选择性必修", "theme": "选必1·光及其应用", "hours": null, "hoursBasis": null,
+      "cognitiveLevel": 2, "competencies": ["物理观念", "科学思维"], "qualityMax": 4, "examScope": "高考",
+      "examWeightPrior": 0.05, "prerequisites": ["physics/mech-wave"],
+      "citation": "课标 四·(二) 选择性必修1"
+    },
+    "physics/electrostatics": {
+      "courseType": "必修", "theme": "必修3·静电场", "hours": null, "hoursBasis": null,
+      "cognitiveLevel": 3, "competencies": ["物理观念"], "qualityMax": 4, "examScope": "高考",
+      "examWeightPrior": 0.08, "prerequisites": ["physics/interactions", "physics/energy"],
+      "citation": "课标 四·(一) 必修3"
+    },
+    "physics/circuits": {
+      "courseType": "必修", "theme": "必修3·电路及其应用", "hours": null, "hoursBasis": null,
+      "cognitiveLevel": 3, "competencies": ["物理观念", "科学探究"], "qualityMax": 4, "examScope": "高考",
+      "examWeightPrior": 0.06, "prerequisites": ["physics/electrostatics"],
+      "citation": "课标 四·(一) 必修3"
+    },
+    "physics/magnetism": {
+      "courseType": "选择性必修", "theme": "选必2·磁场", "hours": null, "hoursBasis": null,
+      "cognitiveLevel": 3, "competencies": ["物理观念", "科学思维"], "qualityMax": 4, "examScope": "高考",
+      "examWeightPrior": 0.09, "prerequisites": ["physics/circuits"],
+      "citation": "课标 四·(二) 选择性必修2"
+    },
+    "physics/induction": {
+      "courseType": "选择性必修", "theme": "选必2·电磁感应及其应用", "hours": null, "hoursBasis": null,
+      "cognitiveLevel": 4, "competencies": ["物理观念", "科学思维"], "qualityMax": 4, "examScope": "高考",
+      "examWeightPrior": 0.10, "prerequisites": ["physics/magnetism", "physics/energy"],
+      "citation": "课标 四·(二) 选择性必修2"
+    },
+    "physics/ac": {
+      "courseType": "选择性必修", "theme": "选必2·电磁振荡与电磁波", "hours": null, "hoursBasis": null,
+      "cognitiveLevel": 2, "competencies": ["物理观念"], "qualityMax": 4, "examScope": "高考",
+      "examWeightPrior": 0.04, "prerequisites": ["physics/induction"],
+      "citation": "课标 四·(二) 选择性必修2"
+    },
+    "physics/thermal": {
+      "courseType": "选择性必修", "theme": "选必3·固体液体和气体 / 热力学定律", "hours": null, "hoursBasis": null,
+      "cognitiveLevel": 2, "competencies": ["物理观念"], "qualityMax": 4, "examScope": "高考",
+      "examWeightPrior": 0.04, "prerequisites": [],
+      "citation": "课标 四·(二) 选择性必修3"
+    },
+    "physics/atomic": {
+      "courseType": "选择性必修", "theme": "选必3·原子与原子核 / 波粒二象性", "hours": null, "hoursBasis": null,
+      "cognitiveLevel": 2, "competencies": ["物理观念"], "qualityMax": 4, "examScope": "高考",
+      "examWeightPrior": 0.04, "prerequisites": [],
+      "citation": "课标 四·(二) 选择性必修3"
+    },
+    "physics/experiment": {
+      "courseType": "跨主题", "theme": "学生必做实验（贯穿）", "hours": null, "hoursBasis": null,
+      "cognitiveLevel": 3, "competencies": ["科学探究", "科学态度与责任"], "qualityMax": 4, "examScope": "高考",
+      "examWeightPrior": 0.10, "prerequisites": [],
+      "citation": "课标 四·(四) 学生必做实验"
+    }
+  }
+}

@@ -1,0 +1,43 @@
+{
+  "name": "dsh-memory-vault-desktop",
+  "version": "0.7.22",
+  "private": true,
+  "description": "Desktop window for the DSH memory vault, built on the same host-free core as the plugin, the CLI and the RPC service.",
+  "type": "module",
+  "main": "main.mjs",
+  "scripts": {
+    "postinstall": "node node_modules/electron/install.js",
+    "start": "electron .",
+    "selftest": "electron . --selftest",
+    "build": "node build.mjs",
+    "build:dir": "node build.mjs --dir"
+  },
+  "devDependencies": {
+    "electron": "37.6.0",
+    "electron-builder": "26.0.12"
+  },
+  "build": {
+    "appId": "dev.huaimaocy.memory-vault-mistakebook",
+    "productName": "Alaya",
+    "files": [
+      "desktop/**",
+      "src/**",
+      "bin/**",
+      "index.js",
+      "client.js",
+      "cordis.patch.yml",
+      "addons/**"
+    ],
+    "win": {
+      "target": [
+        "nsis"
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "shortcutName": "Alaya"
+    },
+    "executableName": "Alaya"
+  }
+}

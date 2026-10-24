@@ -1,0 +1,227 @@
+/*
+ * Quick capture panel.
+ *
+ * Restrained by intent: one surface, one accent, no entrance animation (a
+ * keyboard surface should appear instantly). It reuses the app's design tokens
+ * — --surface / --fg / --fg-2 / --line / --accent / --radius — so it reads as
+ * part of Alaya rather than a bolted-on overlay, and it works in both modes
+ * because a top-layer <dialog> is not scoped to either shell.
+ */
+
+.qc-dialog {
+  width: min(560px, calc(100vw - 32px));
+  max-height: calc(100vh - 48px);
+  margin: auto;
+  padding: 0;
+  border: 1px solid var(--line, #e4e6eb);
+  border-radius: 14px;
+  background: var(--surface, #fff);
+  color: var(--fg, #20232a);
+  box-shadow: 0 24px 60px #0b132026, 0 2px 6px #0b13200f;
+  font: 13px/1.6 -apple-system, BlinkMacSystemFont, "Microsoft YaHei UI", "Microsoft YaHei", "Segoe UI", system-ui, sans-serif;
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+
+.qc-dialog::backdrop {
+  background: #10151d3d;
+}
+
+.qc-dialog:focus {
+  outline: none;
+}
+
+.qc-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 18px 20px 0;
+}
+
+.qc-head-text {
+  min-width: 0;
+  flex: 1;
+}
+
+.qc-title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 650;
+  letter-spacing: .2px;
+}
+
+.qc-head .cap {
+  margin: 3px 0 0;
+  font-size: 12px;
+  color: var(--fg-2, #545d6b);
+}
+
+.qc-close {
+  flex: 0 0 auto;
+  margin: -4px -6px 0 0;
+}
+
+.qc-body {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 16px 20px 4px;
+}
+
+.qc-field {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  min-width: 0;
+}
+
+.qc-field .label {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--fg-2, #545d6b);
+}
+
+/* Segmented domain switch: 知识库 / 对话记忆 / 笔记本 */
+.qc-modes {
+  display: flex;
+  gap: 2px;
+  padding: 3px;
+  background: #f1f3f7;
+  border: 1px solid var(--line, #e4e6eb);
+  border-radius: 10px;
+}
+
+.qc-mode {
+  flex: 1 1 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 32px;
+  padding: 5px 8px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--fg-2, #545d6b);
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.qc-mode:hover {
+  background: #e9ecf2;
+  color: var(--fg, #20232a);
+}
+
+.qc-mode.active,
+.qc-mode[aria-pressed="true"] {
+  background: var(--surface, #fff);
+  color: var(--fg, #20232a);
+  box-shadow: 0 1px 3px #16223b14;
+}
+
+.qc-mode .icon {
+  width: 15px;
+  height: 15px;
+}
+
+.qc-target,
+.qc-tags {
+  width: 100%;
+}
+
+.qc-input {
+  min-height: 96px;
+  max-height: 40vh;
+  resize: vertical;
+  line-height: 1.7;
+}
+
+.qc-input[aria-invalid="true"] {
+  border-color: var(--danger, #cc3543);
+  box-shadow: 0 0 0 3px #cc354315;
+}
+
+.qc-foot {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px 20px 18px;
+  border-top: 1px solid transparent;
+}
+
+.qc-feedback {
+  min-height: 20px;
+}
+
+.qc-status,
+.qc-error,
+.qc-hint {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.qc-status {
+  color: var(--ok, #29845b);
+}
+
+.qc-status:empty {
+  display: none;
+}
+
+.qc-error {
+  color: var(--danger, #cc3543);
+}
+
+.qc-error[hidden] {
+  display: none;
+}
+
+.qc-hint {
+  color: var(--fg-3, #707b8a);
+}
+
+.qc-hint[hidden] {
+  display: none;
+}
+
+.qc-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.qc-kbd-hint {
+  flex: 1;
+  min-width: 0;
+  font-size: 11px;
+  color: var(--fg-3, #707b8a);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.qc-save {
+  flex: 0 0 auto;
+  min-width: 84px;
+}
+
+@media (max-width: 460px) {
+  .qc-modes {
+    flex-direction: column;
+  }
+  .qc-kbd-hint {
+    display: none;
+  }
+}
+
+/* A keyboard-initiated panel must appear and disappear instantly; honour the
+ * explicit reduced-motion preference for the whole subtree as well. */
+@media (prefers-reduced-motion: reduce) {
+  .qc-dialog,
+  .qc-dialog * {
+    animation: none !important;
+    transition: none !important;
+  }
+}

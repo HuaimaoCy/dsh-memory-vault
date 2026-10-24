@@ -1,0 +1,79 @@
+{
+  "subjectID": "biology",
+  "name": "生物学",
+  "attributesVersion": "biology-attrs-1.0.0",
+  "standard": {
+    "credits": { "required": 4, "selective": 6, "elective": 4 },
+    "classHours": { "required": 72, "selective": 108 },
+    "competencies": ["生命观念", "科学思维", "科学探究", "社会责任"],
+    "qualityLevels": 4,
+    "qualityLevelPass": 2,
+    "qualityLevelGaokao": 4,
+    "notes": [
+      "必修：分子与细胞(2学分) / 遗传与进化(2学分)",
+      "选必：稳态与调节 / 生物与环境 / 生物技术与工程（各2学分）"
+    ]
+  },
+  "attributes": {
+    "biology/molecules": {
+      "courseType": "必修", "theme": "分子与细胞", "hours": null, "hoursBasis": null,
+      "cognitiveLevel": 1, "competencies": ["生命观念"], "qualityMax": 4, "examScope": "高考",
+      "examWeightPrior": 0.08, "prerequisites": [],
+      "citation": "课标 四·(一)必修 模块1"
+    },
+    "biology/cell-structure": {
+      "courseType": "必修", "theme": "分子与细胞", "hours": null, "hoursBasis": null,
+      "cognitiveLevel": 2, "competencies": ["生命观念", "科学思维"], "qualityMax": 4, "examScope": "高考",
+      "examWeightPrior": 0.10, "prerequisites": ["biology/molecules"],
+      "citation": "课标 四·(一)必修 模块1"
+    },
+    "biology/metabolism": {
+      "courseType": "必修", "theme": "分子与细胞", "hours": null, "hoursBasis": null,
+      "cognitiveLevel": 3, "competencies": ["生命观念", "科学思维"], "qualityMax": 4, "examScope": "高考",
+      "examWeightPrior": 0.12, "prerequisites": ["biology/cell-structure"],
+      "citation": "课标 四·(一)必修 模块1"
+    },
+    "biology/cell-life": {
+      "courseType": "必修", "theme": "分子与细胞", "hours": null, "hoursBasis": null,
+      "cognitiveLevel": 2, "competencies": ["生命观念", "科学思维"], "qualityMax": 4, "examScope": "高考",
+      "examWeightPrior": 0.08, "prerequisites": ["biology/metabolism"],
+      "citation": "课标 四·(一)必修 模块1"
+    },
+    "biology/genetic-material": {
+      "courseType": "必修", "theme": "遗传与进化", "hours": null, "hoursBasis": null,
+      "cognitiveLevel": 3, "competencies": ["生命观念", "科学思维"], "qualityMax": 4, "examScope": "高考",
+      "examWeightPrior": 0.12, "prerequisites": ["biology/cell-life"],
+      "citation": "课标 四·(一)必修 模块2"
+    },
+    "biology/heredity-laws": {
+      "courseType": "必修", "theme": "遗传与进化", "hours": null, "hoursBasis": null,
+      "cognitiveLevel": 4, "competencies": ["科学思维", "生命观念"], "qualityMax": 4, "examScope": "高考",
+      "examWeightPrior": 0.16, "prerequisites": ["biology/genetic-material"],
+      "citation": "课标 四·(一)必修 模块2"
+    },
+    "biology/variation-evolution": {
+      "courseType": "必修", "theme": "遗传与进化", "hours": null, "hoursBasis": null,
+      "cognitiveLevel": 2, "competencies": ["生命观念", "科学思维"], "qualityMax": 4, "examScope": "高考",
+      "examWeightPrior": 0.08, "prerequisites": ["biology/heredity-laws"],
+      "citation": "课标 四·(一)必修 模块2"
+    },
+    "biology/homeostasis": {
+      "courseType": "选择性必修", "theme": "稳态与调节", "hours": null, "hoursBasis": null,
+      "cognitiveLevel": 3, "competencies": ["生命观念", "科学思维"], "qualityMax": 4, "examScope": "高考",
+      "examWeightPrior": 0.12, "prerequisites": ["biology/metabolism"],
+      "citation": "课标 四·(二) 选必1"
+    },
+    "biology/ecology": {
+      "courseType": "选择性必修", "theme": "生物与环境", "hours": null, "hoursBasis": null,
+      "cognitiveLevel": 2, "competencies": ["生命观念", "社会责任"], "qualityMax": 4, "examScope": "高考",
+      "examWeightPrior": 0.10, "prerequisites": [],
+      "citation": "课标 四·(二) 选必2"
+    },
+    "biology/biotech": {
+      "courseType": "选择性必修", "theme": "生物技术与工程", "hours": null, "hoursBasis": null,
+      "cognitiveLevel": 2, "competencies": ["科学探究", "社会责任"], "qualityMax": 4, "examScope": "高考",
+      "examWeightPrior": 0.04, "prerequisites": ["biology/variation-evolution", "biology/homeostasis"],
+      "citation": "课标 四·(二) 选必3"
+    }
+  }
+}

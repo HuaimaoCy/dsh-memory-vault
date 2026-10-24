@@ -11,11 +11,12 @@
  * @module dsh-memory-vault/src/store
  */
 
-import { copyFileSync, existsSync, mkdirSync } from 'node:fs'
+import { existsSync, mkdirSync } from 'node:fs'
 import { dirname } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
-import { randomUUID } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { normalizePriority } from './policy.js'
+import { normalizeImage, IMAGE_MAX_COUNT, IMAGE_TOTAL_BYTES } from './images.js'
 
 /** The two assignments a group or an entry can carry. */
 export const SCOPES = ['conversation', 'knowledge']
@@ -24,7 +25,16 @@ export const SCOPES = ['conversation', 'knowledge']
 export const ENTRY_KINDS = ['summary', 'fact', 'preference', 'decision', 'task', 'note']
 
 /** Bumped when a migration below changes the on-disk layout. */
-export const SCHEMA_VERSION = 4
+export const SCHEMA_VERSION = 7
+
+/**
+ * How deep sub-groups may nest.
+ *
+ * Three levels is a deliberate ceiling rather than a technical one: a tree
+ * deeper than a person can hold in mind makes the board worse, not better, and
+ * the flat list this replaced is exactly what happens when nesting is unbounded.
+ */
+export const GROUP_MAX_DEPTH = 3
 
 export { MAX_PRIORITY, normalizePriority } from './policy.js'
 /**
@@ -65,6 +75,43 @@ const MIGRATIONS = [
       addColumnIfMissing(db, 'entries', 'base', 'INTEGER NOT NULL DEFAULT 0')
     },
   },
+  {
+    version: 5,
+    summary: '区分人工输入与 AI 生成的记忆',
+    apply: (db) => {
+      // Memories the model wrote mid-conversation were filed as human input: the
+      // tool recorded `manual` together with a session id. That pair alone is not
+      // enough to convict a row, because summarizing with a caller-supplied
+      // body records the same pair — and that body may well have been typed by
+      // a person. The summarizing path is distinguishable: it always writes
+      // `kind = 'summary'` and always leaves a row in `summaries`. Everything
+      // else that is `manual` with a session came from `memory_write`, since the
+      // panel path records `panel`.
+      db.exec(`
+        UPDATE entries SET source = 'model-write'
+        WHERE source = 'manual'
+          AND session_id IS NOT NULL
+          AND kind <> 'summary'
+          AND NOT EXISTS (SELECT 1 FROM summaries s WHERE s.entry_id = entries.id)
+      `)
+      // 「AI自动总结」 named only the summarizer, so a model-written memory and a
+      // summarized record looked identical. The tag now names the axis.
+      db.exec(`UPDATE entries SET tags = replace(tags, '"${AUTO_TAG_GENERATED_LEGACY}"', '"${AUTO_TAG_GENERATED}"') WHERE tags LIKE '%${AUTO_TAG_GENERATED_LEGACY}%'`)
+      db.exec(`UPDATE entries SET tags = replace(tags, '"${AUTO_TAG_MANUAL}"', '"${AUTO_TAG_GENERATED}"') WHERE source = 'model-write' AND tags LIKE '%${AUTO_TAG_MANUAL}%'`)
+    },
+  },
+  {
+    version: 6,
+    summary: '子记忆组',
+    apply: (db) => {
+      // Sub-groups exist because a flat list of groups stops being readable
+      // long before it stops being correct. One level of nesting is what turns
+      // a dozen peer groups into a handful of headings with children. The
+      // helper keeps this a no-op on a database created at this version.
+      addColumnIfMissing(db, 'groups', 'parent_id', 'TEXT REFERENCES groups(id) ON DELETE SET NULL')
+    },
+  },
+  { version: 7, summary: '记忆图片附件', apply: db => db.exec(IMAGE_SCHEMA) },
 ]
 
 /**
@@ -81,6 +128,22 @@ function addColumnIfMissing(db, table, column, declaration) {
   if (!present) db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${declaration}`)
 }
 
+const IMAGE_SCHEMA = `
+CREATE TABLE IF NOT EXISTS images (
+  id TEXT PRIMARY KEY,
+  entry_id TEXT NOT NULL REFERENCES entries(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  mime_type TEXT NOT NULL,
+  width INTEGER NOT NULL,
+  height INTEGER NOT NULL,
+  size INTEGER NOT NULL,
+  sha256 TEXT NOT NULL,
+  data BLOB NOT NULL,
+  created_at INTEGER NOT NULL,
+  UNIQUE (entry_id, sha256)
+) STRICT;
+CREATE INDEX IF NOT EXISTS images_entry ON images(entry_id);
+`
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS meta (
   key   TEXT PRIMARY KEY,
@@ -96,6 +159,7 @@ CREATE TABLE IF NOT EXISTS groups (
   session_id   TEXT,
   auto_summary INTEGER NOT NULL DEFAULT 0,
   priority     INTEGER NOT NULL DEFAULT 0,
+  parent_id    TEXT REFERENCES groups(id) ON DELETE SET NULL,
   created_at   INTEGER NOT NULL,
   updated_at   INTEGER NOT NULL
 ) STRICT;
@@ -175,7 +239,7 @@ CREATE TABLE IF NOT EXISTS summaries (
 ) STRICT;
 
 CREATE INDEX IF NOT EXISTS summaries_group ON summaries(group_id);
-`
+` + IMAGE_SCHEMA
 
 /**
  * Parse a stored JSON column, falling back to an empty array for rows written
@@ -210,8 +274,8 @@ export function normalizeTags(tags) {
   return [...seen]
 }
 
-/** System tag every model- or threshold-generated memory carries. */
-export const AUTO_TAG_GENERATED = 'AI自动总结'
+/** System tag every model-written memory carries, however it was produced. */
+export const AUTO_TAG_GENERATED = 'AI 生成'
 
 /** System tag every human-written memory carries. */
 export const AUTO_TAG_MANUAL = '人工输入'
@@ -220,14 +284,43 @@ export const AUTO_TAG_MANUAL = '人工输入'
 export const AUTO_TAGS = [AUTO_TAG_GENERATED, AUTO_TAG_MANUAL]
 
 /**
+ * The tag this one replaced.
+ *
+ * 「AI自动总结」 described only the summarizer, so a memory the model wrote
+ * during a conversation and a record the threshold produced looked identical —
+ * and worse, a model-initiated `memory_write` was filed as human input. The
+ * rename is what makes origin a real distinction; existing rows are rewritten
+ * by the migration in this same file.
+ */
+export const AUTO_TAG_GENERATED_LEGACY = 'AI自动总结'
+
+/**
+ * Tags the vault owns.
+ *
+ * Callers may not set them, and the retired name is stripped as well: leaving
+ * it settable would let a write reintroduce a tag the migration just removed.
+ */
+const RESERVED_TAGS = [...AUTO_TAGS, AUTO_TAG_GENERATED_LEGACY]
+
+/**
  * Provenance markers whose body was written by a model rather than by a person.
  *
- * `auto-summary` is the threshold-driven run and `model-summary` is a
- * summarization a person asked for; both produce machine-written text, so both
- * carry the generated tag. Which one ran is recorded on the summary record,
- * not in the tag.
+ * `auto-summary` is the threshold-driven run, `model-summary` is a
+ * summarization a person asked for, and `model-write` is the model calling
+ * `memory_write` mid-turn; all three produce machine-written text, so all three
+ * carry the generated tag. Which one ran stays on the row's `source`, so the
+ * detail view can still say precisely where the text came from.
  */
-const MODEL_SOURCES = ['auto-summary', 'model-summary']
+const MODEL_SOURCES = ['auto-summary', 'model-summary', 'model-write']
+
+/**
+ * Whether one provenance marker means a model wrote the text.
+ * @param {string} source - Entry provenance (`model-summary`, `model-write`, `panel`, ...).
+ * @returns {boolean} True for machine-written text.
+ */
+export function isModelWritten(source) {
+  return MODEL_SOURCES.includes(String(source))
+}
 
 /**
  * The system tag one provenance marker implies.
@@ -235,7 +328,7 @@ const MODEL_SOURCES = ['auto-summary', 'model-summary']
  * @returns {string} The matching system tag.
  */
 export function autoTagFor(source) {
-  return MODEL_SOURCES.includes(source) ? AUTO_TAG_GENERATED : AUTO_TAG_MANUAL
+  return isModelWritten(source) ? AUTO_TAG_GENERATED : AUTO_TAG_MANUAL
 }
 
 /**
@@ -247,7 +340,7 @@ export function autoTagFor(source) {
  * @returns {string[]} Canonical tags with exactly one system tag.
  */
 export function withAutoTag(tags, source) {
-  return [...normalizeTags(tags).filter(tag => !AUTO_TAGS.includes(tag)), autoTagFor(source)]
+  return [...normalizeTags(tags).filter(tag => !RESERVED_TAGS.includes(tag)), autoTagFor(source)]
 }
 
 /**
@@ -256,7 +349,7 @@ export function withAutoTag(tags, source) {
  * @param {number} entryCount - Entries currently filed under the group.
  * @returns {Record<string, unknown>} Group view.
  */
-function groupView(row, entryCount) {
+function groupView(row, entryCount, ancestry = { depth: 1, path: [] }) {
   return {
     id: row.id,
     name: row.name,
@@ -266,6 +359,10 @@ function groupView(row, entryCount) {
     sessionId: row.session_id ?? null,
     autoSummary: row.auto_summary === 1,
     priority: Number(row.priority ?? 0),
+    // Where this group sits in the tree: a null parent is a top-level heading.
+    parentId: row.parent_id ?? null,
+    depth: ancestry.depth,
+    path: ancestry.path,
     entryCount,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -286,11 +383,15 @@ function entryView(row) {
     assigned: row.assigned,
     title: row.title,
     content: row.content,
+    imageCount: Number(row.image_count ?? 0),
     kind: row.kind,
     source: row.source,
     autoTag: autoTagFor(String(row.source)),
     hidden: row.hidden === 1,
     priority: Number(row.priority ?? 0),
+    // Who wrote the body. The tag says the same thing in one word; this is the
+    // precise provenance, and the detail view shows it.
+    modelWritten: isModelWritten(String(row.source)),
     // The base layer rides in every conversation's prompt and is counted
     // separately from the knowledge a session chooses to apply.
     base: row.base === 1,
@@ -305,6 +406,10 @@ function entryView(row) {
 export class MemoryStore {
   #db
   #closed = false
+  /** The open connection, shared read-only with extensions (the notebook) hosted in this same database. */
+  get db() { return this.#db }
+  /** How many `transaction()` calls the current call stack is inside. */
+  #depth = 0
 
   /**
    * @param {object} options - Open options.
@@ -317,6 +422,12 @@ export class MemoryStore {
     this.#db = new DatabaseSync(path)
     this.#db.exec('PRAGMA journal_mode = WAL')
     this.#db.exec('PRAGMA foreign_keys = ON')
+    // The vault is one database with several processes over it: the DSH host
+    // holds it open while the CLI (`bin/memory-vault.mjs`) or the loopback RPC
+    // server opens it again. WAL already lets one writer proceed beside many
+    // readers; a busy timeout is what keeps the second writer from failing
+    // outright while the first one commits.
+    this.#db.exec('PRAGMA busy_timeout = 5000')
     const fresh = this.#isEmpty()
     this.#db.exec(SCHEMA)
     const from = fresh ? SCHEMA_VERSION : Number(this.readMeta('schema_version') ?? 1)
@@ -371,11 +482,17 @@ export class MemoryStore {
     if (path === ':memory:') return null
     const target = `${path}.v${String(from)}.bak`
     try {
-      if (!existsSync(target)) copyFileSync(path, target)
+      if (!existsSync(target)) this.backupTo(target)
       return target
     } catch (error) {
       throw new Error(`升级前备份失败（${target}）：${error instanceof Error ? error.message : String(error)}`)
     }
+  }
+
+  /** Make a consistent standalone SQLite snapshot, including committed WAL rows. */
+  backupTo(path) {
+    this.#db.prepare('VACUUM INTO ?').run(path)
+    return path
   }
 
   /**
@@ -391,7 +508,10 @@ export class MemoryStore {
     for (const row of rows) {
       const tags = parseTags(/** @type {string} */ (row.tags))
       const expected = autoTagFor(String(row.source))
-      if (tags.includes(expected)) continue
+      // A row that carries the retired name alongside the current one is stale
+      // even though the expected tag is present, so it is rewritten too.
+      const retired = tags.some(tag => RESERVED_TAGS.includes(tag) && tag !== expected)
+      if (tags.includes(expected) && !retired) continue
       pending.push({
         id: String(row.id),
         tags: JSON.stringify(withAutoTag(tags, String(row.source))),
@@ -476,14 +596,27 @@ export class MemoryStore {
    *
    * SQLite opens an implicit transaction per statement, which is not the same
    * as several business statements being atomic together: a failure halfway
-   * through a batch would otherwise leave the first rows committed. Callers
-   * must not nest — the vault commits one unit at a time.
+   * through a batch would otherwise leave the first rows committed.
+   *
+   * Nesting is allowed and joins the outer unit: a composite operation (a
+   * curation that moves memories and merges labels, say) calls methods that are
+   * each atomic on their own, and the whole thing still has to commit or roll
+   * back as one. Only the outermost call opens and closes the transaction.
    * @param {() => T} run - Work to commit or roll back.
    * @returns {T} Whatever `run` returned.
    * @template T
    */
   transaction(run) {
+    if (this.#depth > 0) {
+      this.#depth += 1
+      try {
+        return run()
+      } finally {
+        this.#depth -= 1
+      }
+    }
     this.#db.exec('BEGIN IMMEDIATE')
+    this.#depth = 1
     try {
       const result = run()
       this.#db.exec('COMMIT')
@@ -496,6 +629,8 @@ export class MemoryStore {
         // the one worth reporting.
       }
       throw error
+    } finally {
+      this.#depth = 0
     }
   }
 
@@ -588,6 +723,63 @@ export class MemoryStore {
   }
 
   /**
+   * Depth and ancestor names for every group, in one pass.
+   *
+   * The parent column is the only thing stored; depth and the breadcrumb are
+   * derived, so a move never has to rewrite a subtree. A cycle would spin here,
+   * so the walk refuses to revisit an id rather than trusting the file.
+   * @param {Record<string, unknown>[]} rows - All `groups` rows.
+   * @returns {Map<string, { depth: number, path: string[] }>} Ancestry by group id.
+   */
+  #ancestry(rows) {
+    /** @type {Map<string, Record<string, unknown>>} */
+    const byId = new Map(rows.map(row => [String(row.id), row]))
+    /** @type {Map<string, { depth: number, path: string[] }>} */
+    const resolved = new Map()
+    /**
+     * @param {string} id - Group id.
+     * @param {Set<string>} chain - Ids on the current walk.
+     * @returns {{ depth: number, path: string[] }} Ancestry.
+     */
+    const walk = (id, chain) => {
+      const known = resolved.get(id)
+      if (known !== undefined) return known
+      const row = byId.get(id)
+      const parentId = row === undefined || row.parent_id === null || row.parent_id === undefined
+        ? null
+        : String(row.parent_id)
+      if (row === undefined || parentId === null || !byId.has(parentId) || chain.has(id)) {
+        const root = { depth: 1, path: [] }
+        resolved.set(id, root)
+        return root
+      }
+      chain.add(id)
+      const parent = walk(parentId, chain)
+      chain.delete(id)
+      const value = {
+        depth: parent.depth + 1,
+        path: [...parent.path, String(byId.get(parentId).name)],
+      }
+      resolved.set(id, value)
+      return value
+    }
+    for (const row of rows) walk(String(row.id), new Set())
+    return resolved
+  }
+
+  /**
+   * Decorate one group row with its place in the tree.
+   * @param {Record<string, unknown>} row - A `groups` row with `entry_count`.
+   * @returns {Record<string, unknown>} Group view.
+   */
+  #viewGroup(row) {
+    const all = this.#db.prepare('SELECT id, name, parent_id FROM groups').all()
+    const ancestry = this.#ancestry(all)
+    const place = ancestry.get(String(row.id)) ?? { depth: 1, path: [] }
+    return groupView(row, Number(row.entry_count), place)
+  }
+
+  /**
    * Resolve a group by id or by name.
    * @param {string} reference - Group id or group name.
    * @returns {Record<string, unknown>|undefined} Group view, or undefined when nothing matches.
@@ -598,7 +790,7 @@ export class MemoryStore {
       FROM groups g WHERE g.id = ? OR g.name = ?
       LIMIT 1
     `).get(reference, reference)
-    return row === undefined ? undefined : groupView(row, Number(row.entry_count))
+    return row === undefined ? undefined : this.#viewGroup(row)
   }
 
   /**
@@ -632,6 +824,55 @@ export class MemoryStore {
   }
 
   /**
+   * How far a group's own subtree reaches below it; 0 for a leaf.
+   * @param {string} groupId - Group id.
+   * @returns {number} Levels below this group.
+   */
+  #subtreeHeight(groupId) {
+    const rows = this.#db.prepare('SELECT id, parent_id FROM groups').all()
+    /** @type {Map<string, string[]>} */
+    const children = new Map()
+    for (const row of rows) {
+      const parent = row.parent_id === null || row.parent_id === undefined ? null : String(row.parent_id)
+      if (parent === null) continue
+      children.set(parent, [...(children.get(parent) ?? []), String(row.id)])
+    }
+    // Bounded by the ceiling rather than trusting the stored shape: a
+    // self-referential row in a hand-edited file would otherwise recurse.
+    const height = (id, level) => {
+      if (level > GROUP_MAX_DEPTH) return 0
+      const kids = children.get(id) ?? []
+      if (kids.length === 0) return 0
+      return 1 + Math.max(...kids.map(kid => height(kid, level + 1)))
+    }
+    return height(groupId, 1)
+  }
+
+  /**
+   * Validate a requested parent for one group.
+   * @param {unknown} reference - Parent id or name; `null`/`''` means top level.
+   * @param {string} [selfId] - The group being moved, when there is one.
+   * @returns {string|null|undefined} Parent id to store, null for top level, undefined when unchanged.
+   * @throws {Error} When the parent is unknown, would form a cycle, or would nest too deep.
+   */
+  #resolveParent(reference, selfId) {
+    if (reference === undefined) return undefined
+    if (reference === null || String(reference).trim() === '') return null
+    const parent = this.requireGroup(String(reference))
+    if (selfId !== undefined && parent.id === selfId) {
+      throw new Error(`「${parent.name}」不能作为自己的父组`)
+    }
+    if (selfId !== undefined && this.descendantIds(selfId).includes(parent.id)) {
+      throw new Error(`「${parent.name}」在「${this.requireGroup(selfId).name}」下面，不能反过来当它的父组`)
+    }
+    const height = selfId === undefined ? 0 : this.#subtreeHeight(selfId)
+    if (parent.depth + 1 + height > GROUP_MAX_DEPTH) {
+      throw new Error(`子记忆组最多 ${GROUP_MAX_DEPTH} 层，这样嵌套会达到 ${parent.depth + 1 + height} 层`)
+    }
+    return parent.id
+  }
+
+  /**
    * Create a group.
    * @param {object} input - New group.
    * @param {string} input.name - Unique group name.
@@ -640,22 +881,25 @@ export class MemoryStore {
    * @param {unknown} [input.tags] - Tag list.
    * @param {string|null} [input.sessionId] - Owning session for a conversation group.
    * @param {boolean} [input.autoSummary] - Whether threshold summarization targets this group.
+   * @param {number} [input.priority] - Priority 0-100.
+   * @param {string|null} [input.parent] - Parent group id or name; null for a top-level group.
    * @returns {Record<string, unknown>} Created group.
    * @throws {Error} When the name is taken by another group.
    */
-  createGroup({ name, scope, description = '', tags = [], sessionId = null, autoSummary = false, priority = 0 }) {
+  createGroup({ name, scope, description = '', tags = [], sessionId = null, autoSummary = false, priority = 0, parent = null }) {
     const trimmed = String(name).trim()
     if (trimmed === '') throw new Error('memory group name must not be empty')
     if (!SCOPES.includes(scope)) throw new Error(`memory group scope must be one of ${SCOPES.join(', ')}`)
     if (this.findGroup(trimmed) !== undefined) throw new Error(`memory group "${trimmed}" already exists`)
+    const parentId = this.#resolveParent(parent) ?? null
     const now = Date.now()
     const id = `grp_${randomUUID()}`
     this.#db.prepare(`
-      INSERT INTO groups (id, name, scope, description, tags, session_id, auto_summary, priority, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO groups (id, name, scope, description, tags, session_id, auto_summary, priority, parent_id, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       id, trimmed, scope, String(description ?? ''), JSON.stringify(normalizeTags(tags)),
-      sessionId, autoSummary ? 1 : 0, normalizePriority(priority), now, now,
+      sessionId, autoSummary ? 1 : 0, normalizePriority(priority), parentId, now, now,
     )
     return this.requireGroup(id)
   }
@@ -669,6 +913,8 @@ export class MemoryStore {
    * @param {string} [patch.description] - New description.
    * @param {unknown} [patch.tags] - Replacement tag list.
    * @param {boolean} [patch.autoSummary] - New auto-summary switch.
+   * @param {number} [patch.priority] - New priority 0-100.
+   * @param {string|null} [patch.parent] - New parent group, or null to move it to the top level.
    * @returns {{ group: Record<string, unknown>, movedEntries: number }} Updated group and entries carried along.
    */
   updateGroup(reference, patch) {
@@ -676,7 +922,13 @@ export class MemoryStore {
     const sets = []
     /** @type {unknown[]} */
     const values = []
-    if (patch.name !== undefined && String(patch.name).trim() !== '' && patch.name !== group.name) {
+    // Validated before any column is written, so a refused move leaves the
+    // group exactly where it was.
+    const parentId = this.#resolveParent(patch.parent, group.id)
+    if (parentId !== undefined) {
+      sets.push('parent_id = ?')
+      values.push(parentId)
+    }    if (patch.name !== undefined && String(patch.name).trim() !== '' && patch.name !== group.name) {
       const clash = this.findGroup(String(patch.name).trim())
       if (clash !== undefined && clash.id !== group.id) throw new Error(`memory group "${patch.name}" already exists`)
       sets.push('name = ?')
@@ -739,6 +991,15 @@ export class MemoryStore {
         + '可以改名或改归属，或先在配置里换掉默认组名称',
       )
     }
+    // Deleting a parent would silently orphan its children into top-level
+    // groups, which is exactly the flat mess sub-groups exist to fix.
+    const children = this.descendantIds(group.id)
+    if (children.length > 0) {
+      const names = children.slice(0, 3).map(id => this.requireGroup(id).name).join('、')
+      throw new Error(
+        `「${group.name}」下面还有 ${children.length} 个子记忆组（${names}…），先把它们移走或删掉再删除本组`,
+      )
+    }
     return this.transaction(() => {
       const removed = this.#db.prepare('SELECT COUNT(*) AS count FROM entries WHERE group_id = ?').get(group.id)
       this.#db.prepare('DELETE FROM groups WHERE id = ?').run(group.id)
@@ -764,7 +1025,45 @@ export class MemoryStore {
           SELECT g.*, (SELECT COUNT(*) FROM entries e WHERE e.group_id = g.id AND e.hidden = 0) AS entry_count
           FROM groups g WHERE g.scope = ? ORDER BY g.priority DESC, g.name
         `).all(filter.scope)
-    return rows.map(row => groupView(row, Number(row.entry_count)))
+    // Depth comes from the whole tree even when the list is filtered, so a
+    // child never reads as a root just because its parent was filtered out.
+    const ancestry = this.#ancestry(this.#db.prepare('SELECT id, name, parent_id FROM groups').all())
+    return rows.map(row => groupView(
+      row,
+      Number(row.entry_count),
+      ancestry.get(String(row.id)) ?? { depth: 1, path: [] },
+    ))
+  }
+
+  /**
+   * Every group below one group, however deep.
+   *
+   * Applying a parent applies its whole subtree: a heading that pulled in
+   * nothing would be a folder, not a group.
+   * @param {string} groupId - Group id.
+   * @returns {string[]} Descendant ids, breadth-first.
+   */
+  descendantIds(groupId) {
+    const rows = this.#db.prepare('SELECT id, parent_id FROM groups').all()
+    /** @type {Map<string, string[]>} */
+    const children = new Map()
+    for (const row of rows) {
+      const parent = row.parent_id === null || row.parent_id === undefined ? null : String(row.parent_id)
+      if (parent === null) continue
+      children.set(parent, [...(children.get(parent) ?? []), String(row.id)])
+    }
+    /** @type {string[]} */
+    const found = []
+    const queue = [...(children.get(groupId) ?? [])]
+    const seen = new Set([groupId])
+    while (queue.length > 0) {
+      const id = /** @type {string} */ (queue.shift())
+      if (seen.has(id)) continue
+      seen.add(id)
+      found.push(id)
+      queue.push(...(children.get(id) ?? []))
+    }
+    return found
   }
 
   /**
@@ -780,14 +1079,15 @@ export class MemoryStore {
    * @param {string|null} [input.scope] - Explicit assignment; defaults to the group's.
    * @returns {Record<string, unknown>} Created entry.
    */
-  createEntry({ groupId, content, title = '', kind = 'note', source = 'manual', sessionId = null, tags = [], scope = null, priority = 0, base = false }) {
+  createEntry({ groupId, content, title = '', kind = 'note', source = 'manual', sessionId = null, tags = [], scope = null, priority = 0, base = false, images = [] }) {
     const text = String(content ?? '').trim()
-    if (text === '') throw new Error('memory entry content must not be empty')
+    if (text === '' && (!Array.isArray(images) || !images.length)) throw new Error('memory entry content must not be empty')
     const group = this.requireGroup(groupId)
     const assignment = scope ?? group.scope
     if (!SCOPES.includes(assignment)) throw new Error(`memory entry scope must be one of ${SCOPES.join(', ')}`)
     const now = Date.now()
     const id = `mem_${randomUUID()}`
+    return this.transaction(() => {
     this.#db.prepare(`
       INSERT INTO entries (id, group_id, scope, assigned, title, content, kind, source, session_id, tags, priority, base, created_at, updated_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -798,7 +1098,9 @@ export class MemoryStore {
       normalizePriority(priority), base === true ? 1 : 0, now, now,
     )
     this.#db.prepare('UPDATE groups SET updated_at = ? WHERE id = ?').run(now, group.id)
+    if (images.length) this.replaceImages(id, images)
     return this.requireEntry(id)
+    })
   }
 
   /**
@@ -823,7 +1125,7 @@ export class MemoryStore {
    */
   requireEntry(id) {
     const row = this.#db.prepare(`
-      SELECT e.*, g.name AS group_name FROM entries e
+      SELECT e.*, g.name AS group_name, (SELECT count(*) FROM images i WHERE i.entry_id = e.id) AS image_count FROM entries e
       LEFT JOIN groups g ON g.id = e.group_id WHERE e.id = ?
     `).get(id)
     if (row === undefined) throw new Error(`memory entry "${id}" does not exist`)
@@ -837,7 +1139,7 @@ export class MemoryStore {
    */
   findEntry(id) {
     const row = this.#db.prepare(`
-      SELECT e.*, g.name AS group_name FROM entries e
+      SELECT e.*, g.name AS group_name, (SELECT count(*) FROM images i WHERE i.entry_id = e.id) AS image_count FROM entries e
       LEFT JOIN groups g ON g.id = e.group_id WHERE e.id = ?
     `).get(id)
     return row === undefined ? undefined : entryView(row)
@@ -864,7 +1166,7 @@ export class MemoryStore {
     }
     if (patch.content !== undefined) {
       const text = String(patch.content).trim()
-      if (text === '') throw new Error('memory entry content must not be empty')
+      if (text === '' && !patch.allowEmpty && !entry.imageCount) throw new Error('memory entry content must not be empty')
       sets.push('content = ?')
       values.push(text)
     }
@@ -958,13 +1260,26 @@ export class MemoryStore {
     /** @type {unknown[]} */
     const values = []
     if (filter.includeHidden !== true) clauses.push('e.hidden = 0')
+    if (filter.hidden === true) clauses.push('e.hidden = 1')
     if (filter.base !== undefined) {
       clauses.push('e.base = ?')
       values.push(filter.base === true ? 1 : 0)
     }
+    // Origin is a real axis, not a label: curation and the panel both scope by
+    // it, and hand-written memories are deliberately left alone by default.
+    if (filter.origin === 'generated' || filter.origin === 'manual') {
+      clauses.push(`e.source ${filter.origin === 'generated' ? 'IN' : 'NOT IN'} (${MODEL_SOURCES.map(() => '?').join(', ')})`)
+      values.push(...MODEL_SOURCES)
+    }
     if (filter.groupId !== undefined) {
       clauses.push('e.group_id = ?')
       values.push(filter.groupId)
+    }
+    // A group and its sub-groups read as one scope; an exact id still wins when
+    // a caller wants that group alone.
+    if (Array.isArray(filter.groupIds) && filter.groupIds.length > 0) {
+      clauses.push(`e.group_id IN (${filter.groupIds.map(() => '?').join(', ')})`)
+      values.push(...filter.groupIds)
     }
     if (filter.scope !== undefined) {
       clauses.push('e.scope = ?')
@@ -979,9 +1294,9 @@ export class MemoryStore {
       clauses.push('EXISTS (SELECT 1 FROM json_each(e.tags) WHERE lower(json_each.value) = lower(?))')
       values.push(String(tag))
     }    const where = clauses.length === 0 ? '' : `WHERE ${clauses.join(' AND ')}`
-    values.push(Math.max(1, Math.min(500, filter.limit ?? 50)), Math.max(0, filter.offset ?? 0))
+    values.push(Math.max(1, Math.min(501, filter.limit ?? 50)), Math.max(0, filter.offset ?? 0))
     const rows = this.#db.prepare(`
-      SELECT e.*, g.name AS group_name FROM entries e
+      SELECT e.*, g.name AS group_name, (SELECT count(*) FROM images i WHERE i.entry_id = e.id) AS image_count FROM entries e
       LEFT JOIN groups g ON g.id = e.group_id
       ${where}
       ORDER BY e.priority DESC, e.updated_at DESC LIMIT ? OFFSET ?
@@ -1008,6 +1323,43 @@ export class MemoryStore {
       .sort((left, right) => (right.count - left.count)
         || (Number(right.system) - Number(left.system))
         || (left.tag < right.tag ? -1 : 1))
+  }
+
+  /**
+   * Rewrite one user tag everywhere, or drop it when `to` is empty.
+   *
+   * A merge has to be vault-wide to mean anything: the reason two labels are
+   * worth merging is that one concept ended up spelled two ways, and half a
+   * vault using each spelling is the problem, not the fix. Hidden rows are
+   * included — they come back eventually, and a dead label left on them would
+   * return with them. System tags are never touched, in either direction.
+   * @param {string} from - Existing tag text.
+   * @param {string} to - Replacement text, or '' to delete the tag.
+   * @returns {{ from: string, to: string, updated: number }} What changed.
+   */
+  renameTag(from, to) {
+    const source = String(from ?? '').trim()
+    const target = String(to ?? '').trim()
+    if (source === '' || RESERVED_TAGS.includes(source) || RESERVED_TAGS.includes(target)) {
+      return { from: source, to: target, updated: 0 }
+    }
+    const wanted = source.toLowerCase()
+    /** @type {{ id: string, tags: string }[]} */
+    const pending = []
+    for (const row of this.#db.prepare('SELECT id, source, tags FROM entries').all()) {
+      const tags = parseTags(/** @type {string} */ (row.tags))
+      if (!tags.some(tag => tag.toLowerCase() === wanted)) continue
+      const kept = tags.filter(tag => tag.toLowerCase() !== wanted)
+      if (target !== '' && !kept.some(tag => tag.toLowerCase() === target.toLowerCase())) kept.push(target)
+      pending.push({ id: String(row.id), tags: JSON.stringify(withAutoTag(kept, String(row.source))) })
+    }
+    if (pending.length === 0) return { from: source, to: target, updated: 0 }
+    this.transaction(() => {
+      const update = this.#db.prepare('UPDATE entries SET tags = ?, updated_at = ? WHERE id = ?')
+      const now = Date.now()
+      for (const row of pending) update.run(row.tags, now, row.id)
+    })
+    return { from: source, to: target, updated: pending.length }
   }
 
   /**
@@ -1052,13 +1404,14 @@ export class MemoryStore {
    * @param {number} [input.limit] - Maximum rows.
    * @returns {Record<string, unknown>[]} Entries ordered by score, then recency.
    */
-  searchEntries({ query, scope, groupId, tag, tags, includeHidden, limit = 20, offset = 0 }) {
+  searchEntries({ query, scope, groupId, groupIds, tag, tags, includeHidden, hidden, limit = 20, offset = 0 }) {
     const terms = String(query ?? '').split(/\s+/).map(term => term.trim()).filter(term => term !== '')
     /** @type {string[]} */
     const clauses = []
     /** @type {unknown[]} */
     const clauseValues = []
     if (includeHidden !== true) clauses.push('e.hidden = 0')
+    if (hidden === true) clauses.push('e.hidden = 1')
     if (scope !== undefined) {
       clauses.push('e.scope = ?')
       clauseValues.push(scope)
@@ -1066,6 +1419,10 @@ export class MemoryStore {
     if (groupId !== undefined) {
       clauses.push('e.group_id = ?')
       clauseValues.push(groupId)
+    }
+    if (Array.isArray(groupIds) && groupIds.length > 0) {
+      clauses.push(`e.group_id IN (${groupIds.map(() => '?').join(', ')})`)
+      clauseValues.push(...groupIds)
     }
     // Same membership rule as `listEntries`: whole JSON elements, all required.
     const wanted = Array.isArray(tags) ? tags : tag === undefined ? [] : [tag]
@@ -1093,11 +1450,11 @@ export class MemoryStore {
     // Placeholders bind in SQL text order: the score expression sits in the
     // SELECT list, so its values precede the WHERE clauses, then the LIMIT.
     const rows = this.#db.prepare(`
-      SELECT e.*, g.name AS group_name, ${score} AS score FROM entries e
+      SELECT e.*, g.name AS group_name, (SELECT count(*) FROM images i WHERE i.entry_id = e.id) AS image_count, ${score} AS score FROM entries e
       LEFT JOIN groups g ON g.id = e.group_id
       ${where}
       ORDER BY score DESC, e.priority DESC, e.updated_at DESC LIMIT ? OFFSET ?
-    `).all(...scoreValues, ...clauseValues, Math.max(1, Math.min(200, limit)), Math.max(0, offset))
+    `).all(...scoreValues, ...clauseValues, Math.max(1, Math.min(501, limit)), Math.max(0, offset))
     return rows.map(entryView)
   }
 
@@ -1499,10 +1856,16 @@ export class MemoryStore {
       FROM applications a JOIN groups g ON g.id = a.group_id
       WHERE a.session_id = ? ORDER BY g.priority DESC, g.name
     `).all(sessionId)
+    // Depth comes from the whole tree, so a sub-group still reads as one.
+    const ancestry = this.#ancestry(this.#db.prepare('SELECT id, name, parent_id FROM groups').all())
     return {
       sessionId,
       explicit: state !== undefined && Number(state.apply_explicit) === 1,
-      groups: rows.map(row => groupView(row, Number(row.entry_count))),
+      groups: rows.map(row => groupView(
+        row,
+        Number(row.entry_count),
+        ancestry.get(String(row.id)) ?? { depth: 1, path: [] },
+      )),
       // A session can also carry memories it picked one by one; they ride
       // alongside the groups rather than replacing them.
       entries: this.appliedEntriesOf(sessionId),
@@ -1533,14 +1896,42 @@ export class MemoryStore {
    */
   effectiveApplications(sessionId, defaultGroups) {
     const stored = this.appliedGroups(sessionId)
-    if (stored.explicit) return { ...stored, source: 'explicit' }
+    if (stored.explicit) {
+      return { ...stored, groups: this.#withDescendants(stored.groups), source: 'explicit' }
+    }
     /** @type {Record<string, unknown>[]} */
     const groups = []
     for (const reference of defaultGroups) {
       const group = this.findGroup(reference)
       if (group !== undefined) groups.push(group)
     }
-    return { sessionId, groups, source: groups.length === 0 ? 'none' : 'default' }
+    return {
+      sessionId,
+      groups: this.#withDescendants(groups),
+      source: groups.length === 0 ? 'none' : 'default',
+    }
+  }
+
+  /**
+   * Add every sub-group of the given groups to an applied set.
+   *
+   * Applying a heading applies what is filed under it: a parent that injected
+   * nothing would be a folder rather than a memory group.
+   * @param {Record<string, unknown>[]} groups - Directly applied groups.
+   * @returns {Record<string, unknown>[]} The groups plus their descendants.
+   */
+  #withDescendants(groups) {
+    const seen = new Set(groups.map(group => String(group.id)))
+    const expanded = [...groups]
+    for (const group of groups) {
+      for (const id of this.descendantIds(String(group.id))) {
+        if (seen.has(id)) continue
+        seen.add(id)
+        const child = this.findGroup(id)
+        if (child !== undefined) expanded.push(child)
+      }
+    }
+    return expanded
   }
 
   /**
@@ -1571,5 +1962,51 @@ export class MemoryStore {
    */
   raw(sql) {
     return this.#db.prepare(sql).all()
+  }
+
+  listImages(entryId) {
+    this.requireEntry(String(entryId))
+    return this.#db.prepare('SELECT id, entry_id AS entryId, name, mime_type AS mimeType, width, height, size, sha256, created_at AS createdAt FROM images WHERE entry_id = ? ORDER BY created_at, id').all(entryId)
+  }
+  readImage(id) {
+    const row = this.#db.prepare('SELECT data, entry_id FROM images WHERE id = ?').get(String(id))
+    if (!row) throw new Error('图片不存在')
+    const image = this.listImages(row.entry_id).find(item => item.id === id)
+    const bytes = Buffer.from(row.data)
+    if (bytes.length !== image.size || createHash('sha256').update(bytes).digest('hex') !== image.sha256) throw new Error('图片数据校验失败，请从备份恢复')
+    return { ...image, data: bytes.toString('base64') }
+  }
+  replaceImages(entryId, inputs) {
+    const entry = this.requireEntry(entryId)
+    if (!Array.isArray(inputs) || inputs.length > IMAGE_MAX_COUNT) throw new Error('每条记忆最多 16 张图片')
+    const existing = this.listImages(entryId)
+    const planned = [], hashes = new Set()
+    for (const input of inputs) {
+      let image
+      if (input?.id) {
+        image = existing.find(item => item.id === input.id)
+        if (!image) throw new Error('图片不属于当前记忆')
+      } else image = normalizeImage(input)
+      if (!hashes.has(image.sha256)) { hashes.add(image.sha256); planned.push(image) }
+    }
+    if (planned.reduce((total, image) => total + image.size, 0) > IMAGE_TOTAL_BYTES) throw new Error('每条记忆的图片总大小不能超过 20 MB')
+    if (!entry.content.trim() && !planned.length) throw new Error('记忆至少需要正文或一张图片')
+    return this.transaction(() => {
+      for (const image of existing) if (!hashes.has(image.sha256)) this.#db.prepare('DELETE FROM images WHERE id = ?').run(image.id)
+      for (const image of planned) {
+        if (image.id || existing.some(item => item.sha256 === image.sha256)) continue
+        this.#db.prepare('INSERT INTO images (id,entry_id,name,mime_type,width,height,size,sha256,data,created_at) VALUES (?,?,?,?,?,?,?,?,?,?)')
+          .run(`img_${randomUUID()}`, entryId, image.name, image.mimeType, image.width, image.height, image.size, image.sha256, image.bytes, Date.now())
+      }
+      this.#db.prepare('UPDATE entries SET updated_at = ? WHERE id = ?').run(Date.now(), entryId)
+      return this.listImages(entryId)
+    })
+  }
+  addImage(entryId, input) { return this.replaceImages(entryId, [...this.listImages(entryId).map(image => ({ id: image.id })), input]) }
+  deleteImage(id) {
+    const image = this.readImage(String(id))
+    this.replaceImages(image.entryId, this.listImages(image.entryId).filter(item => item.id !== id).map(item => ({ id: item.id })))
+    const { data, ...metadata } = image
+    return metadata
   }
 }

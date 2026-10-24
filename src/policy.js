@@ -79,9 +79,9 @@ export function normalizeTags(tags) {
  * @returns {{ content: string, title: string, kind: string, tags: string[] }} Normalised fields.
  * @throws {Error} When a rule is broken.
  */
-export function validateEntryWrite(input, kinds, config) {
+export function validateEntryWrite(input, kinds, config, { allowEmpty = false } = {}) {
   const content = String(input.content ?? '').trim()
-  if (content === '') throw new Error('记忆正文不能为空')
+  if (content === '' && !allowEmpty) throw new Error('记忆正文不能为空')
   if (content.length > config.maxEntryChars) {
     throw new Error(`记忆正文 ${content.length} 字符，超过 ${config.maxEntryChars} 字符上限，请拆分后再写入`)
   }

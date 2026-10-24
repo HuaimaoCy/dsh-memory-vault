@@ -1,0 +1,20 @@
+{
+  "name": "alaya-notebook",
+  "description": "Alaya 笔记本的插件市场：一个插件同时提供 alaya-notebook 技能与 stdio MCP 服务（ZCode 与 Codex 通用）。",
+  "plugins": [
+    {
+      "name": "alaya-notebook",
+      "source": "./",
+      "version": "0.7.22",
+      "description": "读写本机 Alaya 笔记本与自由画布（MCP + 技能）。",
+      "category": "productivity",
+      "tags": [
+        "notebook",
+        "notes",
+        "canvas",
+        "mcp",
+        "sqlite"
+      ]
+    }
+  ]
+}

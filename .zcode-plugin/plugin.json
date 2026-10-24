@@ -1,0 +1,21 @@
+{
+  "name": "alaya-notebook",
+  "version": "0.7.22",
+  "description": "在 ZCode 里读写本机 Alaya 笔记本：列出与读取笔记/错题/物理模型/解题方法/英语词汇，新建条目，并读写自由画布。",
+  "author": {
+    "name": "HuaimaoCy"
+  },
+  "homepage": "https://github.com/HuaimaoCy/dsh-memory-vault",
+  "repository": "https://github.com/HuaimaoCy/dsh-memory-vault",
+  "license": "MIT",
+  "keywords": [
+    "notebook",
+    "notes",
+    "canvas",
+    "mcp",
+    "sqlite",
+    "alaya"
+  ],
+  "skills": "./skills/",
+  "mcpServers": "./.mcp.json"
+}

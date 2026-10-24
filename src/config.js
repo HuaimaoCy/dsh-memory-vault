@@ -191,6 +191,20 @@ function normalize(value) {
 }
 
 /**
+ * Resolve a raw config value into the shape the vault consumes.
+ *
+ * This is the module's one validation entry point, kept host-free so the core
+ * (`src/core/vault.js`) and any non-DSH caller — the CLI, the loopback RPC
+ * server — can normalize exactly the way the Cordis schema does.
+ *
+ * @param {unknown} value - Raw config object.
+ * @returns {{ value: VaultConfig } | { issues: ConfigIssue[] }} Validated config or violations.
+ */
+export function resolveVaultConfig(value) {
+  return normalize(value)
+}
+
+/**
  * Cordis plugin configuration schema. Only the Standard Schema `validate`
  * entry point is required; `version` and `vendor` identify the producer.
  */

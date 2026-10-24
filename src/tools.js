@@ -12,7 +12,7 @@
  */
 
 import { ENTRY_KINDS, SCOPES, normalizePriority } from './store.js'
-import { limitDefaults, validateEntryBatch } from './policy.js'
+import { limitDefaults, normalizeTags, validateEntryBatch } from './policy.js'
 
 /** Output declaration shared by every tool: an open object the renderer turns into text. */
 const OPEN_OBJECT_OUTPUT = { type: 'object', additionalProperties: true }
@@ -34,7 +34,7 @@ function tool(spec) {
     parameters: spec.parameters,
     output: {
       schema: OPEN_OBJECT_OUTPUT,
-      render: (args, value) => [{ type: 'text', text: spec.render(args, value) }],
+      render: spec.renderContent ?? ((args, value) => [{ type: 'text', text: spec.render(args, value) }]),
     },
     execute: spec.execute,
   }
@@ -57,7 +57,7 @@ function entryLine(entry, withContent = true) {
   const group = entry.groupName === undefined || entry.groupName === null || entry.groupName === assignment
     ? ''
     : ` · 记忆组「${entry.groupName}」`
-  const head = `- ${entry.id} · 归属 ${assignment}${manual}${hidden}${group} · ${entry.kind}${priority}${tags}`
+  const head = `- ${entry.id} · 归属 ${assignment}${manual}${hidden}${group} · ${entry.kind}${priority}${tags}${entry.imageCount ? ` · ${entry.imageCount} 张图片（用 memory_image 读取）` : ''}`
   const title = entry.title === '' ? '' : `\n  标题: ${entry.title}`
   return withContent ? `${head}${title}\n  ${entry.content.replace(/\n/g, '\n  ')}` : `${head}${title}`
 }
@@ -73,7 +73,13 @@ function groupLine(group) {
   const auto = group.autoSummary ? ' · 自动总结' : ''
   const priority = Number(group.priority ?? 0) > 0 ? ` · P${String(group.priority)}` : ''
   const description = group.description === '' ? '' : ` — ${group.description}`
-  return `- ${group.id} · ${group.scope === 'knowledge' ? '知识库' : '对话记忆'} · ${group.name}${tags}${auto}${priority} · 组内 ${group.entryCount} 条${description}`
+  // Indentation is the whole point of sub-groups: the list has to read as a
+  // tree without the reader holding the parent column in their head.
+  const indent = '  '.repeat(Math.max(0, Number(group.depth ?? 1) - 1))
+  const under = group.depth > 1 && Array.isArray(group.path) && group.path.length > 0
+    ? `（${group.path.join(' / ')} 下）`
+    : ''
+  return `${indent}- ${group.id} · ${group.scope === 'knowledge' ? '知识库' : '对话记忆'} · ${group.name}${under}${tags}${auto}${priority} · 组内 ${group.entryCount} 条${description}`
 }
 
 /**
@@ -94,7 +100,7 @@ function scopeDescription(subject) {
  * @param {() => void} deps.notify - Invalidate the memory index and Web page.
  * @returns {Record<string, unknown>[]} Definitions to register.
  */
-export function buildTools({ store, config, summarize, curate, notify }) {
+export function buildTools({ store, config, summarize, curate, notify, updates, saveImageAttachment }) {
   /** @type {Record<string, unknown>[]} */
   const definitions = []
 
@@ -131,9 +137,10 @@ export function buildTools({ store, config, summarize, curate, notify }) {
   definitions.push(tool({
     name: 'memory_group',
     description: [
-      '管理知识与记忆库的记忆组：列出、创建、修改、删除，或整体切换一个记忆组的归属（对话记忆 / 知识库）。',
+      '管理知识与记忆库的记忆组：列出、创建、修改、移动（改挂父组）、删除，或整体切换一个记忆组的归属（对话记忆 / 知识库）。',
       '记忆组是记忆条目的一级容器；条目既可以在组之间移动，也可以单独改归属。',
-      'action=list 查看全部记忆组（含条目数），其余 action 需要 name 或 id 定位目标组。',
+      '记忆组可以嵌套成子记忆组（最多三层）：用 parent 指定父组，**应用父组时会连它的所有子组一起应用**，所以平铺的组多了以后应当收进父组。',
+      'action=list 查看全部记忆组（按树形缩进显示，含条目数与层级），其余 action 需要 name 或 id 定位目标组。',
     ].join('\n'),
     parameters: {
       type: 'object',
@@ -146,6 +153,10 @@ export function buildTools({ store, config, summarize, curate, notify }) {
         },
         name: { type: 'string', description: '记忆组名称：创建时必填；其他操作可与 id 二选一。' },
         id: { type: 'string', description: '记忆组 id；与 name 二选一。' },
+        parent: {
+          type: 'string',
+          description: '父记忆组的名称或 id：创建时给出就成为它的子记忆组；update 时给出就是移动过去。传空字符串表示移到顶层。最多三层。',
+        },
         scope: { type: 'string', enum: SCOPES, description: scopeDescription('整个组及其默认归属') },
         description: { type: 'string', description: '记忆组用途说明，写入后出现在记忆索引里。' },
         tags: { type: 'array', items: { type: 'string' }, description: '记忆组标签。' },
@@ -182,6 +193,7 @@ export function buildTools({ store, config, summarize, curate, notify }) {
             sessionId,
             autoSummary: args.autoSummary === true,
             priority: args.priority ?? 0,
+            parent: args.parent ?? null,
           })
           notify()
           return { action: 'create', group }
@@ -200,6 +212,9 @@ export function buildTools({ store, config, summarize, curate, notify }) {
             ...(args.tags === undefined ? {} : { tags: args.tags }),
             ...(args.autoSummary === undefined ? {} : { autoSummary: args.autoSummary }),
             ...(args.priority === undefined ? {} : { priority: args.priority }),
+            // `parent: ''` is a deliberate move to the top level, so only an
+            // omitted parameter means "leave it where it is".
+            ...(args.parent === undefined ? {} : { parent: args.parent }),
           })
           notify()
           return { action: args.action, group, movedEntries }
@@ -268,6 +283,8 @@ export function buildTools({ store, config, summarize, curate, notify }) {
       '每条记忆归属一个记忆组，并带一个归属（对话记忆 / 知识库）：默认跟随记忆组，也可以用 scope 单独指定。',
       '正文支持 Markdown（标题、列表、表格、代码块、引用、链接）与 LaTeX 公式：行内用 $...$，独立成行用 $$...$$；面板会渲染它们。',
       '适合写入：用户的长期偏好、项目约定、关键结论、可复用的操作步骤、排错结论。不要写入一次性的中间过程。',
+      '**只用于新内容。** 要改一条已有记忆的标签、优先级、底层 prompt 标记或归属，用 `memory_assign`，不要把它重写一遍再隐藏旧的——'
+        + '那样会留下两条正文相同的记忆（真实发生过：一次全库整理因此把 21 组记忆翻倍）。写入前若不确定是否已有，先用 `memory_recall` 查一下。',
     ].join('\n'),
     parameters: {
       type: 'object',
@@ -326,7 +343,9 @@ export function buildTools({ store, config, summarize, curate, notify }) {
       const written = store.createEntries(batch.map(fields => ({
         groupId: group.id,
         ...fields,
-        source: 'manual',
+        // The model wrote this, not a person: filing it as `manual` made every
+        // model-written memory show up as 「人工输入」 in the panel.
+        source: 'model-write',
         sessionId,
         scope: args.scope ?? null,
       })))
@@ -360,6 +379,10 @@ export function buildTools({ store, config, summarize, curate, notify }) {
         limit: { type: 'integer', description: `返回条数上限，默认 ${config.searchLimit}。` },
         withContent: { type: 'boolean', description: '是否返回正文，默认 true；只做目录浏览时可设 false。' },
         includeHidden: { type: 'boolean', description: '是否连已隐藏的记忆一起返回，默认 false。' },
+        includeChildren: {
+          type: 'boolean',
+          description: '按记忆组检索时是否连它的子记忆组一起检索，默认 true（子组里的记忆也算这个组的记忆）；设 false 只看该组自己。',
+        },
       },
     },
     execute: async (args) => {
@@ -371,14 +394,21 @@ export function buildTools({ store, config, summarize, curate, notify }) {
       const group = args.group === undefined ? undefined : store.requireGroup(args.group)
       const tag = args.tag === undefined ? undefined : String(args.tag).trim()
       const includeHidden = args.includeHidden === true
+      // Reading a heading reads what is filed under it, unless the caller asks
+      // for that group alone.
+      const groupIds = group === undefined
+        ? undefined
+        : args.includeChildren === false
+          ? [group.id]
+          : [group.id, ...store.descendantIds(group.id)]
       if (args.query === undefined || String(args.query).trim() === '') {
-        const entries = store.listEntries({ groupId: group?.id, scope: args.scope, tag, includeHidden, limit })
+        const entries = store.listEntries({ groupIds, scope: args.scope, tag, includeHidden, limit })
         return { mode: 'list', entries, total: entries.length, group: group ?? null, tag: tag ?? null }
       }
       const entries = store.searchEntries({
         query: args.query,
         scope: args.scope,
-        groupId: group?.id,
+        groupIds,
         tag,
         includeHidden,
         limit,
@@ -409,6 +439,7 @@ export function buildTools({ store, config, summarize, curate, notify }) {
       '归属的移动是显式决定：被移动的条目会标记为手动归属，之后不再随记忆组的归属变化而整体移动。',
       '优先级是 0-100，越大越优先：决定记忆在提示索引里的排序，以及注入预算不够时谁先进入系统提示——把真正重要的结论调高，它就不会被后来的新记忆挤掉。',
       '隐藏是可逆的下架：条目、标签与记忆组都保留，但默认不再出现在检索与提示索引里，随时可以恢复。',
+      '标签可以就地改：给出 ids 与 tags，用 tagsMode=add（默认）/remove/set 增删或整体替换，不必重新写入这条记忆。',
       '典型用法：把当前会话里已沉淀为通用结论的记忆提升到知识库；把反复要用到的结论调到高优先级；把过时或走错方向的记忆隐藏掉。',
     ].join('\n'),
     parameters: {
@@ -435,9 +466,51 @@ export function buildTools({ store, config, summarize, curate, notify }) {
           type: 'boolean',
           description: '配合 ids 使用：true 把这些记忆标为「底层 prompt」（每次对话都注入、不占知识配额），false 取消。',
         },
+        tags: {
+          type: 'array',
+          items: { type: 'string' },
+          description: '配合 ids 使用：要增删的标签。系统标签（「人工输入」「AI 生成」）由记忆来源自动决定，改不了也不必改。',
+        },
+        tagsMode: {
+          type: 'string',
+          enum: ['add', 'remove', 'set'],
+          description: 'tags 的处理方式：add 追加（默认）、remove 移除、set 整体替换成给出的这批。只改标签，不动归属。',
+        },
       },
     },
     execute: async (args) => {
+      if (args.tags !== undefined) {
+        if (!Array.isArray(args.ids) || args.ids.length === 0) {
+          throw new Error('memory_assign 用 tags 调整标签时，必须给出 ids')
+        }
+        const mode = args.tagsMode === 'remove' ? 'remove' : args.tagsMode === 'set' ? 'set' : 'add'
+        const wanted = normalizeTags(args.tags)
+        if (mode !== 'set' && wanted.length === 0) {
+          throw new Error('memory_assign 用 tags 调整标签时，tags 不能为空；要清空全部用户标签请用 tagsMode=set 且给空数组')
+        }
+        /** @type {Record<string, unknown>[]} */
+        const entries = []
+        /** @type {string[]} */
+        const missing = []
+        const drop = new Set(wanted.map(tag => tag.toLowerCase()))
+        for (const id of args.ids) {
+          const current = store.findEntry(id)
+          if (current === undefined) {
+            missing.push(id)
+            continue
+          }
+          // The system tag stays out of it: `updateEntry` re-derives it from the
+          // entry's source, so adding or removing it here simply has no effect.
+          const next = mode === 'set'
+            ? wanted
+            : mode === 'remove'
+              ? current.tags.filter(tag => !drop.has(String(tag).toLowerCase()))
+              : [...current.tags, ...wanted]
+          entries.push(store.updateEntry(id, { tags: next }))
+        }
+        notify()
+        return { mode: 'tags', tagsMode: mode, tags: wanted, entries, missing }
+      }
       if (args.base !== undefined) {
         if (!Array.isArray(args.ids) || args.ids.length === 0) {
           throw new Error('memory_assign 用 base 调整底层 prompt 时，必须给出 ids')
@@ -503,6 +576,15 @@ export function buildTools({ store, config, summarize, curate, notify }) {
       return { mode: 'entries', ...result }
     },
     render: (_args, value) => {
+      if (value.mode === 'tags') {
+        const entries = /** @type {Record<string, any>[]} */ (value.entries)
+        const missing = /** @type {string[]} */ (value.missing)
+        const absent = missing.length === 0 ? '' : `\n未找到 ${missing.length} 个 id：${missing.join(', ')}`
+        const verb = value.tagsMode === 'set' ? '已把标签整体替换为' : value.tagsMode === 'remove' ? '已移除标签' : '已添加标签'
+        const list = /** @type {string[]} */ (value.tags).length === 0 ? '（清空全部用户标签）' : `「${/** @type {string[]} */ (value.tags).join('、')}」`
+        return `${verb}${list}，涉及 ${entries.length} 条记忆：\n`
+          + entries.map(entry => entryLine(entry, false)).join('\n') + absent
+      }
       if (value.mode === 'base') {
         const entries = /** @type {Record<string, any>[]} */ (value.entries)
         const missing = /** @type {string[]} */ (value.missing)
@@ -663,15 +745,21 @@ export function buildTools({ store, config, summarize, curate, notify }) {
     name: 'memory_curate',
     description: [
       '用一次模型调用整理知识库：逐条判断记忆属于「可复用」（跨会话仍然成立的结论、事实、约定、偏好、可复用步骤）还是「单次性」（只对某次任务或临时环境成立的细节、进度与过程）。',
-      'action=review 只给出分类建议、理由与建议的记忆组，不写入任何东西；action=apply 才按建议落库：可复用的提升到知识库并归入建议的记忆组，单次性的改回对话记忆。',
+      '用 origin 选择整理范围，这是来源而不是操作：generated（默认）只整理「AI 生成」的记忆——模型自动总结出来的和在会话里写进去的；manual 只整理「人工输入」的（人特意写下的）；all 两者一起。人工输入的记忆已经被人整理过一次，所以默认不动它们。',
+      'action=review 只给出分类建议、理由与建议的记忆组，不写入任何东西；action=apply 直接落库：可复用的提升到知识库并归入建议的记忆组，单次性的改回对话记忆。',
       '一次最多处理 50 条，默认 20；用 group 指定某个记忆组，或用 ids 指定具体几条。',
-      '整理会改变归属与分组，建议先 review 看一眼再 apply；对同一批反复 apply 是幂等的。',
+      '想先看一眼再用 action=review，确认后 action=apply；直接 apply 也是允许的，两次调用之间对同一批反复整理是幂等的。',
     ].join('\n'),
     parameters: {
       type: 'object',
       additionalProperties: false,
       properties: {
-        action: { type: 'string', enum: ['review', 'apply'], description: 'review 只给建议；apply 按建议落库。' },
+        action: { type: 'string', enum: ['review', 'apply'], description: 'review 只给建议；apply 直接落库。' },
+        origin: {
+          type: 'string',
+          enum: ['generated', 'manual', 'all'],
+          description: '整理范围（按来源）：generated 默认，只整理 AI 生成的记忆；manual 只整理人工输入的；all 两者都整。',
+        },
         group: { type: 'string', description: '要整理的记忆组名称或 id；省略时按 limit 取全库最新的若干条。' },
         ids: { type: 'array', items: { type: 'string' }, description: '只整理这些记忆 id。' },
         limit: { type: 'number', description: '一次最多整理多少条，默认 20，上限 50。' },
@@ -691,29 +779,69 @@ export function buildTools({ store, config, summarize, curate, notify }) {
         limit: args.limit,
         apply: args.action === 'apply',
         applyPriority: args.applyPriority === true,
+        origin: args.origin,
         signal: exec.signal,
       })
       return { action: args.action, ...result }
     },
     render: (_args, value) => {
       const verdicts = /** @type {Record<string, any>[]} */ (value.verdicts)
+      const scopeLabel = value.origin === 'manual' ? '人工输入' : value.origin === 'all' ? '全部来源' : 'AI 生成'
       const head = value.mode === 'review'
-        ? `整理建议（模型 ${String(value.model?.provider)}/${String(value.model?.model)}，共 ${String(value.candidates.length)} 条，未写入）：`
-        : `已整理 ${String(value.applied.length)} 条记忆（模型 ${String(value.model?.provider)}/${String(value.model?.model)}）：`
+        ? `整理建议（范围 ${scopeLabel} · 模型 ${String(value.model?.provider)}/${String(value.model?.model)}，共 ${String(value.candidates.length)} 条，未写入）：`
+        : `已整理 ${String(value.applied.length)} 条记忆（范围 ${scopeLabel} · 模型 ${String(value.model?.provider)}/${String(value.model?.model)}）：`
       if (verdicts.length === 0) return `${head}\n模型没有给出可用的判断，请重试或缩小整理范围。`
       const reusable = verdicts.filter(item => item.verdict === 'reusable')
       const oneoff = verdicts.filter(item => item.verdict === 'oneoff')
       const lines = [
         head,
         `可复用 ${String(reusable.length)} 条：`,
-        ...reusable.map(item => `- ${item.id} → 记忆组「${item.group}」：${item.reason}`),
+        ...reusable.map(item => `- 【${item.modelWritten === true ? 'AI 生成' : '人工输入'}】${item.id} → 记忆组「${item.group}」：${item.reason}`),
         `单次性 ${String(oneoff.length)} 条：`,
-        ...oneoff.map(item => `- ${item.id}：${item.reason}`),
+        ...oneoff.map(item => `- 【${item.modelWritten === true ? 'AI 生成' : '人工输入'}】${item.id}：${item.reason}`),
       ]
       if (value.mode === 'review') lines.push('确认无误后用 action=apply 落库。')
       return lines.join('\n')
     },
   }))
 
+  definitions.push(tool({
+    name: 'memory_updates',
+    description: '查询 Memory Vault 的版本状态，或检查已配置的发布源。不会下载或安装软件。',
+    parameters: { type: 'object', properties: { action: { type: 'string', enum: ['status', 'check'] } }, required: ['action'] },
+    execute: async args => {
+      if (!updates) throw new Error('此宿主未接入更新服务')
+      if (!['status', 'check'].includes(args.action)) throw new Error('action 必须为 status 或 check')
+      return args.action === 'check' ? updates.check() : updates.status()
+    },
+    render: (_args, value) => JSON.stringify(value, null, 2),
+  }))
+  definitions.push(tool({
+    name: 'memory_image',
+    description: '管理记忆的图片附件。list 需 entryId，read/remove 需 id，add 需 entryId 与 Base64 data，可给 name/mimeType。读取会返回图像；支持 PNG、JPEG、WebP、GIF，每张最多 10 MB。',
+    parameters: { type: 'object', properties: {
+      action: { type: 'string', enum: ['list', 'read', 'add', 'remove'] }, entryId: { type: 'string' }, id: { type: 'string' }, data: { type: 'string' }, name: { type: 'string' }, mimeType: { type: 'string' },
+    }, required: ['action'] },
+    execute: async (args, exec) => {
+      switch (args.action) {
+        case 'list': return { images: store.listImages(String(args.entryId ?? '')) }
+        case 'read': {
+          const image = store.readImage(String(args.id ?? ''))
+          if (!saveImageAttachment) return { image }
+          const attachment = await saveImageAttachment(image, exec?.signal)
+          const { data, ...metadata } = image
+          return { image: metadata, attachment }
+        }
+        case 'add': { const images = store.addImage(String(args.entryId ?? ''), args); notify(); return { images } }
+        case 'remove': { const image = store.deleteImage(String(args.id ?? '')); notify(); return { image } }
+        default: throw new Error('未知图片操作')
+      }
+    },
+    renderContent: (_args, value) => {
+      const image = value.image ? { ...value.image } : null
+      if (image) delete image.data
+      return [{ type: 'text', text: JSON.stringify(image ? { image } : value, null, 2) }, ...(value.attachment ? [{ type: 'image', attachment: value.attachment }] : [])]
+    },
+  }))
   return definitions
 }

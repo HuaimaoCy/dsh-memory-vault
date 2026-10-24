@@ -1,0 +1,97 @@
+/* The introduction plays once; only the small indeterminate line keeps moving. */
+.alaya-loader[hidden] { display:none !important; }
+.alaya-loader { --alaya-paper:#fafbf8; --alaya-ink:#191d1c; width:100%; color:var(--alaya-ink); }
+.alaya-stage { position:relative; height:248px; overflow:hidden; isolation:isolate; border:1px solid #e0e3dc; border-radius:8px; background:#171a19; }
+.alaya-origin { position:absolute; inset:0; }
+.alaya-frame { position:absolute; left:50%; top:50%; width:62px; height:62px; border:1.5px solid #f6f7f3; animation:alaya-frame-outer 2400ms var(--ease-in-out) both; }
+.alaya-frame.inner { width:48px; height:48px; border-color:#b7beb8; animation-name:alaya-frame-inner; }
+.alaya-frame.spine { width:62px; height:19px; border-color:#8d9690; animation-name:alaya-frame-spine; }
+.alaya-seed { position:absolute; top:50%; left:50%; color:#fff; font:700 17px/1 Arial,"Segoe UI",sans-serif; letter-spacing:-.07em; transform:translate(-50%,-50%); animation:alaya-seed 2400ms linear both; }
+.alaya-paper { position:absolute; inset:0; background:var(--alaya-paper); animation:alaya-paper 2400ms var(--ease-in-out) both; }
+.alaya-wordmark { position:absolute; left:50%; top:50%; width:180px; transform:translate(-50%,-50%); text-align:left; animation:alaya-wordmark 2400ms linear both; }
+.alaya-wordmark strong { display:block; font:750 52px/.94 Arial,"Segoe UI",sans-serif; letter-spacing:-.065em; color:var(--alaya-ink); }
+.alaya-rule { display:block; height:2px; background:var(--alaya-ink); transform-origin:left center; animation:alaya-rule 2400ms var(--ease-out) both; }
+.alaya-rule.top { margin-bottom:9px; }.alaya-rule.bottom { margin-top:8px; height:1px; }
+.alaya-track { position:absolute; bottom:32px; left:50%; width:180px; height:1px; overflow:hidden; transform:translateX(-50%); background:#daddd6; animation:alaya-wordmark 2400ms linear both; }
+.alaya-track i { display:block; width:60px; height:1px; background:#65746a; animation:alaya-wait 2400ms linear infinite; }
+.alaya-loading-copy { padding:17px 4px 0; }.alaya-loading-label { margin:0; font-size:13px; font-weight:550; line-height:1.8; }
+.alaya-loader.compact { display:flex; align-items:center; gap:13px; margin:12px 0; }
+.alaya-loader.compact .alaya-stage { flex:0 0 96px; width:96px; height:72px; border-radius:5px; }
+.alaya-loader.compact .alaya-frame { width:25px; height:25px; border-width:1px; }.alaya-loader.compact .alaya-frame.inner { width:18px; height:18px; }.alaya-loader.compact .alaya-frame.spine { width:25px; height:9px; }.alaya-loader.compact .alaya-seed { font-size:7px; }
+.alaya-loader.compact .alaya-wordmark { width:68px; top:43%; }.alaya-loader.compact .alaya-wordmark strong { font-size:22px; }.alaya-loader.compact .alaya-rule { height:1px; margin:4px 0; }
+.alaya-loader.compact .alaya-track { width:68px; bottom:13px; }.alaya-loader.compact .alaya-track i { width:23px; }.alaya-loader.compact .alaya-loading-copy { padding:0; }.alaya-loader.compact .alaya-loading-label { font-size:12px; }
+.alaya-preview { width:min(600px,92vw); padding:0; border:1px solid #dfe4d9; border-radius:14px; color:#344038; background:#fff; box-shadow:0 24px 70px #17251c30; }
+.alaya-preview::backdrop { background:#26332a48; backdrop-filter:blur(4px); }.alaya-preview-head { display:flex; align-items:center; justify-content:space-between; gap:16px; padding:20px 24px; border-bottom:1px solid #edf0e7; }.alaya-preview-head strong { font-size:16px; font-weight:600; }.alaya-preview-body { padding:24px; }.alaya-preview-controls { display:flex; gap:10px; justify-content:flex-end; padding:0 24px 24px; }.alaya-preview button:focus-visible { outline:2px solid #78947e; outline-offset:3px; }
+.alaya-startup { position:fixed; inset:0; z-index:100; padding:0; background:#171a19; }
+.alaya-startup .alaya-loader { --alaya-mark-width:clamp(220px,30vmin,340px); height:100%; }
+.alaya-startup .alaya-stage { width:100%; height:100%; border:0; border-radius:0; }
+.alaya-startup .alaya-frame { width:clamp(72px,12vmin,128px); height:clamp(72px,12vmin,128px); }
+.alaya-startup .alaya-frame.inner { width:clamp(56px,9vmin,100px); height:clamp(56px,9vmin,100px); }
+.alaya-startup .alaya-frame.spine { width:clamp(72px,12vmin,128px); height:clamp(22px,3.6vmin,38px); }
+.alaya-startup .alaya-seed { font-size:clamp(21px,3.4vmin,32px); }
+.alaya-startup .alaya-wordmark { width:var(--alaya-mark-width); }
+.alaya-startup .alaya-wordmark strong { font-size:clamp(64px,9vmin,100px); }
+.alaya-startup .alaya-track { width:var(--alaya-mark-width); bottom:calc(50% - clamp(95px,13vmin,145px)); }
+.alaya-startup .alaya-track i { width:33.333%; }
+.alaya-startup .alaya-loading-copy { position:absolute; width:1px; height:1px; padding:0; overflow:hidden; clip-path:inset(50%); white-space:nowrap; }
+.alaya-booting .app-shell { visibility:hidden; }
+@keyframes alaya-frame-outer {
+  0% { opacity:0; transform:translate(-50%,-50%) rotate(0deg) scale(.5); }
+  10% { opacity:1; transform:translate(-50%,-50%) rotate(45deg) scale(.7); }
+  27% { opacity:1; transform:translate(-50%,-50%) rotate(45deg) scale(1); }
+  47% { opacity:1; transform:translate(-50%,-50%) rotate(225deg) scale(1); }
+  61% { opacity:1; transform:translate(-50%,-50%) rotate(225deg) scale(1.1); }
+  72%,100% { opacity:0; transform:translate(-50%,-50%) rotate(225deg) scale(1.7); }
+}
+@keyframes alaya-frame-inner {
+  0%,15% { opacity:0; transform:translate(-50%,-50%) rotate(45deg) scale(.8); }
+  30% { opacity:.8; transform:translate(-50%,-50%) rotate(0deg) scale(1); }
+  48%,61% { opacity:.8; transform:translate(-50%,-50%) rotate(-90deg) scale(1); }
+  72%,100% { opacity:0; transform:translate(-50%,-50%) rotate(-90deg) scale(1.5); }
+}
+@keyframes alaya-frame-spine {
+  0%,23% { opacity:0; transform:translate(-50%,-50%) rotate(0deg) scale(.8); }
+  36%,61% { opacity:.75; transform:translate(-50%,-50%) rotate(90deg) scale(1); }
+  72%,100% { opacity:0; transform:translate(-50%,-50%) rotate(90deg) scale(1.6); }
+}
+@keyframes alaya-seed { 0%,20% { opacity:0; } 33%,57% { opacity:1; } 68%,100% { opacity:0; } }
+@keyframes alaya-paper { 0%,58% { opacity:0; transform:scale(.94); } 76%,100% { opacity:1; transform:scale(1); } }
+@keyframes alaya-wordmark { 0%,65% { opacity:0; } 86%,100% { opacity:1; } }
+@keyframes alaya-rule { 0%,66% { opacity:0; transform:scaleX(.15); } 85%,100% { opacity:1; transform:scaleX(1); } }
+@keyframes alaya-wait { from { transform:translateX(-100%); } to { transform:translateX(300%); } }
+.alaya-reduce-motion .alaya-origin { display:none; }.alaya-reduce-motion .alaya-origin * { animation:none; }.alaya-reduce-motion .alaya-paper,.alaya-reduce-motion .alaya-wordmark,.alaya-reduce-motion .alaya-rule,.alaya-reduce-motion .alaya-track,.alaya-reduce-motion .alaya-registration { animation:none; opacity:1; }.alaya-reduce-motion .alaya-paper { transform:none; }.alaya-reduce-motion .alaya-rule { transform:none; }.alaya-reduce-motion .alaya-track i { animation:alaya-soft-wait 2400ms linear infinite; transform:none; width:100%; }
+@keyframes alaya-soft-wait { 0%,100% { opacity:.35; } 50% { opacity:.8; } }
+@media(prefers-reduced-motion:reduce) {
+  .alaya-origin { display:none; }.alaya-origin * { animation:none !important; }.alaya-paper,.alaya-wordmark,.alaya-rule,.alaya-track,.alaya-registration { animation:none !important; opacity:1; }.alaya-paper,.alaya-rule { transform:none; }.alaya-track i { animation:alaya-soft-wait 2400ms linear infinite !important; transform:none; width:100%; }
+}
+
+// 静态等待状态样式（0.7.2 起）
+// Waiting is a readable status, with no animated splash or artificial delay.
+// 搴旂敤鍚姩鍔ㄧ敾锛?alaya-startup 鐢?index.html 闈欐€佹彁渚涳紝鍔ㄧ敾缁撴潫鍚庣敱鏈嚱鏁?// 绉婚櫎锛涜秴鏃跺厹搴?2.4s锛屼繚璇佷换浣曠幆澧冧笅閮戒笉娈嬬暀锛夈€?export function dismissStartup() {
+  const overlay = document.getElementById('alaya-startup')
+  if (!overlay) return
+  overlay.addEventListener('animationend', event => { if (event.target === overlay) overlay.remove() })
+  setTimeout(() => overlay.remove(), 2400)
+}
+export function createLoadingStatus({ label = '姝ｅ湪澶勭悊鈥?, compact = false, hidden = false } = {}) {
+  const element = document.createElement('section')
+  element.className = `loading-status${compact ? ' compact' : ''}`
+  element.hidden = hidden
+  element.setAttribute('role', 'status')
+  element.setAttribute('aria-live', 'polite')
+  element.setAttribute('aria-busy', String(!hidden))
+  const dot = document.createElement('span')
+  dot.className = 'loading-dot'; dot.setAttribute('aria-hidden', 'true')
+  const text = document.createElement('p'); text.className = 'loading-label'
+  element.append(dot, text)
+  const setLabel = value => { text.textContent = value }
+  setLabel(label)
+  return {
+    element, setLabel,
+    show(value = label) { setLabel(value); element.hidden = false; element.setAttribute('aria-busy', 'true') },
+    hide() { element.hidden = true; element.setAttribute('aria-busy', 'false') },
+    destroy() { element.remove() },
+  }
+}
+
+.alaya-startup { pointer-events:none; }

@@ -14,3 +14,10 @@ pnpm-debug.log*
 *.sqlite-shm
 *.sqlite.v*.bak
 memory-vault/
+desktop/node_modules/
+desktop/selftest.png
+desktop/dist/
+desktop/.runtime/
+
+test-tmp/
+

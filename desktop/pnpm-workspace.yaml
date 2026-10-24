@@ -1,0 +1,10 @@
+allowBuilds:
+  electron: true
+# pnpm reads its settings here, not from package.json's `pnpm` field (pnpm 10+
+# moved them, and pnpm 12 ignores the old location with a warning). Electron's
+# postinstall is what downloads the binary, and pnpm skips install scripts
+# unless the package is approved — so without this the app installs as a
+# package with no `dist/` and `electron .` fails with "Electron failed to
+# install correctly".
+onlyBuiltDependencies:
+  - electron

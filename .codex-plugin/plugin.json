@@ -1,0 +1,20 @@
+{
+  "name": "alaya-notebook",
+  "version": "0.7.22",
+  "description": "在 Codex 里读写本机 Alaya 笔记本：笔记、错题、物理模型、解题方法、英语词汇与自由画布。",
+  "author": {
+    "name": "HuaimaoCy"
+  },
+  "homepage": "https://github.com/HuaimaoCy/dsh-memory-vault",
+  "repository": "https://github.com/HuaimaoCy/dsh-memory-vault",
+  "keywords": [
+    "notebook",
+    "notes",
+    "canvas",
+    "mcp",
+    "sqlite",
+    "local-first"
+  ],
+  "skills": "./skills/",
+  "mcpServers": "./.mcp.json"
+}
