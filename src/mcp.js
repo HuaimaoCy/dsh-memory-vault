@@ -13,6 +13,7 @@ export function validateArguments(value, schema, path = 'arguments') {
   const type = schema.type
   const valid = type === 'object' ? value !== null && typeof value === 'object' && !Array.isArray(value)
     : type === 'array' ? Array.isArray(value)
+    : type === 'integer' ? Number.isInteger(value)
     : type === 'number' ? typeof value === 'number' && Number.isFinite(value)
     : typeof value === type
   if (!valid) throw new Error(`${path} must be ${type}`)

@@ -67,6 +67,8 @@ export async function exerciseMcp(command, args, databasePath, environment = {})
     assert.ok((await call('memory_context', { sessionId: 'task-a' })).context.includes(entry.content))
     assert.ok(!(await call('memory_context', { sessionId: 'task-b' })).context.includes(entry.content))
     assert.equal((await call('memory_recall', { id: entry.id })).entries[0].content, entry.content)
+    assert.equal((await call('memory_recall', { query: '中文', limit: 5 })).entries[0].id, entry.id)
+    assert.equal((await request('tools/call', { name: 'memory_recall', arguments: { limit: 1.5 } })).error.code, -32602)
     const imageData = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aU9sAAAAASUVORK5CYII='
     const attached = await call('memory_image', { action: 'add', entryId: entry.id, name: '测试.png', mimeType: 'image/png', data: imageData })
     assert.equal(attached.images.length, 1)
