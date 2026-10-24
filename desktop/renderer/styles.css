@@ -357,6 +357,25 @@ h1 { margin:0; font-size:29px; font-weight:650; letter-spacing:-.6px; line-heigh
 .unsaved-modal p { font-size:13px; color:var(--fg-2); margin:0; }
 .unsaved-modal .modal-status { padding:12px 0 0; }
 .unsaved-modal .modal-status.err { color:var(--danger); }
+
+/* Command palette (Ctrl/⌘K). Keyboard-first, so it never animates open or
+   closed — it must feel instant. Hover/active are plain state changes. */
+.command-palette { width:min(560px,92vw); max-height:min(60vh,520px); padding:0; border:1px solid var(--line); border-radius:16px; background:var(--surface); color:var(--fg); box-shadow:0 25px 100px #14284735; overflow:hidden; animation:none; transition:none; }
+.command-palette::backdrop { background:#25334b3a; backdrop-filter:blur(5px); }
+.palette-search { display:flex; align-items:center; gap:11px; padding:14px 17px; border-bottom:1px solid #e6e9f0; }
+.palette-search .icon { width:17px; height:17px; color:var(--fg-3); flex-shrink:0; }
+.palette-input { flex:1; min-width:0; border:0; background:transparent; font:inherit; font-size:15px; color:var(--fg); }
+.palette-input:focus { outline:none; border:0; box-shadow:none; }
+.palette-search:focus-within { box-shadow:inset 0 -2px 0 var(--accent); }
+.palette-list { max-height:min(46vh,420px); overflow:auto; padding:8px; }
+.palette-item { display:flex; align-items:center; gap:10px; padding:9px 11px; border-radius:9px; color:var(--fg-2); font-size:13px; cursor:pointer; }
+@media (hover:hover) and (pointer:fine) { .palette-item:hover { background:#eceef4; } }
+.palette-item.active { background:var(--accent-soft); color:var(--fg); }
+.palette-item:active { transform:scale(.98); }
+.palette-label { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.palette-hint { margin-left:auto; flex-shrink:0; font-size:11px; color:var(--fg-3); }
+.palette-empty { padding:20px 12px; text-align:center; color:var(--fg-3); font-size:12px; }
+.command-palette-link kbd { margin-left:auto; white-space:nowrap; font-family:inherit; font-size:9px; color:#a6adba; }
 .unsaved-actions { display:flex; align-items:center; gap:8px; margin-top:24px; }
 .unsaved-actions .btn { padding-inline:11px; }
 @media (max-width:1150px) {

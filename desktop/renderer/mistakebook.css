@@ -1,3 +1,6 @@
+/* 自由画布的样式单独成文件，由这里引入（index.html 不需要新增资源）。 */
+@import url('./freeform-canvas.css');
+
 [hidden] { display:none !important; }
 body[data-mode="mistakebook"] > #status { display:none; }
 .mode-switch { --vault-cutout:#faf9f6; display:inline-flex; align-items:center; justify-content:center; gap:7px; height:38px; padding:0 13px; border:1px solid #deddd9; background:#faf9f6; border-radius:11px; color:#292d32; font-size:12px; box-shadow:0 2px 5px #20232705; }

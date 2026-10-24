@@ -1,0 +1,164 @@
+/* 工作区布局：数据库与笔记本共用。只由 workspace-layout.js 写变量/属性，本文件负责解释。
+   变量：--alaya-side-w / --alaya-detail-w（数据库）、--mb-side-w / --mb-detail-w（笔记本）。 */
+
+/* ---------- 数据库：侧栏宽度与位置 ---------- */
+.app-shell .side {
+  order: 1;
+  width: min(var(--alaya-side-w, 222px), 34vw);
+  flex: 0 0 min(var(--alaya-side-w, 222px), 34vw);
+}
+.app-shell .workspace { order: 3; }
+.app-shell > #side-splitter { order: 2; }
+.app-shell[data-side-side='right'] > .side { order: 3; border-right: 0; border-left: 1px solid #e0e3e9; }
+.app-shell[data-side-side='right'] > .workspace { order: 1; }
+.app-shell[data-side='collapsed'] > .side,
+.app-shell[data-side='collapsed'] > #side-splitter { display: none !important; }
+.app-shell[data-focus='on'] > .side,
+.app-shell[data-focus='on'] > #side-splitter { display: none !important; }
+
+/* ---------- 数据库：详情面板宽度与位置 ---------- */
+.app-shell .body > .main { order: 1; }
+.app-shell .body > #detail-splitter { order: 2; }
+.app-shell .body > .drawer {
+  order: 3;
+  width: min(var(--alaya-detail-w, 410px), 46vw);
+  flex: 0 0 min(var(--alaya-detail-w, 410px), 46vw);
+}
+.app-shell[data-detail-side='left'] .body > .drawer { order: 1; border-left: 0; border-right: 1px solid var(--line); }
+.app-shell[data-detail-side='left'] .body > .main { order: 3; }
+/* 详情面板未打开时，分隔条不该占位（:has 让这条规则不需要 JS 参与）。 */
+.app-shell #detail-splitter { display: none; }
+.app-shell .body:has(> .drawer:not(.hidden)) > #detail-splitter { display: block; }
+.app-shell[data-focus='on'] #detail-splitter,
+.app-shell[data-focus='on'] .body > .drawer { display: none !important; }
+
+/* ---------- 分隔条 ---------- */
+.ws-splitter {
+  flex: 0 0 6px;
+  width: 6px;
+  position: relative;
+  z-index: 6;
+  cursor: col-resize;
+  touch-action: none;
+  background: transparent;
+}
+.ws-splitter::after {
+  content: '';
+  position: absolute;
+  inset-block: 0;
+  left: 2px;
+  width: 2px;
+  border-radius: 2px;
+  background: transparent;
+  transition: background 120ms var(--ease-out, ease-out);
+}
+.ws-splitter:hover::after,
+.ws-splitter:focus-visible::after,
+.ws-splitter[data-dragging]::after { background: var(--accent, #007aff); }
+.ws-splitter:focus-visible { outline: 2px solid var(--accent, #007aff); outline-offset: -2px; border-radius: 3px; }
+body[data-mb-dragging] { cursor: col-resize; user-select: none; }
+
+/* ---------- 数据库：页面宽度（居中留白，滚动条仍贴窗口） ---------- */
+.app-shell[data-page-width='comfortable'] .main { padding-inline: max(31px, calc((100% - 1040px) / 2)); }
+.app-shell[data-page-width='wide'] .main { padding-inline: max(31px, calc((100% - 1320px) / 2)); }
+.app-shell[data-page-width='full'] .main { padding-inline: 31px; }
+
+/* ---------- 数据库：密度 ---------- */
+.app-shell[data-density='compact'] .main { padding-block: 18px 22px; }
+.app-shell[data-density='compact'] .page-heading { margin-bottom: 13px; }
+.app-shell[data-density='compact'] .board-toolbar { margin-bottom: 15px; gap: 13px; }
+.app-shell[data-density='compact'] .sec { margin-bottom: 19px; }
+.app-shell[data-density='compact'] .grid { gap: 10px; grid-template-columns: repeat(auto-fill, minmax(224px, 1fr)); }
+.app-shell[data-density='compact'] .tile { padding: 14px 15px 11px; min-height: 178px; }
+.app-shell[data-density='compact'] .tile-top { margin-bottom: 9px; }
+.app-shell[data-density='compact'] .side { padding-top: 20px; }
+.app-shell[data-density='compact'] .nav { min-height: 33px; }
+
+/* ---------- 折叠/专注的展开与退出（模块生成，默认隐藏） ---------- */
+.ws-expand { display: none; width: 26px; height: 26px; padding: 4px; }
+.app-shell[data-side='collapsed'] .ws-expand,
+.app-shell[data-focus='on'] .ws-expand,
+.mb-shell[data-mb-side='collapsed'] .ws-expand,
+.mb-shell[data-mb-focus='on'] .ws-expand { display: inline-flex; }
+.ws-focus-exit { display: none; }
+.app-shell[data-focus='on'] .ws-focus-exit,
+.mb-shell[data-mb-focus='on'] .ws-focus-exit { display: inline-flex; }
+
+/* ---------- 「布局」菜单 ---------- */
+.ws-layout { position: relative; display: flex; }
+.ws-layout-trigger { list-style: none; min-height: 31px; font-size: 11px; }
+.ws-layout-trigger::-webkit-details-marker { display: none; }
+.ws-layout-trigger .icon { width: 14px; height: 14px; }
+.ws-panel {
+  position: absolute;
+  right: 0;
+  top: 40px;
+  z-index: 40;
+  width: 308px;
+  max-height: min(72vh, 560px);
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 11px;
+  padding: 15px 16px 13px;
+  border: 1px solid var(--line, #e4e6eb);
+  border-radius: 14px;
+  background: #fff;
+  box-shadow: 0 16px 54px #17284226;
+}
+.ws-section { display: flex; align-items: center; gap: 8px; margin-top: 2px; }
+.ws-section::after { content: ''; flex: 1; height: 1px; background: var(--line, #e4e6eb); }
+.ws-section-title { font-size: 10px; font-weight: 600; letter-spacing: .8px; color: var(--fg-3, #707b8a); }
+.ws-field { display: flex; align-items: center; gap: 9px; min-width: 0; }
+.ws-label { flex: 0 0 30px; font-size: 12px; color: var(--fg-2, #545d6b); }
+.ws-cap { margin: 0; font-size: 11px; line-height: 1.6; color: var(--fg-3, #707b8a); }
+.ws-seg { display: flex; flex: 1; min-width: 0; padding: 2px; border-radius: 8px; background: #eef0f4; }
+.ws-segment { flex: 1; min-width: 34px; height: 25px; padding: 0 6px; border: 0; border-radius: 6px; background: transparent; color: #7a8494; font-size: 11px; transition: transform 120ms var(--ease-out, ease-out); }
+.ws-segment[aria-pressed='true'] { background: #fff; color: #2b3340; box-shadow: 0 1px 4px #19243812; }
+.ws-segment:active, .ws-preset:active, .ws-reset:active, .ws-focus-exit:active { transform: scale(.97); }
+.ws-range { flex: 1; min-width: 0; height: 22px; accent-color: var(--accent, #007aff); }
+.ws-value { flex: 0 0 42px; text-align: right; font-size: 11px; color: var(--fg-3, #707b8a); font-variant-numeric: tabular-nums; }
+.ws-switch { display: flex; align-items: center; gap: 9px; font-size: 12px; color: var(--fg-2, #545d6b); cursor: pointer; }
+.ws-presets { gap: 5px; }
+.ws-preset { flex: 1; min-width: 0; min-height: 27px; padding: 4px 6px; border: 1px solid #e4e7ee; border-radius: 7px; background: #fff; color: var(--fg-2, #545d6b); font-size: 11px; transition: background 120ms, transform 120ms var(--ease-out, ease-out); }
+.ws-presets > .ws-label { flex: 0 0 30px; }
+.ws-foot { display: flex; margin-top: 3px; padding-top: 10px; border-top: 1px solid var(--line, #e4e6eb); }
+.ws-reset { width: 100%; min-height: 30px; font-size: 11px; color: var(--fg-2, #545d6b); }
+@media (hover: hover) and (pointer: fine) {
+  .ws-segment:hover, .ws-preset:hover { background: #f1f4f9; }
+  .ws-segment[aria-pressed='true']:hover { background: #fff; }
+  .ws-reset:hover { background: #eef0f4; }
+}
+
+/* ---------- 笔记本：只写笔记本已有的类名/变量，不改它的结构 ---------- */
+.mb-shell[data-mb-side='collapsed'] .mb-side,
+.mb-shell[data-mb-side='collapsed'] #mb-side-split { display: none !important; }
+.mb-shell[data-mb-focus='on'] .mb-side,
+.mb-shell[data-mb-focus='on'] #mb-detail,
+.mb-shell[data-mb-focus='on'] .mb-splitter { display: none !important; }
+.mb-shell[data-mb-page='comfortable'] .mb-main { padding-inline: max(30px, calc((100% - 1080px) / 2)); }
+.mb-shell[data-mb-page='wide'] .mb-main { padding-inline: max(30px, calc((100% - 1360px) / 2)); }
+.mb-shell[data-mb-page='full'] .mb-main { padding-inline: 30px; }
+.mb-shell[data-mb-density='compact'] .mb-main { padding-block: 22px; }
+.mb-shell[data-mb-density='compact'] .mb-bar { min-height: 60px; flex-basis: 60px; }
+.mb-shell[data-mb-density='compact'] .mb-side { padding-block: 20px 12px; }
+
+/* 笔记本的「布局」菜单挂在 220px 宽的侧栏底部：默认 right:0 会把 308px 的
+   面板推到窗口左侧外（预设第一颗与滑杆最小值不可见）。这里改为左锚 + 视口
+   宽度上限，并向上展开，保证 1040×650 下每个控件都在视口内可点。 */
+.mb-shell .mb-side-bottom .ws-panel {
+  left: 0;
+  right: auto;
+  top: auto;
+  bottom: calc(100% + 8px);
+  width: min(308px, calc(100vw - 24px));
+  max-height: min(62vh, 520px);
+}
+/* 折叠/专注后展开按钮移到顶部工具栏（.mb-bar .toolbar-actions），补一点间距。 */
+.mb-shell .mb-bar .toolbar-actions > .ws-expand { flex: 0 0 auto; margin-right: 2px; }
+
+/* ---------- 减少动态效果 ---------- */
+@media (prefers-reduced-motion: reduce) {
+  .ws-splitter::after, .ws-segment, .ws-preset, .ws-reset, .ws-focus-exit { transition: none; }
+  .ws-segment:active, .ws-preset:active, .ws-reset:active, .ws-focus-exit:active { transform: none; }
+}

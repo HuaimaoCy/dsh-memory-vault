@@ -32,8 +32,15 @@ function savePreferences(next) {
 const modelKey = () => preferences.encryptedKey ? safeStorage.decryptString(Buffer.from(preferences.encryptedKey, 'base64')) : ''
 const adapter = () => createModelAdapter(() => preferences.model ?? {}, modelKey)
 function checkDataTarget(path) {
+  if (typeof path !== 'string' || path.trim() === '') throw new Error('导出路径无效，请重新选择')
   const target = resolve(path).toLowerCase()
-  const protectedFiles = [bridge.databasePath, mistakebook.path, prefsPath].flatMap(file => [file, `${file}-wal`, `${file}-shm`]).map(file => resolve(file).toLowerCase())
+  // 与记忆库共用同一个 SQLite 文件时 mistakebook.path 是 null（笔记本没有独立文件）。
+  // 必须先滤掉空值再 resolve：否则 path.resolve(null) 抛 ERR_INVALID_ARG_TYPE，
+  // 会把笔记本导出与备份整体变成 {ok:false}，用户只看到一句无意义的失败。
+  const protectedFiles = [bridge.databasePath, mistakebook?.path, prefsPath]
+    .filter(file => typeof file === 'string' && file.trim() !== '')
+    .flatMap(file => [file, `${file}-wal`, `${file}-shm`])
+    .map(file => resolve(file).toLowerCase())
   if (protectedFiles.includes(target) || existsSync(`${path}-wal`) || existsSync(`${path}-shm`)) throw new Error('请选择独立于正在使用的数据文件的导出或备份路径')
 }
 async function desktopInfo() {
@@ -88,6 +95,18 @@ const notebookHooks = {
 }
 function registerDesktop() {
   register('mistakebook:invoke', (action, body = {}) => bridge.invoke(`notebook.${action}`, body))
+  // 自由画布：画布文档是笔记本域的数据（notebook_meta 的 canvas 键），与笔记同库
+  // 但不进入数据库（记忆）域；读写都经过同一个 MistakebookStore 的校验与限流。
+  register('notebook:canvas', (action, body = {}) => {
+    if (action === 'load') {
+      const state = mistakebook.canvasState()
+      // 保留顶层文档字段：仍按「load 直接返回文档」解析的旧渲染层不会把
+      // { docs, corrupted } 误当成空文档而覆盖原画布；新渲染层读 docs。
+      return { ...state.docs, docs: state.docs, corrupted: state.corrupted }
+    }
+    if (action === 'save') return mistakebook.setCanvasDocs(body?.docs ?? body)
+    throw new Error('未知的画布操作')
+  })
   register('vault:updates', async (action, body) => {
     switch (action) {
       case 'status': return updater.status()

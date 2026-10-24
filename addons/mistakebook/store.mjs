@@ -3,6 +3,7 @@ import { mkdirSync, readFileSync, existsSync, rmSync } from 'node:fs'
 import { dirname } from 'node:path'
 import { randomUUID, createHash, randomInt } from 'node:crypto'
 import { NOTE_TYPES, normalizeFields, contentOf, typeAlias } from './fields.mjs'
+import { CANVAS_LIMITS, emptyDocument, documentSize, mergeDocument, normalizeDocument } from './canvas.mjs'
 import { SIMULATIONS } from './simulations.mjs'
 import curriculum from './lib/curriculum.cjs'
 import { normalizeImage, IMAGE_MAX_COUNT, IMAGE_TOTAL_BYTES } from '../../src/images.js'
@@ -177,6 +178,10 @@ export class MistakebookStore {
         const legacySidebar = hasLegacyMeta ? this.db.prepare("SELECT value FROM legacy_nb.addon_meta WHERE key='sidebar'").get()?.value ?? null : null
         if (legacySidebar && !this.db.prepare(`SELECT 1 FROM ${meta} WHERE key='sidebar'`).get())
           this.db.prepare(`INSERT INTO ${meta}(key, value) VALUES('sidebar', ?)`).run(legacySidebar)
+        // 画布也属于笔记本域：旧文件模式里画好的画布一起搬进来（已有就保留本机）。
+        const legacyCanvas = hasLegacyMeta ? this.db.prepare("SELECT value FROM legacy_nb.addon_meta WHERE key='canvas'").get()?.value ?? null : null
+        if (legacyCanvas && !this.db.prepare(`SELECT 1 FROM ${meta} WHERE key='canvas'`).get())
+          this.db.prepare(`INSERT INTO ${meta}(key, value) VALUES('canvas', ?)`).run(legacyCanvas)
         const marker = JSON.stringify({ path: String(legacyPath), count, at: new Date().toISOString() })
         if (previous) this.db.prepare(`UPDATE ${meta} SET value=? WHERE key='migratedFrom'`).run(marker)
         else this.db.prepare(`INSERT INTO ${meta}(key, value) VALUES('migratedFrom', ?)`).run(marker)
@@ -348,6 +353,29 @@ export class MistakebookStore {
     this.db.prepare(`INSERT INTO ${this.tables.meta} VALUES('sidebar',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value`).run(text)
     return { saved: true }
   }
+  // —— 自由画布：世界坐标自由布局的卡片文档，整份存笔记本元信息的 canvas 键 ——
+  // 与笔记同库同域：随笔记本导出、导入与备份一起走，绝不进入数据库（记忆）
+  // 域的表。「没有记录」与「记录读取失败」必须可区分：前者可以新建空画布，
+  // 后者若被当成空画布，渲染层会把用户的原画布覆盖掉。canvasDocs() 保留旧语义
+  // （坏数据退回空文档，绝不因为一份坏画布打不开笔记本），canvasState() 给
+  // 主进程/渲染层一个只读的带 corrupted 标记的入口。
+  canvasState() {
+    const row = this.db.prepare(`SELECT value FROM ${this.tables.meta} WHERE key='canvas'`).get()
+    if (!row) return { docs: emptyDocument(), corrupted: false }
+    try { return { docs: normalizeDocument(JSON.parse(row.value)), corrupted: false } }
+    catch { return { docs: emptyDocument(), corrupted: true } }
+  }
+  canvasDocs() { return this.canvasState().docs }
+  setCanvasDocs(raw) {
+    const document = normalizeDocument(raw)
+    const size = documentSize(document)
+    if (size > CANVAS_LIMITS.bytes) throw new Error(`画布数据过大（约 ${Math.round(size / 1024)} KB），请拆分到多个画布`)
+    this.db.prepare(`INSERT INTO ${this.tables.meta} VALUES('canvas',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value`).run(JSON.stringify(document))
+    return {
+      saved: true, activeId: document.activeId, canvases: document.canvases.length,
+      cards: document.canvases.reduce((count, canvas) => count + canvas.cards.length, 0),
+    }
+  }
   // 拖动改分类：笔记卡片拖到侧边栏学科项 → 换学科；拖到标签 → 补标签。
   assign(id, { subjectID = '', tag = '' } = {}) {
     return this.transaction(() => {
@@ -370,6 +398,11 @@ export class MistakebookStore {
     if (!rows || rows.length > 3000) throw new Error('请选择错题本 JSON；一次最多 3000 道题')
     const sidebar = input && !Array.isArray(input) && input.sidebar && typeof input.sidebar === 'object' ? input.sidebar : null
     if (sidebar) this.setSidebar(sidebar)
+    // 画布随导出一起走：有 canvas 段就按 id 合并恢复，没有（旧版导出）就不动本机画布。
+    const restored = input && !Array.isArray(input) && input.canvas && typeof input.canvas === 'object'
+      ? mergeDocument(this.canvasDocs(), input.canvas)
+      : null
+    if (restored) this.setCanvasDocs(restored)
     return this.transaction(() => {
       const known = new Set(this.records().filter(record => record.stem.trim() || record.title.trim() || record.type === 'vocabulary').map(dedupKey))
       let created = 0, skipped = 0, unmapped = 0, missingImages = 0
@@ -388,7 +421,7 @@ export class MistakebookStore {
         this.saveInside(candidate)
         if (hasKey) known.add(hash); created++
       }
-      return { created, skipped, unmapped, missingImages }
+      return { created, skipped, unmapped, missingImages, canvases: restored ? restored.canvases.length : 0 }
     })
   }
   // 词典查询落库：新词条自动进入单词库并记为第 1 次背诵；重复查询不新建、
@@ -468,7 +501,8 @@ export class MistakebookStore {
     this.quizzes.delete(id)
     return {score:Math.round(results.filter(row=>row.correct).length/results.length*100),results}
   }
-  export() { return { format: 'memory-vault-notebook', schemaVersion: 2, exportedAt: new Date().toISOString(), sidebar: this.sidebarConfig(), records: this.records().map(row => ({ ...row, images: this.listImages(row.id, true) })) } }
+  // 导出带画布（笔记本域）：画布文档随导出 → 在别的机器导入即可原样恢复。
+  export() { return { format: 'memory-vault-notebook', schemaVersion: 3, exportedAt: new Date().toISOString(), sidebar: this.sidebarConfig(), canvas: this.canvasDocs(), records: this.records().map(row => ({ ...row, images: this.listImages(row.id, true) })) } }
   backupTo(path) {
     if (this.ownsDb) { this.db.prepare('VACUUM INTO ?').run(path); return }
     // 注入模式（与数据库同库承载）：备份只投影本域 notebook_* 表，落成

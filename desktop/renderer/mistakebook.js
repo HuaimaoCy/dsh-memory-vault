@@ -4,10 +4,11 @@ import { NOTE_TYPES, STRUCTURED_FIELDS, normalizeFields } from '../../addons/mis
 import { SIMULATIONS } from '../../addons/mistakebook/simulations.mjs'
 import { extractWords, normalizeWord } from '../../addons/mistakebook/words.mjs'
 import { renderRelationTree, vocabularyGraph } from './relations.js'
-import { attachSplitter } from './layout.js'
+import { createNotebookLayoutAdapter, NOTEBOOK_LAYOUT_DEFAULTS } from './workspace-layout.js'
 import { renderTagEditor, renderTagCloud } from './tags.js'
 import { createSidebarController, renderSidebarConfig, migrateLegacySidebar } from './sidebar.js'
 import { renderRich } from './markdown.js'
+import { createCanvasView } from './freeform-canvas.js'
 
 const h = (tag, props = {}, ...children) => {
   const node = document.createElement(tag)
@@ -60,6 +61,8 @@ export function mountMistakebook({ beforeEnter }) {
   const memory = document.querySelector('.app-shell')
   const shell = h('div', { class: 'mb-shell', hidden: true, 'aria-label': '笔记本' })
   const state = { data: null, view: 'all', type: '', subjectID: '', nodeID: '', query: '', tag: '', order: 'priority', draft: null, dirty: false, busy: false, review: false, showAnswer: false, picking: false, selection: new Set() }
+  // 自由画布视图在 shell 装配完成后创建；先声明，避免在视图切换里踩到 TDZ。
+  let canvasView = null
   const handwritingDrafts = new WeakMap()
   let messageTimer
   const notify = (message, error = false) => {
@@ -79,13 +82,17 @@ export function mountMistakebook({ beforeEnter }) {
   const dirty = () => { state.dirty = true; const hint = document.getElementById('mb-save-state'); if (hint) { hint.textContent = '有未保存的修改'; hint.classList.add('dirty') }; const saveButton = document.getElementById('mb-save'); if (saveButton) saveButton.disabled = false }
   const names = () => new Map((state.data?.taxonomy.nodes ?? []).map(node => [node.id, node.name]))
   const changeView = async (view, subjectID = '', nodeID = '', type = '') => {
+    if (canvasView?.isOpen()) await canvasView.close()
     if (!await discard()) return
     Object.assign(state, { view, subjectID, nodeID, type, tag: '', draft: null, dirty: false, review: false, picking: false }); state.selection.clear(); await load()
   }
   const load = async () => {
+    await prefsWrite
     state.data = await call('list', { view: state.view, type: state.type, subjectID: state.subjectID, nodeID: state.nodeID, query: state.query, tag: state.tag, order: state.order })
     const incoming = state.data.prefs
-    prefsCache = incoming && typeof incoming === 'object' && !Array.isArray(incoming) ? { ...incoming } : {}
+    const stored = incoming && typeof incoming === 'object' && !Array.isArray(incoming) ? incoming : {}
+    prefsCache = prefsSaved === prefsRevision ? { ...stored } : { ...stored, ...prefsCache }
+    notebookLayout.apply({ ...LAYOUT_DEFAULTS, ...prefsCache })
     if (['priority', 'updated', 'manual'].includes(prefsCache.order) && state.order !== prefsCache.order) {
       state.order = prefsCache.order
       const sort = document.getElementById('mb-sort'); if (sort) sort.value = state.order
@@ -100,6 +107,7 @@ export function mountMistakebook({ beforeEnter }) {
   // 图标即切换：品牌图标本身是模式切换按钮（与数据库侧一致）。
   const switchButton = button([icon('vault')], async () => {
     if (document.querySelector('dialog[open]') || !await discard()) return
+    if (canvasView?.isOpen()) await canvasView.close()
     localStorage.setItem('alaya.mode', 'memory')
     state.draft = null; state.dirty = false; shell.hidden = true; memory.hidden = false; document.body.dataset.mode = 'memory'
     document.getElementById('mode-switch').focus()
@@ -118,30 +126,24 @@ export function mountMistakebook({ beforeEnter }) {
   // —— 自由布局：侧边栏/详情宽度用 CSS 变量承载，拖动分隔条即改写并持久化 ——
   // 布局与排序偏好存笔记本数据库（随 list 返回 prefs，写入走 prefs.save），
   // 渲染层不再使用 localStorage。prefsCache 是内存镜像，写入异步落库。
-  const LAYOUT_DEFAULTS = { sideW: 220, detailW: 440, detailSide: 'right' }
+  const LAYOUT_DEFAULTS = NOTEBOOK_LAYOUT_DEFAULTS
   let prefsCache = {}
+  let notebookLayout = null, prefsWrite = Promise.resolve(), prefsRevision = 0, prefsSaved = 0
   const layoutPrefs = () => ({ ...LAYOUT_DEFAULTS, ...prefsCache })
-  const applyLayout = (prefs = layoutPrefs()) => {
-    shell.style.setProperty('--mb-side-w', `${prefs.sideW}px`)
-    shell.style.setProperty('--mb-detail-w', `${prefs.detailW}px`)
-    shell.classList.toggle('detail-left', prefs.detailSide === 'left')
+  // 不使用 guard：排序/设置等调用方已经持有 guard，嵌套 guard 会静默丢弃保存。
+  // 串行写入快照，保证快速拖动不会乱序；失败保留内存偏好并明确提示。
+  const savePrefs = next => {
+    const snapshot = { ...next }, revision = ++prefsRevision
+    prefsCache = snapshot
+    notebookLayout?.apply(snapshot)
+    prefsWrite = prefsWrite.then(() => call('prefs.save', snapshot)).then(() => {
+      prefsSaved = revision
+    }).catch(error => notify(`布局或排序保存失败：${error.message || error}；请重试修改。`, true))
+    return prefsWrite
   }
-  const savePrefs = next => { prefsCache = next; void guard(() => call('prefs.save', next)); applyLayout(next) }
-  const saveLayout = prefs => savePrefs(prefs)
-  const setPanelWidth = (name, width, min, max) => {
-    const prefs = layoutPrefs()
-    prefs[name] = Math.round(Math.min(max, Math.max(min, width)))
-    saveLayout(prefs)
-  }
+  const saveLayout = prefs => notebookLayout.set(prefs)
   const sideSplitter = h('div', { class: 'mb-splitter', id: 'mb-side-split', role: 'separator', 'aria-orientation': 'vertical', 'aria-label': '拖动调整侧边栏宽度，双击恢复默认', title: '拖动调整宽度 · 双击复位' })
   const detailSplitter = h('div', { class: 'mb-splitter', id: 'mb-detail-split', role: 'separator', 'aria-orientation': 'vertical', 'aria-label': '拖动调整详情面板宽度，双击恢复默认', title: '拖动调整宽度 · 双击复位', hidden: true })
-  let sideOrigin = 0, detailOrigin = 0
-  attachSplitter(sideSplitter, { onStart: () => { sideOrigin = layoutPrefs().sideW }, onResize: ({ dx }) => setPanelWidth('sideW', sideOrigin + dx, 170, 320), onReset: () => setPanelWidth('sideW', 220, 170, 320) })
-  attachSplitter(detailSplitter, {
-    onStart: () => { detailOrigin = layoutPrefs().detailW },
-    onResize: ({ dx }) => setPanelWidth('detailW', detailOrigin + dx * (layoutPrefs().detailSide === 'left' ? 1 : -1), 320, 760),
-    onReset: () => setPanelWidth('detailW', 440, 320, 760),
-  })
   // —— 自定义侧边栏：区块注册表驱动，顺序与显隐持久化在本机 ——
   const tagNav = h('div', { class: 'mb-side-tags' })
   const sideScroll = h('div', { class: 'mb-side-scroll', id: 'mb-side-scroll' })
@@ -302,17 +304,46 @@ export function mountMistakebook({ beforeEnter }) {
     h('div', { class: 'brand' }, switchButton, h('div', {}, h('div', { class: 'brand-name', text: '笔记本' }), h('div', { class: 'brand-caption', text: 'ALAYA NOTEBOOK' }))),
     sideScroll,
     h('div', { class: 'mb-side-bottom' }, h('div', { class: 'mb-local' }, h('span', { class: 'library-dot' }), h('span', { text: '独立保存在本机' })),
+      button([icon('layers'), '自由画布'], () => openCanvas(), false, { class: 'nav', id: 'mb-open-canvas', title: '自由画布：便签、文本与笔记引用按世界坐标摆放' }),
       button([icon('grid'), '自定义侧边栏'], () => openSidebarConfig(), false, { class: 'nav', id: 'mb-sidebar-config', title: '调整侧边栏区块的顺序与显隐' }),
       button([icon('settings'), '笔记本设置'], openSettings, false, { class: 'nav', id: 'mb-settings' }))),
     sideSplitter,
     h('div', { class: 'mb-workspace' }, h('header', { class: 'mb-bar' }, h('div', { class: 'breadcrumb' }, icon('book'), h('span', { text: '笔记本' })),
-      h('div', { class: 'toolbar-actions' }, h('label', { class: 'search-wrap' }, icon('search'), search), button('录入', () => openImport(), false, { id: 'mb-import', title: '识别或粘贴，导入错题、笔记与词汇' }), button([icon('plus'), '新建笔记'], openCreate, true, { id: 'mb-new' }))),
+      h('div', { class: 'toolbar-actions' }, h('label', { class: 'search-wrap' }, icon('search'), search), button([icon('layers'), '画布'], () => openCanvas(), false, { id: 'mb-canvas-button', title: '打开自由画布' }), button('录入', () => openImport(), false, { id: 'mb-import', title: '识别或粘贴，导入错题、笔记与词汇' }), button([icon('plus'), '新建笔记'], openCreate, true, { id: 'mb-new' }))),
       h('div', { class: 'mb-body' }, h('main', { class: 'mb-main' }, h('div', { class: 'mb-page-heading' }, h('div', {}, heading, subtitle), h('div', { class: 'mb-total', id: 'mb-total' })),
         h('div', { class: 'mb-board' }, order, h('span', { class: 'spacer' }), button('AI 助手', toggleAISide, false, { class: 'btn soft', id: 'mb-ai-toggle', title: '打开 AI 学习助手侧边栏' }), button('查词典', openLookup, false, { class: 'btn soft', id: 'mb-lookup', title: '查一个单词，自动存入单词库；重复查询累计背诵次数' }), button('单词检测', openQuiz, false, { class: 'btn soft', id: 'mb-quiz' }), pickButton, moreMenu), searchFilter, list), detailSplitter, detail),
       h('footer', { class: 'mb-foot' }, h('span', { text: '笔记本 · 本地保存' }), h('span', { class: 'spacer' }))), jsonPicker, h('div', { id: 'mb-status', class: 'mb-status', role: 'status', 'aria-live': 'polite' }))
   document.body.append(shell)
   document.body.append(aiSide)
-  applyLayout()
+  notebookLayout = createNotebookLayoutAdapter({
+    shell, read: () => prefsCache, write: savePrefs, icon, onStatus: notify,
+    menuHost: shell.querySelector('.mb-side-bottom'),
+    expandHost: shell.querySelector('.mb-bar .toolbar-actions'),
+    focusExitHost: shell.querySelector('.mb-bar .toolbar-actions'),
+    escapeGuard: () => !shell.hidden && !canvasView?.isOpen(),
+  })
+  // —— 自由画布：世界坐标版面，文档存在笔记本域（notebook_meta 的 canvas 键），
+  //    随笔记本导出/导入与备份一起走，绝不进入数据库（记忆）域。
+  const callCanvas = async (action, body) => {
+    if (typeof window.vault?.canvas !== 'function') throw new Error('当前版本不支持自由画布，请更新到最新版')
+    const reply = await window.vault.canvas(action, body)
+    if (!reply?.ok) throw new Error(reply?.error || '画布操作失败')
+    return reply.result
+  }
+  canvasView = createCanvasView({
+    host: shell.querySelector('.mb-workspace'), shell, h, icon, dialog,
+    call: callCanvas, notify, confirm,
+    notes: async () => (await call('list', { view: 'all', order: 'updated' })).records,
+    openNote: async id => {
+      await canvasView.close()
+      if (!state.data?.records?.some(row => row.id === id)) await load()
+      await select(id)
+    },
+  })
+  async function openCanvas() {
+    if (!await discard()) return
+    await canvasView.open()
+  }
   document.getElementById('mode-switch').addEventListener('click', () => void guard(async () => {
     if (!await beforeEnter()) return
     await load(); localStorage.setItem('alaya.mode', 'notebook'); document.getElementById('status').classList.remove('show'); memory.hidden = true; shell.hidden = false; document.body.dataset.mode = 'mistakebook'; search.focus()
@@ -885,7 +916,7 @@ export function mountMistakebook({ beforeEnter }) {
       }, true, { id: 'mb-config-save' }), h('h3', { text: '本地数据' }), h('p', { class: 'mb-data-path', text: config.path }), button('备份笔记本', async () => { if (await call('backup')) notify('笔记本已备份，包含原图') }), h('p', { class: 'cap', text: '笔记本使用独立数据库，不进入 Codex / DSH 的记忆上下文。' }),
       h('h3', { text: '界面布局' }), h('p', { class: 'cap', text: '侧边栏与详情面板之间有可拖动的分隔条：按住拖动自由调整宽度，双击恢复默认。' }),
       field('详情面板位置', h('select', { class: 'select', id: 'mb-detail-side', onChange: event => void guard(() => { const prefs = layoutPrefs(); prefs.detailSide = event.target.value; saveLayout(prefs); notify('布局已更新') }) }, [['right', '右侧（默认）'], ['left', '左侧']].map(([value, text]) => h('option', { value, text, selected: layoutPrefs().detailSide === value ? 'selected' : undefined })))),
-      button('恢复默认布局', () => { savePrefs({ ...prefsCache, ...LAYOUT_DEFAULTS }); notify('布局已恢复默认') }, false, { class: 'btn ghost', id: 'mb-layout-reset' })))
+      button('恢复默认布局', () => notebookLayout.reset(), false, { class: 'btn ghost', id: 'mb-settings-layout-reset' })))
   }
   async function openImport(initial = 'mistake') {
     if (!await discard()) return
@@ -1035,6 +1066,8 @@ export function mountMistakebook({ beforeEnter }) {
   }
   document.addEventListener('keydown', event => {
     if (document.body.dataset.mode !== 'mistakebook' || document.querySelector('dialog[open]')) return
+    // 画布打开时笔记列表/编辑器是隐藏的：Ctrl+N / Ctrl+F 等不能作用到看不见的 .mb-body。
+    if (canvasView?.isOpen()) return
     if (event.key === 'Escape' && state.picking) { state.picking = false; state.selection.clear(); renderList(); return }
     if (event.key === 'Escape' && shell.classList.contains('detail-full')) { shell.classList.remove('detail-full'); renderDetail(); return }
     if (event.ctrlKey || event.metaKey) {

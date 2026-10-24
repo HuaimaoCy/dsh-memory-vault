@@ -54,6 +54,11 @@
     "build:desktop": "npm --prefix desktop run build",
     "mcp": "node --no-warnings bin/memory-vault.mjs mcp",
     "test:mistakebook": "node --no-warnings tests/mistakebook-smoke.mjs",
-    "test:notebook": "node --no-warnings tests/notebook-smoke.mjs"
+    "test:notebook": "node --no-warnings tests/notebook-smoke.mjs",
+    "test:palette": "node tests/run-desktop-palette.mjs",
+    "test:palette:browser": "node tests/run-palette-browser.mjs",
+    "test:views": "node --no-warnings tests/views-smoke.mjs && node tests/run-desktop-views.mjs",
+    "test:capture": "node --no-warnings tests/capture-smoke.mjs && node --no-warnings tests/run-desktop-capture-app.mjs",
+    "test:capture:module": "node --no-warnings tests/run-desktop-capture.mjs"
   }
 }
