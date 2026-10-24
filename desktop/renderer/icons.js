@@ -14,6 +14,8 @@ const paths = {
   'chevron-right': ['M9 6l6 6-6 6'], 'chevron-down': ['M6 9l6 6 6-6'], close: ['M6 6l12 12M6 18 18 6'],
   sparkles: ['M12 3l2.5 6.5L21 12l-6.5 2.5L12 21l-2.5-6.5L3 12l6.5-2.5L12 3ZM20 2v4M18 4h4'],
   grid: ['M3 3h7v7H3zM14 3h7v7h-7zM3 14h7v7H3zM14 14h7v7h-7z'],
+  maximize: ['M9 3H3v6M15 3h6v6M15 21h6v-6M9 21H3v-6'],
+  minimize: ['M3 9h6V3M21 9h-6V3M21 15h-6v6M3 15h6v6'],
   list: ['M8 5h13M8 12h13M8 19h13M3 5h.01M3 12h.01M3 19h.01'], sort: ['M8 4v16M4 16l4 4 4-4M14 5h7M14 10h5M14 15h3'],
   shield: ['M12 3l8 3v6c0 5-8 9-8 9s-8-4-8-9V6l8-3Z', 'M8 12l3 3 5-6'],
   note: ['M6 3h9l4 4v14H6V3Z', 'M14 3v5h5M9 12h7M9 16h5'],

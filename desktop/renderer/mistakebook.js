@@ -570,7 +570,19 @@ export function mountMistakebook({ beforeEnter }) {
     const errorType = h('select', { class: 'select', 'data-mb-field': 'errorType', onChange: event => { draft.errorType = event.target.value; dirty() } }, errors.map(label => h('option', { value: label === '未记录' ? '' : label, text: label, selected: (label === '未记录' ? '' : label) === draft.errorType ? 'selected' : undefined })))
     const target = h('select', { class: 'select', 'data-mb-field': 'target', onChange: event => { draft.target = event.target.value; dirty() } }, [['gaokao','高考'],['huige','合格考']].map(([value, text]) => h('option', { value, text, selected: value === draft.target ? 'selected' : undefined })))
     const close = button('', async () => { if (await discard()) { state.draft = null; state.dirty = false; renderList(); renderDetail() } }, false, { class: 'icon-button', 'aria-label': '关闭题目' }); close.append(icon('close'))
-    const fullscreen = button('', () => { shell.classList.toggle('detail-full'); renderDetail() }, false, { class: 'icon-button', id: 'mb-fullscreen', title: '全屏编辑（Esc 退出）', 'aria-label': '全屏编辑', 'aria-pressed': String(shell.classList.contains('detail-full')) }); fullscreen.append(icon('grid'))
+    const fullscreenOn = shell.classList.contains('detail-full')
+    const fullscreen = button('', () => {
+      shell.classList.toggle('detail-full')
+      renderDetail()
+      notify(shell.classList.contains('detail-full') ? '已进入全屏查看，Esc 退出' : '已退出全屏')
+      setTimeout(() => document.querySelector('#mb-fullscreen')?.focus(), 0)
+    }, false, {
+      class: 'icon-button', id: 'mb-fullscreen',
+      title: fullscreenOn ? '退出全屏（Esc）' : '全屏查看（F）',
+      'aria-label': fullscreenOn ? '退出全屏查看' : '全屏查看',
+      'aria-pressed': String(fullscreenOn),
+    })
+    fullscreen.append(icon(fullscreenOn ? 'minimize' : 'maximize'))
     const head = h('div', { class: 'mb-detail-head' }, h('div', {}, h('span', { class: 'eyebrow', text: state.review ? '复习' : NOTE_TYPES[draft.type].label }), h('h2', { text: draft.id ? state.review ? '独立回忆，再核对' : draft.title || draft.vocabulary?.word || '笔记详情' : `新建${NOTE_TYPES[draft.type].label}` })), fullscreen, close)
     const actions = h('div', { class: 'row mb-save-actions' }, h('span', { id: 'mb-save-state', class: state.dirty ? 'cap dirty' : 'cap', role: 'status', 'aria-live': 'polite', text: state.dirty ? '有未保存的修改' : draft.id ? '已保存' : '尚未保存' }), h('span', { class: 'spacer' }), button('保存笔记', save, true, { id: 'mb-save', disabled: !state.dirty && Boolean(draft.id), title: '保存笔记 · Ctrl / ⌘ S' }),button(draft.type==='physics'?'AI 构建与推导':draft.type==='vocabulary'?'AI 补全词条':'AI 自动解答', solveAI,false,{id:'mb-ai-solve'}))
     const form = h('form', { class: 'mb-editor-form', onSubmit: event => { event.preventDefault(); void guard(save) } })
@@ -1111,6 +1123,16 @@ export function mountMistakebook({ beforeEnter }) {
     if (canvasView?.isOpen()) return
     if (event.key === 'Escape' && state.picking) { state.picking = false; state.selection.clear(); renderList(); return }
     if (event.key === 'Escape' && shell.classList.contains('detail-full')) { shell.classList.remove('detail-full'); renderDetail(); return }
+    // F 切换全屏查看；只在没有焦点在输入框里时生效，避免把字母打进正文。
+    const typing = Boolean(event.target.closest?.('input, textarea, select, [contenteditable="true"]'))
+    if (!typing && !event.ctrlKey && !event.metaKey && !event.altKey && event.key.toLowerCase() === 'f' && state.draft) {
+      event.preventDefault()
+      shell.classList.toggle('detail-full')
+      renderDetail()
+      notify(shell.classList.contains('detail-full') ? '已进入全屏查看，Esc 退出' : '已退出全屏')
+      setTimeout(() => document.querySelector('#mb-fullscreen')?.focus(), 0)
+      return
+    }
     if (event.ctrlKey || event.metaKey) {
       if (event.key.toLowerCase() === 'f') { event.preventDefault(); search.focus(); search.select() }
       if (event.key.toLowerCase() === 'n') { event.preventDefault(); void guard(openCreate) }

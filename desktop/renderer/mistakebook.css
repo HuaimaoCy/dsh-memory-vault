@@ -279,6 +279,22 @@ body[data-mb-dragging] { cursor:col-resize; user-select:none; }
 .mb-shell.detail-full .mb-main { display:none; }
 .mb-shell.detail-full .mb-detail { flex:1 !important; width:auto !important; max-width:none; }
 .mb-shell.detail-full .mb-splitter { display:none !important; }
+
+/* 真正的全屏查看：侧栏与顶栏让位，正文按阅读宽度居中并放大一档。 */
+.mb-shell.detail-full .mb-side,
+.mb-shell.detail-full .mb-bar { display:none; }
+.mb-shell.detail-full .mb-detail { border:0; }
+.mb-shell.detail-full .mb-detail-head { position:sticky; top:0; z-index:3; background:rgba(255,255,255,.9); backdrop-filter:blur(18px) saturate(180%); -webkit-backdrop-filter:blur(18px) saturate(180%); border-bottom:1px solid rgba(20,26,38,.07); }
+.mb-shell.detail-full .mb-detail-head h2 { font-size:20px; }
+.mb-shell.detail-full .mb-editor-form { max-width:860px; width:100%; margin:0 auto; padding:30px 34px 44px; font-size:14.5px; gap:22px; }
+.mb-shell.detail-full .mb-editor-form .area { min-height:110px; font-size:14px; }
+.mb-shell.detail-full .mb-editor-form [data-mb-field=stem] { min-height:260px; }
+.mb-shell.detail-full .mb-review-stem { max-width:860px; margin:0 auto; font-size:16px; line-height:2.1; }
+.mb-shell.detail-full .mb-save-actions { max-width:860px; width:100%; margin:0 auto; }
+@media (prefers-reduced-motion: no-preference) {
+  .mb-shell.detail-full .mb-detail { animation:mb-detail-full-in .24s cubic-bezier(.22,1,.32,1) both; }
+  @keyframes mb-detail-full-in { from { opacity:0; } to { opacity:1; } }
+}
 .mb-ai-side { position:fixed; top:0; right:0; bottom:0; width:min(420px,92vw); z-index:45; background:#fdfefd; border-left:1px solid #e2e7e1; box-shadow:-18px 0 44px #20232714; display:flex; flex-direction:column; }
 .mb-ai-head { display:flex; align-items:center; gap:10px; padding:16px 20px; border-bottom:1px solid #eaece3; }
 .mb-ai-head strong { font-size:14px; }
