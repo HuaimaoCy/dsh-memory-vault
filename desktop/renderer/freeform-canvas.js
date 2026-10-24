@@ -48,8 +48,8 @@ export function createCanvasView(options) {
   const stateChip = h('button', { type: 'button', class: 'mb-canvas-save cap', id: 'mb-canvas-save-state', title: '画布保存状态；失败时点击重试', text: '已保存' })
   const picker = h('select', { class: 'select', id: 'mb-canvas-picker', 'aria-label': '切换画布' })
   const zoomLabel = h('span', { class: 'mb-canvas-zoom-label', id: 'mb-canvas-zoom', text: '100%' })
-  const undoButton = h('button', { type: 'button', class: 'mb-canvas-icon', id: 'mb-canvas-undo', title: '撤销 · Ctrl / ⌘ Z', 'aria-label': '撤销', disabled: true }, icon('refresh'))
-  const redoButton = h('button', { type: 'button', class: 'mb-canvas-icon', id: 'mb-canvas-redo', title: '重做 · Ctrl / ⌘ Shift Z', 'aria-label': '重做', disabled: true }, icon('refresh'))
+  const undoButton = h('button', { type: 'button', class: 'mb-canvas-icon', id: 'mb-canvas-undo', title: '撤销 · Ctrl / ⌘ Z', 'aria-label': '撤销', disabled: true, onClick: () => undo() }, icon('refresh'))
+  const redoButton = h('button', { type: 'button', class: 'mb-canvas-icon', id: 'mb-canvas-redo', title: '重做 · Ctrl / ⌘ Shift Z', 'aria-label': '重做', disabled: true, onClick: () => redo() }, icon('refresh'))
   redoButton.classList.add('flip')
 
   const surface = h('div', {
@@ -282,6 +282,9 @@ export function createCanvasView(options) {
     paintSelection()
   }
   function paintCards() {
+    // 重建卡片会销毁正在编辑的 textarea（移除节点不保证触发 blur），所以必须先把
+    // 这段输入结算成一条历史；否则下一次 focus 会复用同一份旧快照，一次撤销回退两段。
+    settleTyping()
     const canvas = current()
     cardNodes.clear()
     for (const node of world.querySelectorAll('.mb-canvas-card')) node.remove()
@@ -352,6 +355,8 @@ export function createCanvasView(options) {
     if (loadError) return false
     const canvas = current()
     if (!canvas) return false
+    // 任何结构性改动都从「已结算」的状态开始，历史边界才不会把两段输入混在一起。
+    settleTyping()
     const before = JSON.stringify(doc)
     const next = action(canvas)
     if (!next || next === canvas) return false
@@ -384,12 +389,25 @@ export function createCanvasView(options) {
     const canvas = current()
     const card = canvas?.cards.find(row => row.id === id)
     if (!card) return
+    // 输入会话以「写入」为准而不是只靠 focus/blur：卡片会被 render 重建，
+    // 重建后不一定有 blur，focus 也不一定再触发。没有会话就从这里开一段新的，
+    // 这样撤销永远只回退最近这一段输入。
+    if (!typing || typing.id !== id) {
+      settleTyping()
+      typing = { id, before: JSON.stringify(doc) }
+    }
     card.text = String(value).slice(0, CANVAS_LIMITS.text)
     markDirty()
   }
   function beginTyping(id) {
+    // 同一张卡片的输入只有「输入框仍持有焦点」时才算连续输入；焦点已经不在
+    // （render 重建、点了别处却没触发 blur）就先把上一段结算掉。
+    if (typing && (typing.id !== id || document.activeElement?.closest?.(`[data-card-id="${typing.id}"]`) === null)) settleTyping()
     if (typing?.id === id) return
     typing = { id, before: JSON.stringify(doc) }
+  }
+  function settleTyping() {
+    if (typing) endTyping(typing.id)
   }
   function endTyping(id) {
     if (!typing || typing.id !== id) return
@@ -503,6 +521,7 @@ export function createCanvasView(options) {
     } catch (error) { notify(error?.message || String(error), true) }
   }
   function undo() {
+    settleTyping()
     const current_ = current()
     if (!current_ || !history.past.length) return
     const before = history.past.pop()
@@ -511,6 +530,7 @@ export function createCanvasView(options) {
     paintHistory()
   }
   function redo() {
+    settleTyping()
     if (!history.future.length) return
     const next = history.future.pop()
     history.past.push(JSON.stringify(doc))

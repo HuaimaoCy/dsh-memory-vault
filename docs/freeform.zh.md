@@ -68,6 +68,16 @@
 
 画布只给笔记本窗口用，写入口径也只属于笔记本域。它没有进 `src/core/notebook_ops.mjs` 的共享 op 表——这样 Codex / CLI / MCP 的写入面不会因为一块 UI 版面而扩大；`desktop/main.mjs` 的 `notebook:canvas` 通道沿用同一个 `MistakebookStore` 的校验（归一化、上限、字节闸门）和同一个数据库连接，与笔记走同一份规则。
 
+## 撤销的粒度
+
+一次连续的卡片输入算**一条**历史，和「加卡片」「加便签」「拖动」这些动作各自独立。实现上不依赖 focus/blur 成对出现：
+
+- 输入写入时就开一段输入会话（`writeText`），不等人先触发 focus；
+- 画布重建卡片之前（`paintCards`）与任何结构性改动之前（`mutate`）先结算当前会话；
+- 撤销/重做前也先结算，避免把「还没结算的输入」算进下一次撤销。
+
+工具栏的撤销/重做按钮此前只画了图标、没有绑定点击（只有 Ctrl/⌘ Z 能用），本版本已接上 `undo()` / `redo()`。
+
 ## 本版本边界
 
 - 没有图片卡片、PDF 卡片、画布内搜索、自由画笔与多人协作。
@@ -86,6 +96,9 @@ node --no-warnings tests/canvas-smoke.mjs
 # 以及坏画布不覆盖、保存竞态、上限提示、文本框滚动、画布内快捷键隔离、
 # 指针捕获丢失、Shift 反选、1040×650 下的折叠/展开与布局菜单
 node --no-warnings tests/run-desktop-canvas.mjs
+
+# 撤销粒度：输入 A → 加便签（重建卡片）→ 输入 B → 一次撤销只回退 B
+node --no-warnings tests/run-desktop-canvas-undo.mjs
 ```
 
 本机（Windows + DSH 代理沙箱）直接跑 `electron.exe` 会以 `0x80000003` 崩溃、没有任何输出，这是 Chromium 沙箱与本环境作业对象不兼容，不是应用的问题；`tests/run-desktop-canvas.mjs` 因此给测试进程加了 `--no-sandbox`（只用于测试，安装包不受影响）。测试全部使用 `test-tmp/` 下的一次性配置目录与数据库，不碰本机真实数据。
