@@ -1,0 +1,22 @@
+{
+  "mcpServers": {
+    "alaya-notebook": {
+      "command": "node",
+      "args": ["bin/memory-vault.mjs", "mcp"],
+      "cwd": ".",
+      "env_vars": [
+        "PATH",
+        "HOME",
+        "USERPROFILE",
+        "HOMEDRIVE",
+        "HOMEPATH",
+        "APPDATA",
+        "LOCALAPPDATA",
+        "TEMP",
+        "TMP",
+        "DSH_HOME",
+        "MEMORY_VAULT_DB"
+      ]
+    }
+  }
+}

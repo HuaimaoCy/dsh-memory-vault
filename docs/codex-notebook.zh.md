@@ -54,3 +54,22 @@ $alaya-notebook 把这段结论记成一篇笔记：……
 2. **加第二台**：新增 `[mcp_servers.alaya-notebook]`，`--db` 指同一个数据库，与记忆那台并存（工具名不冲突，但两个服务都会开同一库）。
 
 两种都只改配置、不改数据；切换前先备份 `config.toml`。
+## ZCode 里使用
+
+ZCode 的插件格式与 Codex 同源：`.zcode-plugin/plugin.json`（清单）、`skills/`、`.mcp.json`。本仓库根目录同时是**插件本体**和**插件市场**：
+
+```text
+marketplace.json          # 市场清单：插件名、版本、source: "./"
+.zcode-plugin/plugin.json # 插件清单：skills 与 mcpServers
+.codex-plugin/plugin.json # Codex 同款清单
+.mcp.json                 # alaya-notebook MCP 服务
+skills/alaya-notebook/    # 技能
+```
+
+在 ZCode 里接入：
+
+1. 打开 **设置 → 插件 → 右上角 Create → 添加市场**
+2. 选 **本地目录**，指向本仓库（或填 GitHub 仓库 `HuaimaoCy/dsh-memory-vault`）
+3. 在 Personal 分组里点 **安装** `alaya-notebook`
+
+安装后技能出现在 **设置 → 技能 → Plugin skills**，MCP 出现在 **设置 → MCP → Plugin MCP servers**。改版本时 `marketplace.json` 的 `version` 也要跟着改，否则更新检查不会提示（ZCode 比较的是市场条目版本与已安装插件版本）。
