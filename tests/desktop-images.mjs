@@ -34,7 +34,14 @@ export async function run(window, bridge) {
   await js(`(() => { const input=document.querySelector('#image-picker');input.files=${transferCode('山间日落.png')}.files;input.dispatchEvent(new Event('change',{bubbles:true})) })()`)
   await until("document.querySelectorAll('.image-thumbnail').length === 1")
   await click('#save-entry')
-  await until("document.querySelector('#status').textContent === '记忆已创建' && !document.querySelector('#save-entry').disabled")
+  // 保存成功的可观察契约：状态文案 + 抽屉从「新建记忆」切到「记忆详情」。
+  // 「保存按钮 disabled」是保存后的设计状态（没有未保存修改），不能当成功信号。
+  const saveHints = () => js(`(() => ({ disabled: document.querySelector('#save-entry').disabled, hint: document.querySelector('#editor-save-state').textContent }))()`)
+  await until("document.querySelector('#status').textContent === '记忆已创建' && document.querySelector('#drawer .drawer-head h2')?.textContent === '记忆详情'")
+  const afterCreate = await saveHints()
+  assert.equal(afterCreate.disabled, true, '保存后保存按钮应回到「无未保存修改」状态')
+  assert.equal(afterCreate.hint, '已保存到本地数据库')
+  assert.equal(bridge.vault.store.listEntries({ limit: 5 }).length, 1, '保存不得产生重复条目')
   const entry = bridge.vault.store.listEntries({ limit: 5 })[0]
   assert.equal(entry.content, ''); assert.equal(entry.imageCount, 1)
   assert.match(await js("document.querySelector('.tile').textContent"), /1 张图片/)
@@ -53,7 +60,8 @@ export async function run(window, bridge) {
   await js(`document.querySelector('.image-drop-hint').dispatchEvent(new DragEvent('drop',{dataTransfer:${transferCode('拖入图片.png')},bubbles:true,cancelable:true}))`)
   await until("document.querySelectorAll('.image-thumbnail').length === 3")
   await click('#save-entry')
-  await until("document.querySelector('#status').textContent === '修改已保存' && !document.querySelector('#save-entry').disabled")
+  await until("document.querySelector('#status').textContent === '修改已保存'")
+  assert.equal((await saveHints()).disabled, true, '保存后保存按钮应回到「无未保存修改」状态')
   await until("document.querySelectorAll('.image-thumbnail').length === 1")
   assert.equal(bridge.vault.store.listImages(entry.id).length, 1)
   await click('.image-attachment-caption button')
@@ -63,8 +71,17 @@ export async function run(window, bridge) {
   assert.equal(bridge.vault.store.listImages(entry.id).length, 1)
   await js("const content=document.querySelector('[data-field=content]');content.value='图片可以移除，记忆正文继续保留。';content.dispatchEvent(new Event('input',{bubbles:true}))")
   await click('#save-entry')
-  await until("document.querySelector('#status').textContent === '修改已保存' && !document.querySelector('#save-entry').disabled")
+  await until("document.querySelector('#status').textContent === '修改已保存'")
+  assert.equal((await saveHints()).disabled, true, '保存后保存按钮应回到「无未保存修改」状态')
   assert.equal(bridge.vault.store.listImages(entry.id).length, 0)
   assert.equal(bridge.vault.store.requireEntry(entry.id).content, '图片可以移除，记忆正文继续保留。')
-  console.log('Desktop images: file import, image-only save, thumbnails, large preview, clipboard paste, drag/drop, deduplication, deferred removal and empty-entry guard passed')
+  // 状态机探针：编辑一个字必须重新启用保存按钮并提示未保存；保存后回到禁用。
+  // 这条把「按钮 disabled 到底代表什么」钉死，避免以后再把保存后的禁用当成失败。
+  await js("(() => { const node=document.querySelector('[data-field=title]'); node.value='图片也能成为记忆（再改）'; node.dispatchEvent(new Event('input',{bubbles:true})); return true })()")
+  await until("!document.querySelector('#save-entry').disabled")
+  assert.equal((await saveHints()).hint, '有未保存的修改')
+  await click('#save-entry')
+  await until("document.querySelector('#status').textContent === '修改已保存' && document.querySelector('#save-entry').disabled")
+  assert.equal(bridge.vault.store.requireEntry(entry.id).title, '图片也能成为记忆（再改）')
+  console.log('Desktop images: file import, image-only save, thumbnails, large preview, clipboard paste, drag/drop, deduplication, deferred removal, empty-entry guard and the save-button state machine passed')
 }
