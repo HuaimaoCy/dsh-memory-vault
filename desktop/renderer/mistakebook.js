@@ -583,7 +583,7 @@ export function mountMistakebook({ beforeEnter }) {
       'aria-pressed': String(fullscreenOn),
     })
     fullscreen.append(icon(fullscreenOn ? 'minimize' : 'maximize'))
-    const head = h('div', { class: 'mb-detail-head' }, h('div', {}, h('span', { class: 'eyebrow', text: state.review ? '复习' : NOTE_TYPES[draft.type].label }), h('h2', { text: draft.id ? state.review ? '独立回忆，再核对' : draft.title || draft.vocabulary?.word || '笔记详情' : `新建${NOTE_TYPES[draft.type].label}` })), fullscreen, close)
+    const head = h('div', { class: 'mb-detail-head' }, h('div', {}, h('span', { class: 'eyebrow', text: state.review ? '复习' : NOTE_TYPES[draft.type].label }), h('h2', { text: draft.id ? state.review ? '独立回忆，再核对' : draft.title || draft.vocabulary?.word || '笔记详情' : `新建${NOTE_TYPES[draft.type].label}` })), h('div', { class: 'row mb-detail-head-actions' }, fullscreen, close))
     const actions = h('div', { class: 'row mb-save-actions' }, h('span', { id: 'mb-save-state', class: state.dirty ? 'cap dirty' : 'cap', role: 'status', 'aria-live': 'polite', text: state.dirty ? '有未保存的修改' : draft.id ? '已保存' : '尚未保存' }), h('span', { class: 'spacer' }), button('保存笔记', save, true, { id: 'mb-save', disabled: !state.dirty && Boolean(draft.id), title: '保存笔记 · Ctrl / ⌘ S' }),button(draft.type==='physics'?'AI 构建与推导':draft.type==='vocabulary'?'AI 补全词条':'AI 自动解答', solveAI,false,{id:'mb-ai-solve'}))
     const form = h('form', { class: 'mb-editor-form', onSubmit: event => { event.preventDefault(); void guard(save) } })
     if (state.review) {

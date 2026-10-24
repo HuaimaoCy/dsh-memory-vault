@@ -286,6 +286,9 @@ body[data-mb-dragging] { cursor:col-resize; user-select:none; }
 .mb-shell.detail-full .mb-detail { border:0; }
 .mb-shell.detail-full .mb-detail-head { position:sticky; top:0; z-index:3; background:rgba(255,255,255,.9); backdrop-filter:blur(18px) saturate(180%); -webkit-backdrop-filter:blur(18px) saturate(180%); border-bottom:1px solid rgba(20,26,38,.07); }
 .mb-shell.detail-full .mb-detail-head h2 { font-size:20px; }
+.mb-detail-head-actions { flex:0 0 auto; gap:6px; flex-wrap:nowrap; }
+/* 全屏时标题栏与 860px 阅读列左右对齐，动作按钮贴右侧成组。 */
+.mb-shell.detail-full .mb-detail-head { padding-inline:max(24px, calc((100vw - 940px) / 2)); }
 .mb-shell.detail-full .mb-editor-form { max-width:860px; width:100%; margin:0 auto; padding:30px 34px 44px; font-size:14.5px; gap:22px; }
 .mb-shell.detail-full .mb-editor-form .area { min-height:110px; font-size:14px; }
 .mb-shell.detail-full .mb-editor-form [data-mb-field=stem] { min-height:260px; }
