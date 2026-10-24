@@ -149,9 +149,22 @@ export function mountMistakebook({ beforeEnter }) {
   const sideScroll = h('div', { class: 'mb-side-scroll', id: 'mb-side-scroll' })
   // 条目注册表：itemId（view:all / type:physics / subject:english）→ 可点击
   // 元素；侧边栏控制器与配置对话框共用这一份目录。
-  const viewItems = () => [['all', '全部笔记', 'library'], ['due', '待复习', 'task'], ['mastered', '已掌握', 'check'], ['archived', '归档', 'folder'], ['trash', '回收站', 'hidden']].map(([view, label, symbol]) => ({ id: `view:${view}`, label, view, element: button([icon(symbol), h('span', { class: 'nav-label', text: label }), h('span', { class: 'count', text: state.data?.stats[view] ?? 0 })], () => changeView(view), false, { class: `nav${state.view === view && !state.subjectID && !state.type ? ' on' : ''}`, 'data-mb-view': view, 'aria-current': state.view === view && !state.subjectID && !state.type ? 'page' : 'false' }) }))
-  const typeItems = () => Object.entries(NOTE_TYPES).map(([type, meta]) => ({ id: `type:${type}`, label: meta.label, type, element: button([icon(meta.icon), h('span', { class: 'nav-label', text: meta.label }), h('span', { class: 'count', text: state.data?.stats.types[type] ?? 0 })], () => changeView('all', '', '', type), false, { class: `nav${state.type === type ? ' on' : ''}`, 'data-mb-type': type }) }))
-  const subjectItems = () => (state.data?.taxonomy.nodes ?? []).filter(node => !node.parentID).map(node => ({ id: `subject:${node.id}`, label: node.name, subject: node.id, element: button([h('span', { class: 'mb-subject-dot', text: node.name.slice(0, 1) }), h('span', { class: 'nav-label', text: node.name }), h('span', { class: 'count', text: state.data?.stats.subjects[node.id] ?? 0 })], () => changeView('all', node.id), false, { class: `nav${state.subjectID === node.id ? ' on' : ''}`, 'data-mb-subject': node.id }) }))
+  // 条目显示名可被侧边栏配置覆盖（双击重命名写入 sidebar.labels）。
+  // 读控制器里的即时配置，而不是上一次 list 返回的快照，否则改完要等重载才生效。
+  let sideLabelsCache = {}
+  const sideLabel = id => sideLabelsCache[id] ?? null
+  const viewItems = () => [['all', '全部笔记', 'library'], ['due', '待复习', 'task'], ['mastered', '已掌握', 'check'], ['archived', '归档', 'folder'], ['trash', '回收站', 'hidden']].map(([view, fallback, symbol]) => {
+    const label = sideLabel(`view:${view}`) ?? fallback
+    return { id: `view:${view}`, label, view, element: button([icon(symbol), h('span', { class: 'nav-label', text: label }), h('span', { class: 'count', text: state.data?.stats[view] ?? 0 })], () => changeView(view), false, { class: `nav${state.view === view && !state.subjectID && !state.type ? ' on' : ''}`, 'data-mb-view': view, 'aria-current': state.view === view && !state.subjectID && !state.type ? 'page' : 'false' }) }
+  })
+  const typeItems = () => Object.entries(NOTE_TYPES).map(([type, meta]) => {
+    const label = sideLabel(`type:${type}`) ?? meta.label
+    return { id: `type:${type}`, label, type, element: button([icon(meta.icon), h('span', { class: 'nav-label', text: label }), h('span', { class: 'count', text: state.data?.stats.types[type] ?? 0 })], () => changeView('all', '', '', type), false, { class: `nav${state.type === type ? ' on' : ''}`, 'data-mb-type': type }) }
+  })
+  const subjectItems = () => (state.data?.taxonomy.nodes ?? []).filter(node => !node.parentID).map(node => {
+    const label = sideLabel(`subject:${node.id}`) ?? node.name
+    return { id: `subject:${node.id}`, label, subject: node.id, element: button([h('span', { class: 'mb-subject-dot', text: label.slice(0, 1) }), h('span', { class: 'nav-label', text: label }), h('span', { class: 'count', text: state.data?.stats.subjects[node.id] ?? 0 })], () => changeView('all', node.id), false, { class: `nav${state.subjectID === node.id ? ' on' : ''}`, 'data-mb-subject': node.id }) }
+  })
   const allSideItems = () => [...viewItems(), ...typeItems(), ...subjectItems()]
   const itemFor = id => allSideItems().find(item => item.id === id) ?? null
   // 侧边栏配置存数据库（随 list 返回），写入走 sidebar.save；旧 localStorage
@@ -364,16 +377,44 @@ export function mountMistakebook({ beforeEnter }) {
       })
     })
   }
+  // 侧边栏区块标题：双击就地改名（写回数据库的 sidebar 配置）。
+  function beginSideRename(id, labelNode) {
+    const config = sidebar.config()
+    const section = config.sections.find(row => row.id === id)
+    if (!section || !labelNode?.isConnected) return
+    const input = h('input', { class: 'input mb-side-rename-input', id: 'mb-side-rename-live', value: section.label, 'aria-label': '区块名称' })
+    const finish = commit => {
+      if (!input.isConnected) return
+      const text = input.value.trim().slice(0, 30)
+      if (commit && text && text !== section.label) sidebar.setConfig({ ...config, sections: config.sections.map(row => row.id === id ? { ...row, label: text } : row) })
+      else renderSide()
+    }
+    input.addEventListener('keydown', event => {
+      if (event.key === 'Enter') { event.preventDefault(); finish(true) }
+      if (event.key === 'Escape') { event.preventDefault(); finish(false) }
+    })
+    input.addEventListener('blur', () => finish(true))
+    labelNode.replaceWith(input)
+    input.focus(); input.select()
+  }
+  const sideSectionLabel = section => {
+    const label = h('span', { class: 'mb-side-label', text: section.label, title: '双击重命名' })
+    label.addEventListener('dblclick', event => { event.preventDefault(); event.stopPropagation(); beginSideRename(section.id, label) })
+    return label
+  }
+  const sideSummary = section => h('summary', {}, sideSectionLabel(section))
+
   function renderSide() {
     const stats = state.data.stats
     const config = sidebar.config()
+    sideLabelsCache = { ...(config.labels ?? {}) }
     const hidden = new Set(config.hidden)
     const navFor = { views: sideViews, types: categories, subjects: subjects }
     const sections = []
     for (const section of config.sections) {
       if (hidden.has(section.id)) continue
       if (section.tags) {
-        sections.push(h('details', { class: 'mb-side-group', id: 'mb-tags-wrap', 'data-side-section': 'tags' }, h('summary', { text: section.label }), tagNav))
+        sections.push(h('details', { class: 'mb-side-group', id: 'mb-tags-wrap', 'data-side-section': 'tags' }, sideSummary(section), tagNav))
         continue
       }
       const builtinNav = navFor[section.id]
@@ -382,20 +423,20 @@ export function mountMistakebook({ beforeEnter }) {
       nav.replaceChildren(...placed.map(item => item.element))
       for (const item of placed) if (item.subject) wireClassify(item.element, { subjectID: item.subject })
       if (builtinNav) {
-        if (section.id === 'views') sections.push(h('div', { class: 'mb-side-section', 'data-side-section': 'views' }, h('div', { class: 'side-head', text: section.label }), nav))
-        else if (section.id === 'types') sections.push(h('details', { class: 'mb-side-group', id: 'mb-types-wrap', 'data-side-section': 'types', open: true }, h('summary', { text: section.label }), nav))
+        if (section.id === 'views') sections.push(h('div', { class: 'mb-side-section', 'data-side-section': 'views' }, h('div', { class: 'side-head' }, sideSectionLabel(section)), nav))
+        else if (section.id === 'types') sections.push(h('details', { class: 'mb-side-group', id: 'mb-types-wrap', 'data-side-section': 'types', open: true }, sideSummary(section), nav))
         else {
           if (state.subjectID && placed.some(item => item.subject === state.subjectID)) {
             const nodes = state.data.taxonomy.nodes.filter(node => node.subjectID === state.subjectID && node.parentID === state.subjectID)
             nav.append(h('div', { class: 'mb-topics' }, nodes.map(node => button(node.name, () => changeView('all', state.subjectID, node.id), false, { class: `nav${state.nodeID === node.id ? ' on' : ''}` }))))
           }
-          const wrap = h('details', { class: 'mb-side-group', id: 'mb-subjects-wrap', 'data-side-section': 'subjects' }, h('summary', { text: section.label }), nav)
+          const wrap = h('details', { class: 'mb-side-group', id: 'mb-subjects-wrap', 'data-side-section': 'subjects' }, sideSummary(section), nav)
           if (state.subjectID && placed.some(item => item.subject === state.subjectID)) wrap.open = true
           sections.push(wrap)
         }
       } else {
         if (!placed.length) nav.append(h('p', { class: 'cap mb-side-empty', text: '在「自定义侧边栏」里把条目拖进这个区块。' }))
-        sections.push(h('details', { class: 'mb-side-group', 'data-side-section': section.id, open: true }, h('summary', { text: section.label }), nav))
+        sections.push(h('details', { class: 'mb-side-group', 'data-side-section': section.id, open: true }, sideSummary(section), nav))
       }
     }
     sideScroll.replaceChildren(...sections)

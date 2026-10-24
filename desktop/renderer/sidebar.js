@@ -43,7 +43,15 @@ export function normalizeSidebarConfig(raw, knownIds = []) {
   }
   const hidden = [...new Set((Array.isArray(raw?.hidden) ? raw.hidden : []).map(String))]
     .filter(id => known.has(id) || sections.some(section => section.id === id))
-  return { sections, hidden }
+  // 条目改名是「覆盖值」：只存用户真的改过的条目，删掉覆盖就回到目录里的默认名。
+  const labels = {}
+  const rawLabels = raw?.labels && typeof raw.labels === 'object' && !Array.isArray(raw.labels) ? raw.labels : {}
+  for (const [id, text] of Object.entries(rawLabels)) {
+    if (!known.has(id)) continue
+    const value = String(text ?? '').trim().slice(0, 24)
+    if (value) labels[id] = value
+  }
+  return { sections, hidden, labels }
 }
 
 // 控制器：read() 取数据库里的原始配置（随 list 返回），write(next) 异步持久
@@ -75,24 +83,41 @@ const reorder = (list, source, target) => {
 export function renderSidebarConfig({ config, knownItems, onChange }) {
   const sections = config.sections.map(section => ({ ...section, items: [...section.items] }))
   const hidden = new Set(config.hidden)
-  const expanded = new Set(), renaming = new Set()
+  const labels = { ...(config.labels ?? {}) }
+  const expanded = new Set(), renaming = new Set(), renamingItems = new Set()
   const context = { section: '', item: '' }
   const catalog = knownItems()
   const known = catalog.map(item => item.id)
-  const itemLabel = id => {
+  const defaultItemLabel = id => {
     const [kind, ref] = id.split(':')
     return kind === 'view' ? ({ all: '全部笔记', due: '待复习', mastered: '已掌握', archived: '归档', trash: '回收站' })[ref] ?? ref
       : kind === 'type' ? ({ mistake: '错题', physics: '物理模型', method: '解题方法', vocabulary: '英语词汇', handwriting: '手写笔记', note: '普通笔记' })[ref] ?? ref
       : (catalog.find(item => item.id === id)?.label ?? ref)
   }
-  const apply = () => onChange({ sections: sections.map(section => ({ ...section, items: [...section.items] })), hidden: [...hidden] })
+  const itemLabel = id => labels[id] ?? defaultItemLabel(id)
+  const apply = () => onChange({ sections: sections.map(section => ({ ...section, items: [...section.items] })), hidden: [...hidden], labels: { ...labels } })
+  const commitItemLabel = (id, value) => {
+    const text = String(value ?? '').trim().slice(0, 24)
+    const fallback = defaultItemLabel(id)
+    if (!text || text === fallback) delete labels[id]
+    else labels[id] = text
+    renamingItems.delete(id)
+    apply(); paint()
+  }
   const itemRows = section => {
     if (!section.items.length) return [h('p', { class: 'cap mb-side-empty', 'data-side-items': section.id, text: '暂无条目——从其他区块拖一项进来，或用上方「编辑内容」整理。' })]
     return section.items.flatMap(itemId => {
       if (!known.includes(itemId)) return []
-      return [h('div', { class: 'mb-side-config-row', role: 'listitem', draggable: 'true', 'data-side-item': itemId },
+      const renamingItem = renamingItems.has(itemId)
+      return [h('div', { class: 'mb-side-config-row', role: 'listitem', draggable: String(!renamingItem), 'data-side-item': itemId },
         h('span', { class: 'mb-side-config-grip', 'aria-hidden': 'true', title: '拖动排序；拖到其他区块可改变归属' }, '⠿'),
-        h('span', { class: 'mb-side-config-name', text: itemLabel(itemId) }),
+        renamingItem
+          ? h('input', { class: 'input mb-side-rename-input', id: `mb-side-item-rename-${itemId}`, value: itemLabel(itemId), 'aria-label': '条目名称', onKeydown: event => {
+            if (event.key === 'Escape') { renamingItems.delete(itemId); paint() }
+            if (event.key === 'Enter') { event.preventDefault(); commitItemLabel(itemId, event.target.value) }
+          }, onBlur: event => commitItemLabel(itemId, event.target.value) })
+          : h('span', { class: 'mb-side-config-name', title: '双击重命名', onDblclick: () => { renamingItems.add(itemId); paint() }, text: itemLabel(itemId) }),
+        labels[itemId] ? h('button', { type: 'button', class: 'btn ghost', id: `mb-side-item-reset-${itemId}`, text: '默认名', onClick: () => { delete labels[itemId]; apply(); paint() } }) : null,
         h('label', { class: 'row cap' }, h('input', { type: 'checkbox', checked: !hidden.has(itemId), 'data-side-item-visible': itemId, onChange: event => { event.target.checked ? hidden.delete(itemId) : hidden.add(itemId); apply() } }), '显示'),
       )]
     })
@@ -149,8 +174,14 @@ export function renderSidebarConfig({ config, knownItems, onChange }) {
           ? h('div', { class: 'row mb-side-rename' },
               h('input', { class: 'input', id: 'mb-side-rename-input', value: section.label, 'aria-label': '区块名称', onKeydown: event => { if (event.key === 'Enter') { section.label = event.target.value.trim().slice(0, 30) || section.label; renaming.delete(section.id); apply(); paint() } } }),
               h('button', { type: 'button', class: 'btn ghost', id: 'mb-side-rename-save', text: '保存', onClick: () => { const input = row.querySelector('#mb-side-rename-input'); section.label = (input?.value ?? '').trim().slice(0, 30) || section.label; renaming.delete(section.id); apply(); paint() } }))
-          : h('span', { class: 'mb-side-config-name', text: section.label }),
+          : h('span', { class: 'mb-side-config-name', title: '双击重命名', onDblclick: () => { renaming.add(section.id); paint() }, text: section.label }),
         !renameBox ? h('button', { type: 'button', class: 'btn ghost', id: `mb-side-config-rename-${section.id}`, text: '重命名', onClick: () => { renaming.add(section.id); paint() } }) : null,
+        section.custom ? h('button', { type: 'button', class: 'btn ghost danger', id: `mb-side-config-delete-${section.id}`, text: '删除', title: '删除这个自定义区块；里面的条目回到默认区块', onClick: () => {
+          const index = sections.findIndex(row => row.id === section.id)
+          if (index >= 0) sections.splice(index, 1)
+          renaming.delete(section.id); expanded.delete(section.id)
+          apply(); paint()
+        } }) : null,
         !section.tags ? h('button', { type: 'button', class: 'btn ghost', id: `mb-side-config-edit-${section.id}`, 'aria-expanded': String(expanded.has(section.id)), text: expanded.has(section.id) ? '收起内容' : '编辑内容', onClick: () => { expanded.has(section.id) ? expanded.delete(section.id) : expanded.add(section.id); paint() } }) : null,
         h('label', { class: 'row cap' }, h('input', { type: 'checkbox', checked: !hidden.has(section.id), 'data-side-visible': section.id, onChange: event => { event.target.checked ? hidden.delete(section.id) : hidden.add(section.id); apply() } }), '显示'))
       row.addEventListener('dragstart', () => { if (renameBox) return; context.section = section.id; context.item = ''; row.classList.add('dragging') })
@@ -170,7 +201,7 @@ export function renderSidebarConfig({ config, knownItems, onChange }) {
   const body = h('div', { class: 'mb-side-config', id: 'mb-side-config', role: 'list' })
   paint()
   return h('div', { class: 'mb-side-config-wrap' },
-    h('p', { class: 'cap', text: '区块可重命名、新增、排序、隐藏；「编辑内容」可整理条目，把条目拖到别的区块即改变归属。配置保存在笔记本数据库里。' }),
+    h('p', { class: 'cap', text: '双击名称即可重命名；区块可新增、排序、删除与隐藏；「编辑内容」可整理条目，把条目拖到别的区块即改变归属。配置保存在笔记本数据库里。' }),
     body,
     h('div', { class: 'row mb-side-add' },
       h('input', { class: 'input', id: 'mb-side-new-section', placeholder: '新区块名称，如「常用」', 'aria-label': '新区块名称', onKeydown: event => { if (event.key === 'Enter') addSection() } }),
