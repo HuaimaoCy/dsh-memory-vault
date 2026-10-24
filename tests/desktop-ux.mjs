@@ -46,6 +46,9 @@ export async function run(window, bridge) {
       button.click();
     })()`)
     await until("document.querySelector('#unsaved-changes[open]') === null")
+    // close() 只同步去掉 open 属性；查询框/编辑器的恢复在 close 事件的 onClose 里，
+    // 该回调末尾才 dialog.remove()。等节点消失，避免在恢复之前就断言。
+    await until("document.querySelector('#unsaved-changes') === null")
   }
   const searchMemory = async (query, count = 1) => {
     await fill('#query', query)
@@ -78,19 +81,63 @@ export async function run(window, bridge) {
       send('pointerup', .41, .25);
     })()`)
     assert.match(await js("document.querySelector('#mb-save-state').textContent"), /未保存/)
-    const drawing = await js("document.querySelector('#mb-handwrite-canvas').toDataURL('image/png')")
+    // 手写页存的是 PNG（不是笔画数据），而改分类/换排序会重建画布并用取整坐标重放笔画，
+    // 抗锯齿因此可能在一两个像素上不同——实测 1400×900 的画布差 1 个像素、峰值 26。
+    // 所以「是否保留笔画」用视觉等价判断，并留一条反向守卫证明容差不是永远通过。
+    const inkAndDiff = (leftUrl, rightUrl) => js(`(async () => {
+      const load = src => new Promise((done, fail) => { const image = new Image(); image.onload = () => done(image); image.onerror = fail; image.src = src })
+      const paint = image => { const canvas = document.createElement('canvas'); canvas.width = image.width; canvas.height = image.height; canvas.getContext('2d').drawImage(image, 0, 0); return canvas }
+      const [left, right] = await Promise.all([load(${JSON.stringify(leftUrl)}), load(${JSON.stringify(rightUrl)})])
+      const a = paint(left), b = paint(right)
+      if (a.width !== b.width || a.height !== b.height) return { sameSize: false, left: [a.width, a.height], right: [b.width, b.height] }
+      const x = a.getContext('2d').getImageData(0, 0, a.width, a.height).data
+      const y = b.getContext('2d').getImageData(0, 0, b.width, b.height).data
+      let count = 0, peak = 0, ink = 0
+      for (let index = 0; index < x.length; index += 4) {
+        if (x[index + 3] > 0) ink++
+        let delta = 0
+        for (let channel = 0; channel < 4; channel++) delta = Math.max(delta, Math.abs(x[index + channel] - y[index + channel]))
+        if (delta > 0) { count++; peak = Math.max(peak, delta) }
+      }
+      return { sameSize: true, size: [a.width, a.height], count, peak, ink, total: a.width * a.height }
+    })()`)
+    const canvasUrl = () => js("document.querySelector('#mb-handwrite-canvas').toDataURL('image/png')")
+    const expectSameDrawing = async (label, reference) => {
+      const current = await canvasUrl()
+      const stats = await inkAndDiff(reference, current)
+      assert.equal(stats.sameSize, true, `${label}：画布尺寸不得变化（${JSON.stringify(stats)}）`)
+      assert.ok(stats.ink > 1000, `${label}：画布上必须仍有笔画（墨迹像素 ${stats.ink}）`)
+      assert.ok(stats.count / stats.total <= 1e-5 && stats.peak <= 32,
+        `${label}：手写笔画被改变（差异像素 ${stats.count}/${stats.total}，峰值 ${stats.peak}）`)
+      return current
+    }
+    const drawing = await canvasUrl()
+    const canvasSize = await js("(() => { const canvas = document.querySelector('#mb-handwrite-canvas'); return [canvas.width, canvas.height] })()")
     await fill('[data-mb-field="title"]', `${token}-handwriting`)
     await fill('[data-mb-field="subjectID"]', 'physics', 'change')
-    assert.equal(await js("document.querySelector('#mb-handwrite-canvas').toDataURL('image/png')"), drawing, 'Changing classification must preserve hand-drawn strokes')
+    await expectSameDrawing('Changing classification must preserve hand-drawn strokes', drawing)
     await fill('#mb-sort', 'updated', 'change'); await idle()
-    assert.equal(await js("document.querySelector('#mb-handwrite-canvas').toDataURL('image/png')"), drawing, 'Sorting must preserve hand-drawn strokes')
+    await expectSameDrawing('Sorting must preserve hand-drawn strokes', drawing)
+    // 反向守卫：把同一张图平移 2 像素必须被判为不同，证明上面的容差不会放过真实改动。
+    const shifted = await js(`(async () => {
+      const image = new Image(); image.src = ${JSON.stringify(drawing)}
+      await image.decode()
+      const canvas = document.createElement('canvas'); canvas.width = image.width; canvas.height = image.height
+      canvas.getContext('2d').drawImage(image, 2, 0)
+      return canvas.toDataURL('image/png')
+    })()`)
+    const shiftedStats = await inkAndDiff(drawing, shifted)
+    assert.ok(shiftedStats.count / shiftedStats.total > 1e-5 || shiftedStats.peak > 32,
+      `视觉等价的容差不能放过真实改动（平移 2 像素只差 ${shiftedStats.count} 像素）`)
+    assert.deepEqual((await inkAndDiff(drawing, await canvasUrl())).size, canvasSize)
+    const canvasAtSave = await expectSameDrawing('保存前', drawing)
     await click('#mb-save'); await idle()
     const handwriting = (await notebook('list', { type: 'note' })).records.find(row => row.title === `${token}-handwriting`)
     assert.ok(handwriting, 'Directly saving a hand-drawn note must create a record')
     notebookIds.push(handwriting.id)
     const written = await notebook('read', { id: handwriting.id })
     assert.equal(written.images.length, 1, 'Direct save must include the uncommitted handwriting page once')
-    assert.equal(written.images[0].data, drawing.split(',')[1], 'The saved page must contain the preserved drawing')
+    assert.equal(written.images[0].data, canvasAtSave.split(',')[1], '保存的必须是用户看到的那一页（且它与原始笔画视觉等价）')
     assert.match(await js("document.querySelector('#mb-save-state').textContent"), /已保存/)
 
     // Search cannot leave invisible notes selected for a destructive batch action.
