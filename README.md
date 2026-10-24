@@ -66,5 +66,6 @@
 
 - [笔记本说明](docs/notebook.zh.md) —— 逐项功能与操作
 - 界面：[命令面板](docs/command-palette.zh.md)、[布局定制](docs/workspace-layout.zh.md)、[可保存视图](docs/notion-views.zh.md)、[快速捕获](docs/capture.zh.md)、[自由画布](docs/freeform.zh.md)
+- [在 Codex 里读写笔记本](docs/codex-notebook.zh.md) —— `notebook_*` 工具与 `alaya-notebook` 技能
 - [独立部署](docs/standalone.zh.md)、[图片](docs/images.zh.md)、[更新](docs/updates.zh.md)
 - 数据库核心（记忆组、工具、配置与存储）：[Alaya](https://github.com/HuaimaoCy/Alaya-Database)
