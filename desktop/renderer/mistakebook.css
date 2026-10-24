@@ -13,7 +13,7 @@ body[data-mode="mistakebook"] > #status { display:none; }
 .mb-dialog label.row { flex-wrap:nowrap; align-items:flex-start; font-size:11px; line-height:1.7; }
 .mb-shell .btn,.mb-dialog .btn { font-size:12px; }
 .mb-shell .nav.on { background:#e4ece6; color:#356556; }
-.mb-side { width:var(--mb-side-w,220px); flex:0 0 var(--mb-side-w,220px); display:flex; flex-direction:column; padding:20px 14px 14px; background:#eff2ee; border-right:1px solid #e1e6df; }
+.mb-side { width:var(--mb-side-w,220px); flex:0 0 var(--mb-side-w,220px); display:flex; flex-direction:column; padding:20px 14px 14px; background:rgba(238,242,237,.72); backdrop-filter:blur(24px) saturate(180%); -webkit-backdrop-filter:blur(24px) saturate(180%); border-right:1px solid rgba(20,26,38,.07); }
 .mb-side .brand { padding-bottom:22px; }
 .mb-book-mark { display:grid; place-items:center; width:42px; height:44px; color:#557667; background:#fbfaf7; border:1px solid #dfded6; border-radius:12px; }
 .mb-book-mark .icon { width:25px; height:25px; }
@@ -38,7 +38,7 @@ body[data-mode="mistakebook"] > #status { display:none; }
 .mb-side-bottom { border-top:1px solid #dedfd7; padding-top:16px; }
 .mb-local { display:flex; align-items:center; gap:8px; font-size:11px; color:#889087; padding:7px 11px 16px; }
 .mb-workspace { display:flex; flex-direction:column; flex:1; min-width:0; }
-.mb-bar { min-height:76px; flex:0 0 76px; display:flex; align-items:center; justify-content:space-between; gap:20px; padding:0 30px; border-bottom:1px solid #e2e7e1; background:#fdfefd; }
+.mb-bar { min-height:76px; flex:0 0 76px; display:flex; align-items:center; justify-content:space-between; gap:20px; padding:0 30px; border-bottom:1px solid rgba(20,26,38,.07); background:rgba(252,253,251,.72); backdrop-filter:blur(24px) saturate(180%); -webkit-backdrop-filter:blur(24px) saturate(180%); }
 .mb-bar .toolbar-actions { min-width:0; gap:10px; }
 .mb-bar .search-wrap { width:clamp(190px,23vw,320px); background:#f2f4f1; border:1px solid transparent; }
 .mb-bar .search-wrap:focus-within { background:#fff; border-color:#a9bdb1; }
@@ -301,3 +301,15 @@ button.brand-mark { border:1px solid #dfded6; border-radius:12px; background:#fb
 .mb-ai-msg-actions { display:flex; gap:6px; margin-top:6px; }
 .mb-ai-msg-actions .btn { min-height:22px; padding:2px 9px; font-size:10.5px; }
 .mb-ai-head .cap { flex:0 0 auto; }
+
+/* —— 设计层：按下的即时反馈 + 减少透明度时的实心材质 —— */
+.mb-shell .btn,.mb-shell .icon-button,.mb-shell .nav,.mb-shell .mb-book-mark,.mb-card,.mb-note-card { transition:transform .12s cubic-bezier(.22,1,.32,1), background .16s, border-color .16s, color .16s; }
+.mb-shell .btn:active:not(:disabled),.mb-shell .icon-button:active:not(:disabled),.mb-shell .nav:active { transform:scale(.985); }
+@media (prefers-reduced-motion: reduce) {
+  .mb-shell .btn:active,.mb-shell .icon-button:active,.mb-shell .nav:active { transform:none; }
+}
+@media (prefers-reduced-transparency: reduce) {
+  .mb-bar,.mb-side { backdrop-filter:none !important; -webkit-backdrop-filter:none !important; }
+  .mb-bar { background:#fdfefd; }
+  .mb-side { background:#eff2ee; }
+}

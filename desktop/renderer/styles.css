@@ -1,4 +1,8 @@
-:root { color-scheme: light; --bg:#f7f8fa; --surface:#fff; --side:#eef0f4; --line:#e4e6eb; --fg:#20232a; --fg-2:#545d6b; --fg-3:#707b8a; --accent:#007aff; --accent-soft:#e6f0ff; --ok:#29845b; --danger:#cc3543; --radius:10px; font-synthesis:none; }
+:root { color-scheme: light; --bg:#f7f8fa; --surface:#fff; --side:#eef0f4; --line:#e4e6eb; --fg:#20232a; --fg-2:#545d6b; --fg-3:#707b8a; --accent:#007aff; --accent-soft:#e6f0ff; --ok:#29845b; --danger:#cc3543; --radius:10px; font-synthesis:none;
+  /* 材质与深度：chrome 是半透明的一层，内容层保持实心。 */
+  --radius-lg:14px; --hairline:rgba(20,26,38,.07); --material-chrome:rgba(246,247,250,.72); --material-float:rgba(255,255,255,.84);
+  --shadow-float:0 1px 2px rgba(22,34,59,.06), 0 18px 44px -20px rgba(22,34,59,.30);
+  --spring:cubic-bezier(.22,1,.32,1); }
 * { box-sizing:border-box; }
 :root { --ease-out:cubic-bezier(0.23,1,0.32,1); --ease-in-out:cubic-bezier(0.77,0,0.175,1); }
 html,body { height:100%; }
@@ -39,9 +43,9 @@ button:disabled:hover { transform:none; }
 input[type="checkbox"] { width:15px; height:15px; accent-color:var(--accent); flex-shrink:0; }
 .app-shell { display:flex; height:100%; }
 /* Sidebar navigation remains separate from the content toolbar. */
-.side { display:flex; flex-direction:column; width:222px; flex:0 0 222px; background:linear-gradient(150deg,#f0f2f6 0%,#eceef3 100%); border-right:1px solid #e0e3e9; padding:30px 16px 14px; }
+.side { display:flex; flex-direction:column; width:222px; flex:0 0 222px; background:var(--material-chrome); backdrop-filter:blur(24px) saturate(180%); -webkit-backdrop-filter:blur(24px) saturate(180%); border-right:1px solid var(--hairline); padding:30px 16px 14px; }
 .brand { display:flex; align-items:center; gap:12px; padding:0 7px 31px; }
-.brand-mark { --vault-cutout:#f6f5f2; display:flex; align-items:center; justify-content:center; width:41px; height:43px; border-radius:13px; background:linear-gradient(180deg,#faf9f7,#ecebe7); border:1px solid #e0e0df; box-shadow:0 3px 8px #18202a06; color:#252a30; }
+.brand-mark { --vault-cutout:#f6f5f2; display:flex; align-items:center; justify-content:center; width:41px; height:43px; border-radius:13px; background:var(--material-float); backdrop-filter:blur(10px); -webkit-backdrop-filter:blur(10px); border:1px solid var(--hairline); box-shadow:0 1px 2px rgba(22,34,59,.05); color:#252a30; }
 .brand-mark .icon { width:34px; height:34px; }
 .brand-name { font-size:18px; font-weight:650; letter-spacing:.5px; line-height:1.4; }
 .brand-caption { font-size:10px; letter-spacing:.9px; color:var(--fg-3); margin-top:3px; }
@@ -75,7 +79,7 @@ input[type="checkbox"] { width:15px; height:15px; accent-color:var(--accent); fl
 .settings-link .trailing { margin-left:auto; }
 .settings-link .trailing .icon { width:13px; height:13px; color:#9299a6; }
 .workspace { display:flex; flex-direction:column; flex:1; min-width:0; }
-.bar { height:73px; flex:0 0 73px; display:flex; align-items:center; justify-content:space-between; gap:18px; padding:0 30px; border-bottom:1px solid var(--line); background:#ffffffad; }
+.bar { height:73px; flex:0 0 73px; display:flex; align-items:center; justify-content:space-between; gap:18px; padding:0 30px; border-bottom:1px solid var(--hairline); background:var(--material-chrome); backdrop-filter:blur(24px) saturate(180%); -webkit-backdrop-filter:blur(24px) saturate(180%); }
 .breadcrumb { display:flex; align-items:center; gap:9px; color:var(--fg-2); font-size:12px; min-width:0; }
 .breadcrumb > span:last-child { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .breadcrumb .icon { width:16px; height:16px; color:#8f96a5; }
@@ -391,4 +395,47 @@ h1 { margin:0; font-size:25px; font-weight:600; letter-spacing:-.3px; line-heigh
 
 button.brand-mark { cursor:pointer; font:inherit; }
 button.brand-mark:hover { border-color:#c9d4c4; }
+
+/* —— 设计层：反馈、材质与三档降级 —— */
+
+/* 按下即反馈，不等松开；只动 transform，不触发布局。 */
+.btn,.icon-button,.segment,.nav,.tile,.saved-view,.palette-item { transition:transform .12s var(--spring), background .16s var(--spring), border-color .16s var(--spring), color .16s var(--spring); }
+.btn:active:not(:disabled),.icon-button:active:not(:disabled),.segment:active:not(:disabled),.nav:active,.saved-view:active,.palette-item:active { transform:scale(.985); }
+.tile:active { transform:scale(.995); }
+
+/* 焦点环：2px、留 2px 间隙，比默认 outline 安静。 */
+button:focus-visible,summary:focus-visible,[tabindex]:focus-visible,select:focus-visible { outline:2px solid rgba(0,122,255,.6); outline-offset:2px; }
+
+/* 浮层材质：比 chrome 更亮更厚，用更深的投影表达层级，不叠两层浅材质。 */
+.modal { background:var(--material-float); backdrop-filter:blur(30px) saturate(180%); -webkit-backdrop-filter:blur(30px) saturate(180%); box-shadow:var(--shadow-float); }
+.modal::backdrop { background:rgba(23,32,48,.28); backdrop-filter:blur(8px) saturate(120%); }
+.curation-popover { background:var(--material-float); backdrop-filter:blur(24px) saturate(180%); -webkit-backdrop-filter:blur(24px) saturate(180%); box-shadow:var(--shadow-float); transform-origin:top right; }
+.command-palette { background:var(--material-float); backdrop-filter:blur(30px) saturate(180%); -webkit-backdrop-filter:blur(30px) saturate(180%); box-shadow:var(--shadow-float); }
+.status { background:var(--material-float); backdrop-filter:blur(20px) saturate(180%); -webkit-backdrop-filter:blur(20px) saturate(180%); box-shadow:var(--shadow-float); }
+
+/* 菜单从触发点长出来（材质出现，而不是一张图淡入）。 */
+#curation-menu[open] .curation-popover,
+#layout-menu[open] .ws-panel { animation:alaya-materialize .26s var(--spring) both; }
+@keyframes alaya-materialize { from { opacity:0; transform:scale(.97) translateY(-2px); } to { opacity:1; transform:none; } }
+
+/* 减少动态效果：位移与缩放退化成短淡入，反馈本身不消失。 */
+@media (prefers-reduced-motion: reduce) {
+  .btn:active,.icon-button:active,.segment:active,.tile:active,.nav:active,.saved-view:active,.palette-item:active { transform:none; }
+  #curation-menu[open] .curation-popover,#layout-menu[open] .ws-panel { animation:alaya-fade .18s ease both; }
+  @keyframes alaya-fade { from { opacity:0; } to { opacity:1; } }
+}
+
+/* 减少透明度：材质变实心，模糊关掉。 */
+@media (prefers-reduced-transparency: reduce) {
+  .bar,.side,.brand-mark,.modal,.curation-popover,.command-palette,.status { backdrop-filter:none !important; -webkit-backdrop-filter:none !important; }
+  .bar,.side,.brand-mark { background:#f3f5f8; }
+  .modal { background:#fbfcfe; }
+  .modal::backdrop { backdrop-filter:none; }
+}
+
+/* 提高对比度：描边更明确。 */
+@media (prefers-contrast: more) {
+  .bar,.side,.modal,.curation-popover,.command-palette { background:#fff; }
+  .tile,.btn,.input,.select,.search-wrap { border-color:rgba(20,26,38,.26); }
+}
 

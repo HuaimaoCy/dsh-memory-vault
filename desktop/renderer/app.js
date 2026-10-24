@@ -5,6 +5,7 @@ import { mountMistakebook } from './mistakebook.js'
 import { NOTEBOOK_TARGETS, mountQuickCapture } from './quick-capture.js'
 import { createStorageStore, mountWorkspaceLayout } from './workspace-layout.js'
 import { createLoadingStatus, runAlayaStartup } from './loading.js'
+import { enterDialog, enterPanel } from './motion.js'
 import {
   GROUPING_LABELS, KIND_LABELS, SHAPE_LABELS, SORT_LABELS, UNGROUPED, normalizeFilters, normalizeSource, sourceEquals,
   activeFilterCount, clearLegacyLayout, createView, defaultViews, describeFilters, describeView,
@@ -360,8 +361,11 @@ function selectEntry(entry) {
 }
 function renderDrawer() {
   const drawer = el('drawer')
+  const opening = drawer.classList.contains('hidden') && Boolean(state.selected)
   drawer.classList.toggle('hidden', !state.selected)
   document.querySelector('.body').classList.toggle('with-inspector', Boolean(state.selected))
+  // 抽屉是贴右边缘的全高内容层：只淡入，不做位移（位移会让右缘探出窗口）。
+  if (opening) enterPanel(drawer, { distance: 0, response: 0.3 })
   if (!state.selected) return
   const entry = state.selected, draft = state.draft, isNew = !entry.id
   const control = (name, tagName = 'input', props = {}) => h(tagName, {
@@ -529,7 +533,7 @@ function modal(title, ...children) {
   el('modal')?.remove()
   el('curation-menu').open = false
   const dialog = h('dialog', { id: 'modal', class: 'modal', 'aria-labelledby': 'modal-title', onClose: () => { dialog.remove(); scheduleSearch() } }, h('div', { class: 'modal-header' }, h('h2', { id: 'modal-title', text: title }), h('span', { class: 'spacer' }), iconButton('close', '关闭', async () => dialog.close())), h('div', { class: 'modal-status', role: 'status' }), h('div', { class: 'modal-body' }, children))
-  document.body.append(dialog); dialog.showModal()
+  document.body.append(dialog); dialog.showModal(); enterDialog(dialog)
   return dialog
 }
 function groupManager() {
