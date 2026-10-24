@@ -9,7 +9,7 @@ import assert from 'node:assert/strict'
 import {
   DEFAULT_VIEW_IDS, KIND_LABELS, LEGACY_LAYOUT_KEY, UNGROUPED, VIEW_SCHEMA, VIEW_SHAPES, VIEW_STORE_KEY,
   activeFilterCount, clearLegacyLayout, createView, defaultViews, describeFilters, describeSource, describeView,
-  filterEntries, groupEntries, isDefaultView, migrateViewStore, nextViewId, normalizeFilters, normalizeSource,
+  filterEntries, filterScopeNotice, groupEntries, isDefaultView, migrateViewStore, nextViewId, normalizeFilters, normalizeSource,
   normalizeView, normalizeViewStore, readViewStore, serializeView, sortEntries, sourceEquals, titleOf, writeViewStore,
 } from '../desktop/renderer/views.js'
 
@@ -247,6 +247,21 @@ check('来源与筛选互不干扰', () => {
   const view = normalizeView({ source: { kind: 'scope', id: 'conversation' }, filters: { kinds: ['task'] } })
   is(view.source, { kind: 'scope', id: 'conversation' })
   is(view.filters.kinds, ['task'])
+})
+
+check('筛选范围的边界提示', () => {
+  // 有筛选 + 还有未加载的结果 → 必须提示边界，否则「看板上没有」会被误读成「库里没有」。
+  is(filterScopeNotice({ loaded: 200, shown: 3, hasMore: true, filterCount: 1 }), '筛选只作用于已加载的 200 条（匹配 3 条）；还有更多结果未加载')
+  // 没有筛选时列表底部已有「加载更多」，不重复提示。
+  is(filterScopeNotice({ loaded: 200, shown: 200, hasMore: true, filterCount: 0 }), null)
+  // 已经加载完就没有边界问题。
+  is(filterScopeNotice({ loaded: 42, shown: 5, hasMore: false, filterCount: 2 }), null)
+  // 坏输入不能抛。
+  is(filterScopeNotice(), null)
+  is(filterScopeNotice({ filterCount: 'x' }), null)
+  // 文案必须同时带上「已加载条数」与「匹配条数」，且不能声称是整库结果。
+  const text = filterScopeNotice({ loaded: 200, shown: 0, hasMore: true, filterCount: 1 })
+  ok(text.includes('已加载的 200 条') && text.includes('匹配 0 条') && !text.includes('全部'))
 })
 
 console.log(`views-smoke: ${checks} groups passed`)

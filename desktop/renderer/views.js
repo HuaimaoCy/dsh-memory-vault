@@ -346,6 +346,20 @@ export function activeFilterCount(filters) {
 }
 
 /**
+ * 筛选只作用于「已加载的这一页」，界面必须把这条边界说出来，否则用户会把
+ * 看板/表格里缺少的条目误当成不存在。
+ *
+ * 只有「有筛选」且「还有未加载的结果」时才需要提示；没有筛选时列表底部本来
+ * 就有「加载更多」，不重复提示。
+ * @param {{loaded?: number, shown?: number, hasMore?: boolean, filterCount?: number}} [input]
+ * @returns {string|null}
+ */
+export function filterScopeNotice({ loaded = 0, shown = 0, hasMore = false, filterCount = 0 } = {}) {
+  if (!filterCount || !hasMore) return null
+  return `筛选只作用于已加载的 ${loaded} 条（匹配 ${shown} 条）；还有更多结果未加载`
+}
+
+/**
  * 人话描述的筛选条件，用于工具栏徽标、设置弹层与空态。
  * @param {unknown} filters - 任意来源的筛选配置。
  * @returns {string[]} 逐条描述（无筛选时为空数组）。

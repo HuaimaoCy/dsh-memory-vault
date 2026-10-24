@@ -93,6 +93,12 @@
 .filter-empty p { margin:0; max-width:400px; color:#9aa3b1; font-size:12px; line-height:1.7; }
 .filter-empty .row { margin-top:6px; }
 
+/* —— 筛选范围的边界提示：筛选只作用于已加载的一页，必须让用户看得见 —— */
+.filter-scope { display:flex; align-items:center; gap:9px; margin:0 0 12px; padding:9px 12px; border:1px solid #e6e9f0; border-radius:11px; background:#f7f8fb; color:#6b7688; font-size:12px; }
+.filter-scope .icon { width:14px; height:14px; flex-shrink:0; color:#9aa3b1; }
+.filter-scope span { flex:1; min-width:0; line-height:1.6; }
+.filter-scope .btn { flex-shrink:0; padding:5px 10px; font-size:12px; }
+
 /* —— 尊重系统的「减少动态效果」 —— */
 @media (prefers-reduced-motion: reduce) {
   .saved-view,.filter-button,.segment,.view-table tbody tr,.board-card,.tile { transition:none; }

@@ -8,7 +8,7 @@ import { createLoadingStatus, runAlayaStartup } from './loading.js'
 import {
   GROUPING_LABELS, KIND_LABELS, SHAPE_LABELS, SORT_LABELS, UNGROUPED, normalizeFilters, normalizeSource, sourceEquals,
   activeFilterCount, clearLegacyLayout, createView, defaultViews, describeFilters, describeView,
-  filterEntries, groupEntries, isDefaultView, normalizeView, readViewStore, sortEntries, titleOf, writeViewStore,
+  filterEntries, filterScopeNotice, groupEntries, isDefaultView, normalizeView, readViewStore, sortEntries, titleOf, writeViewStore,
 } from './views.js'
 
 const el = id => document.getElementById(id)
@@ -240,8 +240,12 @@ function renderList() {
   const sorted = sortEntries(filtered, view.sort)
   state.shown = sorted.length
   list.replaceChildren()
+  // 筛选只作用于已加载的一页：把这条边界写出来，避免「看板上没有 = 库里不存在」。
+  const scopeNotice = filterScopeNotice({ loaded: loaded.length, shown: sorted.length, hasMore: state.nextOffset !== null, filterCount: activeFilterCount(view.filters) })
+  if (scopeNotice) list.append(h('div', { class: 'filter-scope', id: 'filter-scope', role: 'status' },
+    icon('search'), h('span', { text: scopeNotice }), button('加载更多', () => load(true), false, { class: 'btn soft', id: 'filter-scope-more' })))
   if (!sorted.length) {
-    emptyState(list, { searching: Boolean(state.query), filtered: loaded.length > 0 })
+    emptyState(list, { searching: Boolean(state.query), filtered: loaded.length > 0, partial: Boolean(scopeNotice), loaded: loaded.length })
   } else if (view.shape === 'board') {
     renderBoard(list, sorted)
   } else if (view.shape === 'table') {
@@ -262,12 +266,14 @@ function cardNode(entry) {
   h('div', { class: 'tile-footer' }, h('span', { text: entry.source === 'panel' ? '手动记录' : entry.tags.includes('AI 生成') ? 'AI 生成' : entry.source || '记忆' }), h('span', { class: 'date', text: new Date(entry.updatedAt).toLocaleDateString('zh-CN', { month: 'short', day: 'numeric' }) })))
 }
 // 空态分三种：搜索没命中、筛选没命中（要给一键清除）、库里本来就空。
-function emptyState(list, { searching, filtered }) {
+function emptyState(list, { searching, filtered, partial = false, loaded = 0 }) {
   if (filtered) {
     list.append(h('div', { class: 'filter-empty' }, h('div', { class: 'empty-art' }, icon('search')),
-      h('h2', { text: '当前筛选没有结果' }),
-      h('p', { text: `「${state.current.name}」的筛选条件把所有记忆都排除了：${describeFilters(state.current.filters).join('；')}。` }),
-      h('div', { class: 'row' }, button('清除筛选', async () => clearViewFilters(), true), button('视图设置', async () => viewSettings()))))
+      h('h2', { text: partial ? '已加载的结果里没有匹配' : '当前筛选没有结果' }),
+      h('p', { text: partial ? `筛选只作用于已加载的 ${loaded} 条；更大范围里可能还有匹配的结果。` : `「${state.current.name}」的筛选条件把所有记忆都排除了：${describeFilters(state.current.filters).join('；')}。` }),
+      h('div', { class: 'row' },
+        partial ? button('加载更多', () => load(true), true, { id: 'filter-empty-more' }) : button('清除筛选', async () => clearViewFilters(), true),
+        button('视图设置', async () => viewSettings()))))
     return
   }
   list.append(h('div', { class: 'empty' }, h('div', { class: 'empty-art' }, icon(searching ? 'search' : 'vault')),
