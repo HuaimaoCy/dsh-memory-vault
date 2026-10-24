@@ -1,3 +1,4 @@
+import { renderTex } from './tex.js'
 // 轻量 Markdown + LaTeX 渲染器（无外部依赖，CSP 安全：全部转义后生成 DOM）。
 // 支持：标题/粗斜体/行内代码/代码块/有序无序列表/引用/分隔线/表格/
 // $$...$$ 块级公式（居中衬线）与 $...$ 行内公式（衬线斜体近似排版）。
@@ -15,12 +16,13 @@ const h = (tag, props = {}, ...children) => {
 // 行内：$..$ 公式、`code`、**粗**、*斜*。文本已转义由外层保证：这里接收纯文本片段。
 const inline = text => {
   const nodes = []
-  const pattern = /(\$[^$\n]+\$)|(`[^`]+`)|(\*\*[^*]+\*\*)|(\*[^*\n]+\*)/g
+  const pattern = /(\$\$[^$]+\$\$)|(`[^`]+`)|(\*\*[^*]+\*\*)|(\*[^*\n]+\*)|(\$[^$\n]+\$)/g
   let last = 0, match
   while ((match = pattern.exec(text))) {
     if (match.index > last) nodes.push(text.slice(last, match.index))
     const token = match[0]
-    if (token.startsWith('$')) nodes.push(h('span', { class: 'mb-math', text: token.slice(1, -1) }))
+    if (token.startsWith('$$')) nodes.push(renderTex(token.slice(2, -2), { display: true }))
+    else if (token.startsWith('$')) nodes.push(renderTex(token.slice(1, -1)))
     else if (token.startsWith('`')) nodes.push(h('code', { class: 'mb-code-inline', text: token.slice(1, -1) }))
     else if (token.startsWith('**')) nodes.push(h('strong', { text: token.slice(2, -2) }))
     else nodes.push(h('em', { text: token.slice(1, -1) }))
@@ -51,9 +53,9 @@ export function renderRich(source) {
     if (/^\s*\$\$/.test(line)) {
       flushAll()
       const formula = [line.replace(/^\s*\$\$/, '')]
-      if (!/\$\$\s*$/.test(line)) while (index + 1 < lines.length && !/\$\$\s*$/.test(lines[index + 1])) formula.push(lines[++index])
-      formula[index] = formula[formula.length - 1].replace(/\$\$\s*$/, '')
-      root.append(h('div', { class: 'mb-math-block', text: formula.join('\n').replace(/\$\$\s*$/g, '').trim() }))
+      while (!/\$\$\s*$/.test(formula[formula.length - 1]) && index + 1 < lines.length) formula.push(lines[++index])
+      formula[formula.length - 1] = formula[formula.length - 1].replace(/\$\$\s*$/, '')
+      root.append(h('div', { class: 'mb-math-block' }, renderTex(formula.join('\n').trim(), { display: true })))
       continue
     }
     if (/^\s*[-*+]\s+/.test(line)) { flushParagraph(); if (table) { root.append(table); table = null } if (!list || list.tagName !== 'UL') { if (list) root.append(list); list = h('ul', { class: 'mb-md-list' }) } list.append(h('li', {}, inline(line.replace(/^\s*[-*+]\s+/, '')))); continue }

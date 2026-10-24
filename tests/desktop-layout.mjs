@@ -84,7 +84,7 @@ export async function run(window, bridge) {
       await layout('Notebook overview', ['.mb-shell', '.mb-workspace', '.mb-bar', '.mb-main'], ['#mb-new', '#mb-import', '#mb-mode-switch', '#mb-settings', '#mb-quiz'], null, null)
     }
     await screenshot('Alaya-笔记本界面')
-    await click(`[data-question-id="${notebookIds[0]}"]`); await idle()
+    await click(`[data-question-id="${notebookIds[0]}"]`); await idle(); await click('#mb-edit'); await idle()
     for (const [width, height] of [[1440, 940], [1040, 650]]) {
       await resize(width, height)
       await layout('Notebook editor', ['.mb-shell', '.mb-bar', '.mb-main', '.mb-detail', '.mb-editor-form', '.mb-save-actions'], ['#mb-new', '#mb-import', '#mb-mode-switch', '#mb-settings', '#mb-save', '#mb-ai-solve'], '.mb-editor-form', '.mb-save-actions')

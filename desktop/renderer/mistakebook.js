@@ -60,7 +60,7 @@ const firstMeaningfulLine = text => text.split(/\r?\n/).map(line => line.replace
 export function mountMistakebook({ beforeEnter }) {
   const memory = document.querySelector('.app-shell')
   const shell = h('div', { class: 'mb-shell', hidden: true, 'aria-label': '笔记本' })
-  const state = { data: null, view: 'all', type: '', subjectID: '', nodeID: '', query: '', tag: '', order: 'priority', draft: null, dirty: false, busy: false, review: false, showAnswer: false, picking: false, selection: new Set() }
+  const state = { data: null, view: 'all', type: '', subjectID: '', nodeID: '', query: '', tag: '', order: 'priority', page: 'view', draft: null, dirty: false, busy: false, review: false, showAnswer: false, picking: false, selection: new Set() }
   // 自由画布视图在 shell 装配完成后创建；先声明，避免在视图切换里踩到 TDZ。
   let canvasView = null
   const handwritingDrafts = new WeakMap()
@@ -514,7 +514,7 @@ export function mountMistakebook({ beforeEnter }) {
   }
   async function select(id) {
     if (!await discard()) return
-    state.draft = await call('read', { id }); state.dirty = false; state.review = state.view === 'due'; state.showAnswer = false
+    state.draft = await call('read', { id }); state.dirty = false; state.review = state.view === 'due'; state.showAnswer = false; state.page = 'view'
     renderList(); renderDetail()
   }
   async function openCreate() {
@@ -524,7 +524,7 @@ export function mountMistakebook({ beforeEnter }) {
   async function newQuestion(type = state.type || 'note') {
     if (!await discard()) return
     state.draft = { type, title:'', physics:normalizeFields('physics'),method:normalizeFields('method'),vocabulary:normalizeFields('vocabulary'),simulationId:'',stem: '', studentWork: '', referenceAnswer: '', notes: '', cause: '', errorType: '', nodeID: '', subjectID: type==='physics'?'physics':type==='vocabulary'?'english':state.subjectID, target: 'gaokao', images: [], tags: [], reviewState: 'new', repeatCount: 0, mastery: 0 }
-    state.dirty = false; state.review = false; renderList(); renderDetail(); setTimeout(()=>document.querySelector(`[data-mb-field="${type==='vocabulary'?'vocabulary.word':'title'}"]`)?.focus(),0)
+    state.dirty = false; state.review = false; state.page = 'edit'; renderList(); renderDetail(); setTimeout(()=>document.querySelector(`[data-mb-field="${type==='vocabulary'?'vocabulary.word':'title'}"]`)?.focus(),0)
   }
   async function save() {
     const draft = state.draft; if (!draft) return
@@ -555,9 +555,86 @@ export function mountMistakebook({ beforeEnter }) {
     if (state.draft) { state.review = true; state.showAnswer = false }
     await load(); notify(({ pass: '复习已记录，下次按计划再来', fail: '已记录薄弱点，明天再练一次', delete: '已移入回收站', restore: '题目已恢复', archive: '已归档', unarchive: '已取消归档', purge: '题目已永久删除' })[action])
   }
+  // —— 查看页：整块 Markdown + LaTeX，与编辑表单分离 ——
+  const noteMarkdown = draft => {
+    const parts = []
+    const push = (label, value) => { if (String(value ?? '').trim()) parts.push(`## ${label}\n\n${String(value).trim()}`) }
+    if (draft.type === 'vocabulary') {
+      const vocabulary = draft.vocabulary ?? {}
+      const head = [vocabulary.word, vocabulary.phonetic, vocabulary.partOfSpeech].filter(Boolean).join(' · ')
+      if (head) parts.push(`**${head}**`)
+      if (vocabulary.meaning) parts.push(String(vocabulary.meaning).trim())
+    } else if (String(draft.stem ?? '').trim()) parts.push(String(draft.stem).trim())
+    if (draft.type === 'mistake') {
+      push('我的作答', draft.studentWork)
+      push('参考答案', draft.referenceAnswer)
+      if (draft.errorType) push('错因类型', draft.errorType)
+      push('错因与复盘', draft.cause)
+    } else {
+      for (const [key, label] of STRUCTURED_FIELDS[draft.type] ?? []) push(label, draft[draft.type]?.[key])
+      push('备注', draft.notes)
+    }
+    return parts.length ? parts.join('\n\n') : '（这篇笔记还没有正文，点「编辑」写点什么。）'
+  }
+  const closeButton = () => {
+    const close = button('', async () => { if (await discard()) { state.draft = null; state.dirty = false; renderList(); renderDetail() } }, false, { class: 'icon-button', 'aria-label': '关闭题目' })
+    close.append(icon('close'))
+    return close
+  }
+  const fullscreenButton = () => {
+    const on = shell.classList.contains('detail-full')
+    const fullscreen = button('', () => {
+      shell.classList.toggle('detail-full')
+      renderDetail()
+      notify(shell.classList.contains('detail-full') ? '已进入全屏查看，Esc 退出' : '已退出全屏')
+      setTimeout(() => document.querySelector('#mb-fullscreen')?.focus(), 0)
+    }, false, {
+      class: 'icon-button', id: 'mb-fullscreen',
+      title: on ? '退出全屏（Esc）' : '全屏查看（F）',
+      'aria-label': on ? '退出全屏查看' : '全屏查看',
+      'aria-pressed': String(on),
+    })
+    fullscreen.append(icon(on ? 'minimize' : 'maximize'))
+    return fullscreen
+  }
+  async function toggleReview(draft) {
+    if (!await discard()) return
+    state.draft = await call('read', { id: draft.id })
+    state.dirty = false
+    state.review = !state.review
+    state.showAnswer = false
+    if (!state.review) state.page = 'edit'
+    renderDetail()
+  }
+  function renderNoteView(draft) {
+    const nodes = state.data.taxonomy.nodes
+    const subject = nodes.find(node => node.id === draft.subjectID)?.name ?? ''
+    const node = nodes.find(row => row.id === draft.nodeID)?.name ?? ''
+    const edited = draft.updatedAt ? new Date(draft.updatedAt).toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : ''
+    const chip = text => h('span', { class: 'mb-note-tag', text })
+    const meta = h('div', { class: 'mb-note-meta' },
+      subject ? chip(subject) : null,
+      node && node !== subject ? chip(node) : null,
+      ...(draft.tags ?? []).map(chip),
+      draft.repeatCount ? h('span', { class: 'cap', text: `复习 ${draft.repeatCount} 次` }) : null,
+      edited ? h('span', { class: 'cap', text: `更新于 ${edited}` }) : null)
+    const edit = button('编辑', () => { state.page = 'edit'; renderDetail() }, true, { id: 'mb-edit' })
+    const review = button('复习', () => { void toggleReview(draft) }, false, { id: 'mb-start-review' })
+    const head = h('div', { class: 'mb-detail-head' },
+      h('div', {}, h('span', { class: 'eyebrow', text: NOTE_TYPES[draft.type].label }), h('h2', { text: draft.title || draft.vocabulary?.word || '笔记详情' })),
+      h('div', { class: 'row mb-detail-head-actions' }, review, edit, fullscreenButton(), closeButton()))
+    const article = h('article', { class: 'mb-note-view', id: 'mb-note-view' },
+      h('div', { class: 'mb-note-body' }, renderRich(noteMarkdown(draft))),
+      draft.images?.length ? h('div', { class: 'mb-note-images' }, draft.images.map(image => h('figure', {},
+        h('img', { src: `data:${image.mimeType};base64,${image.data}`, alt: image.name || '笔记图片', loading: 'lazy' }),
+        image.name ? h('figcaption', { text: image.name }) : null))) : null)
+    detail.replaceChildren(head, meta, article)
+  }
   function renderDetail() {
     const draft = state.draft; detail.hidden = !draft; detailSplitter.hidden = !draft; shell.classList.toggle('with-question', Boolean(draft))
     if (!draft) { detail.replaceChildren(); return }
+    // 查看页与编辑页分离：已保存的笔记默认只读渲染，编辑需要显式进入。
+    if (!state.review && draft.id && state.page !== 'edit') { renderNoteView(draft); return }
     const control = (name, rows = 3) => {
       const path=name.split('.'), get=()=>path.reduce((value,key)=>value?.[key],draft)
       return h(rows===1?'input':'textarea', { class: rows===1?'input':'area', rows:rows===1?undefined:rows, value:get()||'', 'data-mb-field':name, onInput:event=>{const parent=path.length===1?draft:draft[path[0]];parent[path.at(-1)]=event.target.value;dirty()} })
@@ -569,21 +646,9 @@ export function mountMistakebook({ beforeEnter }) {
     if (draft.errorType && !errors.includes(draft.errorType)) errors.push(draft.errorType)
     const errorType = h('select', { class: 'select', 'data-mb-field': 'errorType', onChange: event => { draft.errorType = event.target.value; dirty() } }, errors.map(label => h('option', { value: label === '未记录' ? '' : label, text: label, selected: (label === '未记录' ? '' : label) === draft.errorType ? 'selected' : undefined })))
     const target = h('select', { class: 'select', 'data-mb-field': 'target', onChange: event => { draft.target = event.target.value; dirty() } }, [['gaokao','高考'],['huige','合格考']].map(([value, text]) => h('option', { value, text, selected: value === draft.target ? 'selected' : undefined })))
-    const close = button('', async () => { if (await discard()) { state.draft = null; state.dirty = false; renderList(); renderDetail() } }, false, { class: 'icon-button', 'aria-label': '关闭题目' }); close.append(icon('close'))
-    const fullscreenOn = shell.classList.contains('detail-full')
-    const fullscreen = button('', () => {
-      shell.classList.toggle('detail-full')
-      renderDetail()
-      notify(shell.classList.contains('detail-full') ? '已进入全屏查看，Esc 退出' : '已退出全屏')
-      setTimeout(() => document.querySelector('#mb-fullscreen')?.focus(), 0)
-    }, false, {
-      class: 'icon-button', id: 'mb-fullscreen',
-      title: fullscreenOn ? '退出全屏（Esc）' : '全屏查看（F）',
-      'aria-label': fullscreenOn ? '退出全屏查看' : '全屏查看',
-      'aria-pressed': String(fullscreenOn),
-    })
-    fullscreen.append(icon(fullscreenOn ? 'minimize' : 'maximize'))
-    const head = h('div', { class: 'mb-detail-head' }, h('div', {}, h('span', { class: 'eyebrow', text: state.review ? '复习' : NOTE_TYPES[draft.type].label }), h('h2', { text: draft.id ? state.review ? '独立回忆，再核对' : draft.title || draft.vocabulary?.word || '笔记详情' : `新建${NOTE_TYPES[draft.type].label}` })), h('div', { class: 'row mb-detail-head-actions' }, fullscreen, close))
+    const close = closeButton()
+    const fullscreen = fullscreenButton()
+    const head = h('div', { class: 'mb-detail-head' }, h('div', {}, h('span', { class: 'eyebrow', text: state.review ? '复习' : NOTE_TYPES[draft.type].label }), h('h2', { text: draft.id ? state.review ? '独立回忆，再核对' : draft.title || draft.vocabulary?.word || '笔记详情' : `新建${NOTE_TYPES[draft.type].label}` })), h('div', { class: 'row mb-detail-head-actions' }, draft.id && !state.review ? button('查看', () => { state.page = 'view'; renderDetail() }, false, { id: 'mb-view' }) : null, fullscreen, close))
     const actions = h('div', { class: 'row mb-save-actions' }, h('span', { id: 'mb-save-state', class: state.dirty ? 'cap dirty' : 'cap', role: 'status', 'aria-live': 'polite', text: state.dirty ? '有未保存的修改' : draft.id ? '已保存' : '尚未保存' }), h('span', { class: 'spacer' }), button('保存笔记', save, true, { id: 'mb-save', disabled: !state.dirty && Boolean(draft.id), title: '保存笔记 · Ctrl / ⌘ S' }),button(draft.type==='physics'?'AI 构建与推导':draft.type==='vocabulary'?'AI 补全词条':'AI 自动解答', solveAI,false,{id:'mb-ai-solve'}))
     const form = h('form', { class: 'mb-editor-form', onSubmit: event => { event.preventDefault(); void guard(save) } })
     if (state.review) {
@@ -633,7 +698,7 @@ export function mountMistakebook({ beforeEnter }) {
       const tools = h('div', { class: 'row mb-detail-actions' })
       if (draft.isSoftDeleted) tools.append(button('恢复', () => perform('restore')), button('永久删除', () => perform('purge'), false, { class: 'btn danger' }))
       else {
-        for (const tool of [button(state.review ? '退出复习' : '开始复习', async () => { if (await discard()) { state.draft = await call('read',{id:draft.id}); state.dirty=false; state.review=!state.review; state.showAnswer=false; renderDetail() } }, false, { id: 'mb-start-review' }),
+        for (const tool of [button(state.review ? '退出复习' : '开始复习', () => { void toggleReview(draft) }, false, { id: 'mb-start-review' }),
           draft.type === 'vocabulary' ? button('关联树', () => { if (state.dirty) throw new Error('请先保存修改，再查看关联树'); void openRelationTree(draft) }, false, { id: 'mb-relations', title: '按近义词、反义词与词形变化展开这棵词库关系树' }) : null,
           button(draft.isArchived ? '取消归档' : '归档', () => perform(draft.isArchived ? 'unarchive' : 'archive')), button('移到回收站', () => perform('delete'), false, { class: 'btn ghost danger', id: 'mb-delete' })]) if (tool) tools.append(tool)
         if (!draft.isArchived && draft.type==='mistake') tools.append(button('辅助分析错因', async () => {
