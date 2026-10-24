@@ -25,16 +25,47 @@
 
 import { createServer } from 'node:http'
 import { readFileSync, statSync } from 'node:fs'
-import { basename } from 'node:path'
+import { mkdirSync, writeFileSync } from 'node:fs'
+import { basename, join, resolve } from 'node:path'
+import { homedir } from 'node:os'
 import { IMAGE_MAX_BYTES } from '../src/images.js'
-import { pathToFileURL } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import { createMemoryVault } from '../src/core/vault.js'
 import { VAULT_OPS, operateVault } from '../src/core/ops.js'
 import { serveMcp } from '../src/mcp.js'
+import { MistakebookStore } from '../addons/mistakebook/store.mjs'
 
 /** Default port for `serve`; loopback only unless explicitly overridden. */
 const DEFAULT_PORT = 47321
 const DEFAULT_HOST = '127.0.0.1'
+
+/** The Codex skill this package ships; installed by `memory-vault skill install`. */
+const SKILL_NAME = 'alaya-notebook'
+
+const skillPath = () => fileURLToPath(new URL(`../skills/${SKILL_NAME}/SKILL.md`, import.meta.url))
+
+const defaultSkillRoot = () => {
+  const home = process.env.CODEX_HOME ?? join(homedir(), '.codex')
+  if (!home.trim()) throw new Error('CODEX_HOME 不能为空')
+  return resolve(home, 'skills')
+}
+
+/**
+ * `memory-vault skill print|path|install [--dir <目录>]`
+ * 只读写这一个 SKILL.md，不打开数据库、不改 Codex 配置。
+ */
+function manageSkill(action = 'print', flags = new Map()) {
+  const source = skillPath()
+  if (action === 'path') return source
+  if (action === 'print') return readFileSync(source, 'utf8')
+  if (action !== 'install') throw new Error(`skill 支持 print / path / install，收到「${action}」`)
+  const root = option(flags, 'dir') ? resolve(option(flags, 'dir')) : defaultSkillRoot()
+  const target = join(root, SKILL_NAME)
+  const body = readFileSync(source, 'utf8')
+  mkdirSync(target, { recursive: true })
+  writeFileSync(join(target, 'SKILL.md'), body)
+  return { installed: join(target, 'SKILL.md'), bytes: Buffer.byteLength(body) }
+}
 
 /** Header every RPC caller must set — the same marker the DSH panel uses, so a cross-site form post cannot reach the vault either. */
 const CLIENT_HEADER = 'x-dsh-memory-vault'
@@ -406,6 +437,12 @@ function commandToOp(command, parsed) {
       return { direct: 'serve' }
     case 'mcp':
       return { direct: 'mcp' }
+    case 'skill': {
+      const action = positionals[0] ?? 'print'
+      if (!['print', 'path', 'install'].includes(action)) throw new Error('skill 支持 print / path / install')
+      for (const key of flags.keys()) if (key !== 'dir') throw new Error(`skill 不支持 --${key}`)
+      return { direct: 'skill', action }
+    }
     case 'help':
     case '--help':
     case '-h':
@@ -440,10 +477,24 @@ export async function runCli(argv, io = {}) {
       stdout(`${usage()}\n`)
       return 0
     }
+    // 技能管理不打开数据库，放在 vaultFrom 之前。
+    if ('direct' in plan && plan.direct === 'skill') {
+      const output = manageSkill(plan.action, parsed.flags)
+      stdout(`${typeof output === 'string' ? output : JSON.stringify(output, null, 2)}\n`)
+      return 0
+    }
     vault = vaultFrom(parsed.flags)
     if ('direct' in plan && plan.direct === 'mcp') {
       vaultLivesOn = true
-      const server = serveMcp(vault, { sessionId: option(parsed.flags, 'session') })
+      // 笔记本与记忆库同库不同域：把同一个连接上的笔记本存储挂进 MCP，让 Codex
+      // 能读写笔记与画布；构造失败就退化成只有记忆工具，不拖垮整条 MCP。
+      let notebook = null
+      try {
+        notebook = new MistakebookStore({ database: vault.store.db })
+      } catch (error) {
+        stderr(`memory-vault: notebook unavailable: ${error?.message ?? error}\n`)
+      }
+      const server = serveMcp(vault, { sessionId: option(parsed.flags, 'session'), notebook })
       const stop = () => server.close()
       process.once('SIGINT', stop)
       process.once('SIGTERM', stop)
