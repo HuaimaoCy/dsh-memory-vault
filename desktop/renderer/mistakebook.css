@@ -300,8 +300,12 @@ body[data-mb-dragging] { cursor:col-resize; user-select:none; }
 .mb-shell.detail-full .mb-splitter { display:none !important; }
 
 /* 真正的全屏查看：侧栏与顶栏让位，正文按阅读宽度居中并放大一档。 */
-.mb-shell.detail-full .mb-side,
 .mb-shell.detail-full .mb-bar { display:none; }
+/* 阅览模式可保留侧栏：开启后全屏只让出顶栏与列表，侧栏仍在左侧。 */
+.mb-shell.detail-full:not(.keep-side) .mb-side { display:none; }
+.mb-shell.detail-full.keep-side .mb-detail-head { padding-inline:24px; }
+.mb-shell.detail-full.keep-side .mb-editor-form,
+.mb-shell.detail-full.keep-side .mb-note-body { max-width:820px; }
 .mb-shell.detail-full .mb-detail { border:0; }
 .mb-shell.detail-full .mb-detail-head { position:sticky; top:0; z-index:3; background:rgba(255,255,255,.9); backdrop-filter:blur(18px) saturate(180%); -webkit-backdrop-filter:blur(18px) saturate(180%); border-bottom:1px solid rgba(20,26,38,.07); }
 .mb-shell.detail-full .mb-detail-head h2 { font-size:20px; }

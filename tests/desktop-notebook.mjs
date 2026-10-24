@@ -263,6 +263,27 @@ export async function run(window,bridge) {
     await until("document.querySelector('.mb-shell').classList.contains('detail-full')")
     await js("document.body.dispatchEvent(new KeyboardEvent('keydown',{key:'f',bubbles:true,cancelable:true}))");await idle()
     await until("!document.querySelector('.mb-shell').classList.contains('detail-full')")
+    // 阅览模式保留侧栏：默认隐藏，开启后全屏仍显示侧栏并记住偏好
+    assert.equal(await js("document.querySelector('#mb-keep-side').getAttribute('aria-pressed')"),'false')
+    await js("document.querySelector('#mb-keep-side').click()");await idle()
+    assert.equal(await js("document.querySelector('#mb-keep-side').getAttribute('aria-pressed')"),'true')
+    assert.equal(await js("localStorage.getItem('alaya.notebook.readSidebar')"),'1','偏好应持久化')
+    await js("document.querySelector('#mb-fullscreen').click()");await idle()
+    await until("document.querySelector('.mb-shell').classList.contains('detail-full')")
+    assert.equal(await js("document.querySelector('.mb-shell').classList.contains('keep-side')"),true)
+    assert.equal(await js("getComputedStyle(document.querySelector('.mb-side')).display"),'flex','开启后全屏保留侧栏')
+    assert.equal(await js("getComputedStyle(document.querySelector('.mb-bar')).display"),'none','顶栏仍然让位')
+    // 白屏回归：在全屏里直接关掉详情，主列表与顶栏必须回来
+    await js("document.querySelector('[aria-label=\"关闭题目\"]').click()");await idle()
+    await until("!document.querySelector('.mb-shell').classList.contains('detail-full')")
+    assert.equal(await js("getComputedStyle(document.querySelector('.mb-main')).display !== 'none'"),true,'全屏中关闭详情后不能白屏')
+    assert.equal(await js("getComputedStyle(document.querySelector('.mb-bar')).display"),'flex','关闭后顶栏恢复')
+    assert.equal(await js("document.querySelector('.mb-shell').classList.contains('keep-side')"),false,'关闭时必须清掉全屏状态')
+    assert.equal(await js("document.querySelector('#mb-detail').hidden"),true)
+    // 关掉侧栏偏好，恢复默认
+    await click(`[data-question-id="${physicsNote.id}"]`);await idle()
+    await js("document.querySelector('#mb-keep-side').click()");await idle()
+    assert.equal(await js("localStorage.getItem('alaya.notebook.readSidebar')"),'0')
     await js("document.querySelector('[aria-label=\"关闭题目\"]').click()");await idle()
     // 查看页把 Markdown + LaTeX 渲染成整块：分式、根号、上下标都要真的成为 DOM
     const mathNote=(await api('save',{type:'method',title:'查看页公式',stem:'判别式 $\\sqrt{b^2-4ac}\\ge 0$，顶点横坐标 $x=-\\frac{b}{2a}$，且 $a\\ne 0$。',method:{steps:'配方：$\\left(x+\\frac{b}{2a}\\right)^2$'}})).result

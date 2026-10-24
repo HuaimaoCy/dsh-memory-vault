@@ -577,14 +577,23 @@ export function mountMistakebook({ beforeEnter }) {
     return parts.length ? parts.join('\n\n') : '（这篇笔记还没有正文，点「编辑」写点什么。）'
   }
   const closeButton = () => {
-    const close = button('', async () => { if (await discard()) { state.draft = null; state.dirty = false; renderList(); renderDetail() } }, false, { class: 'icon-button', 'aria-label': '关闭题目' })
+    const close = button('', async () => {
+      if (!await discard()) return
+      shell.classList.remove('detail-full', 'keep-side')
+      state.draft = null; state.dirty = false
+      renderList(); renderDetail()
+    }, false, { class: 'icon-button', 'aria-label': '关闭题目' })
     close.append(icon('close'))
     return close
   }
+  const readSidebarPref = () => localStorage.getItem('alaya.notebook.readSidebar') === '1'
   const fullscreenButton = () => {
     const on = shell.classList.contains('detail-full')
     const fullscreen = button('', () => {
       shell.classList.toggle('detail-full')
+      // 全屏时是否保留侧栏由偏好决定；退出时一并清掉，避免留下半隐藏状态。
+      if (shell.classList.contains('detail-full')) shell.classList.toggle('keep-side', readSidebarPref())
+      else shell.classList.remove('keep-side')
       renderDetail()
       notify(shell.classList.contains('detail-full') ? '已进入全屏查看，Esc 退出' : '已退出全屏')
       setTimeout(() => document.querySelector('#mb-fullscreen')?.focus(), 0)
@@ -620,9 +629,24 @@ export function mountMistakebook({ beforeEnter }) {
       edited ? h('span', { class: 'cap', text: `更新于 ${edited}` }) : null)
     const edit = button('编辑', () => { state.page = 'edit'; renderDetail() }, true, { id: 'mb-edit' })
     const review = button('复习', () => { void toggleReview(draft) }, false, { id: 'mb-start-review' })
+    // 全屏阅读时是否保留侧栏：偏好持久化，按钮随时切换。
+    const keepSide = readSidebarPref()
+    const sideToggle = button('', () => {
+      const next = !readSidebarPref()
+      localStorage.setItem('alaya.notebook.readSidebar', next ? '1' : '0')
+      if (shell.classList.contains('detail-full')) shell.classList.toggle('keep-side', next)
+      renderDetail()
+      notify(next ? '全屏阅读时保留侧栏' : '全屏阅读隐藏侧栏')
+    }, false, {
+      class: 'icon-button', id: 'mb-keep-side',
+      title: keepSide ? '全屏阅读时保留侧栏（已开启）' : '全屏阅读时保留侧栏（已关闭）',
+      'aria-label': keepSide ? '全屏阅读时不保留侧栏' : '全屏阅读时保留侧栏',
+      'aria-pressed': String(keepSide),
+    })
+    sideToggle.append(icon('layers'))
     const head = h('div', { class: 'mb-detail-head' },
       h('div', {}, h('span', { class: 'eyebrow', text: NOTE_TYPES[draft.type].label }), h('h2', { text: draft.title || draft.vocabulary?.word || '笔记详情' })),
-      h('div', { class: 'row mb-detail-head-actions' }, review, edit, fullscreenButton(), closeButton()))
+      h('div', { class: 'row mb-detail-head-actions' }, review, edit, sideToggle, fullscreenButton(), closeButton()))
     const article = h('article', { class: 'mb-note-view', id: 'mb-note-view' },
       h('div', { class: 'mb-note-body' }, renderRich(noteMarkdown(draft))),
       draft.images?.length ? h('div', { class: 'mb-note-images' }, draft.images.map(image => h('figure', {},
@@ -632,7 +656,12 @@ export function mountMistakebook({ beforeEnter }) {
   }
   function renderDetail() {
     const draft = state.draft; detail.hidden = !draft; detailSplitter.hidden = !draft; shell.classList.toggle('with-question', Boolean(draft))
-    if (!draft) { detail.replaceChildren(); return }
+    if (!draft) {
+      // 关闭详情时必须把全屏状态一起复位，否则主列表仍被 display:none 挡住，只剩白底。
+      shell.classList.remove('detail-full', 'keep-side')
+      detail.replaceChildren()
+      return
+    }
     // 查看页与编辑页分离：已保存的笔记默认只读渲染，编辑需要显式进入。
     if (!state.review && draft.id && state.page !== 'edit') { renderNoteView(draft); return }
     const control = (name, rows = 3) => {
@@ -1187,12 +1216,14 @@ export function mountMistakebook({ beforeEnter }) {
     // 画布打开时笔记列表/编辑器是隐藏的：Ctrl+N / Ctrl+F 等不能作用到看不见的 .mb-body。
     if (canvasView?.isOpen()) return
     if (event.key === 'Escape' && state.picking) { state.picking = false; state.selection.clear(); renderList(); return }
-    if (event.key === 'Escape' && shell.classList.contains('detail-full')) { shell.classList.remove('detail-full'); renderDetail(); return }
+    if (event.key === 'Escape' && shell.classList.contains('detail-full')) { shell.classList.remove('detail-full', 'keep-side'); renderDetail(); return }
     // F 切换全屏查看；只在没有焦点在输入框里时生效，避免把字母打进正文。
     const typing = Boolean(event.target.closest?.('input, textarea, select, [contenteditable="true"]'))
     if (!typing && !event.ctrlKey && !event.metaKey && !event.altKey && event.key.toLowerCase() === 'f' && state.draft) {
       event.preventDefault()
       shell.classList.toggle('detail-full')
+      if (shell.classList.contains('detail-full')) shell.classList.toggle('keep-side', readSidebarPref())
+      else shell.classList.remove('keep-side')
       renderDetail()
       notify(shell.classList.contains('detail-full') ? '已进入全屏查看，Esc 退出' : '已退出全屏')
       setTimeout(() => document.querySelector('#mb-fullscreen')?.focus(), 0)
