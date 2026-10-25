@@ -205,3 +205,18 @@ h1 {
 
 /* çŠ¶æ€æç¤ºåŸæ¥è´´åº•ï¼ŒæŠ¬ä¸€ç‚¹é¿å…å‹ä½å†…å®¹ */
 .status { bottom: 58px; }
+
+/* WebGL ±³¾°ºó¶Ë½Ó¹Ü»·¾³É«Ê±£¬Òş²Ø CSS ÄÇÒ»²ã£¬±ÜÃâÁ½·İ±³¾°µşÔÚÒ»Æğ */
+html[data-optical-backend="webgl"] .app-shell::before { display: none; }
+html[data-optical-backend="webgl"] .alaya-optical-webgl { z-index: -1; }
+
+/* WebGL ºó¶Ë½Ó¹Ü±³¾°ºó£¬²£Á§Ãæ²»ÔÙµş×Ô¼ºµÄ backdrop Ä£ºı£º
+   Á½²ãÄ£ºı»á°Ñ²ÄÖÊÀïµÄÎ»ÒÆÄ¨Æ½£¨Êµ²â£ºÍ¬Ò»ÕÅÎ»ÒÆÍ¼ÔÚ blur(26px) ÏÂ²îÒì¹éÁã£©¡£
+   ÕâÀïÈÃ CSS Ö»¸ºÔğ tint / Ãè±ß / ÂÖÀª¸ß¹â£¬¹âÑ§½»¸ø canvas¡£ */
+html[data-optical-backend="webgl"] .bar .toolbar-actions[data-glass-surface],
+html[data-optical-backend="webgl"] [data-glass-surface="float"],
+html[data-optical-backend="webgl"] .search-wrap[data-glass-surface],
+html[data-optical-backend="webgl"] .side[data-glass-surface] {
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}

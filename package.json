@@ -70,6 +70,9 @@
     "test:canvas": "node --no-warnings tests/canvas-smoke.mjs && node tests/run-desktop-canvas.mjs && node tests/run-desktop-canvas-undo.mjs",
     "test:capture": "node --no-warnings tests/capture-smoke.mjs && node --no-warnings tests/run-desktop-capture-app.mjs",
     "test:capture:module": "node --no-warnings tests/run-desktop-capture.mjs",
-    "test:optical": "node tests/preview-optical.mjs"
+    "test:optical": "node tests/optical-smoke.mjs",
+    "test:perf": "node tests/preview-perf.mjs",
+    "test:webgl": "node tests/preview-webgl.mjs",
+    "test:optical-ux": "node tests/preview-optical.mjs"
   }
 }

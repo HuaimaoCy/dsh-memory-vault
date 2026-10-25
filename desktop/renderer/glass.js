@@ -158,6 +158,54 @@ function createInstance({ root, tier: initialTier, storageKey }) {
     return capabilities
   }
 
+  // ---- 光学引擎（full 档） ---------------------------------------------------
+  // 后端与数学都在 optical/ 里；这里只负责「哪些面注册进去、什么时候启用」。
+  // 注册的是**背后真有内容**的面：顶栏胶囊与浮层。侧栏与侧板背后是页面底色，
+  // 折射一块纯色没有意义，还要白付一张贴图。
+  let opticalEngine = null
+  let opticalLoading = null
+  const OPTICAL_SELECTORS = ['.bar .toolbar-actions', '.mb-bar .toolbar-actions', '[data-glass-surface="float"]']
+
+  const opticalTargets = () => {
+    const list = []
+    for (const selector of OPTICAL_SELECTORS) {
+      for (const node of host.querySelectorAll(selector)) {
+        if (node.getAttribute(SURFACE_ATTRIBUTE) === 'float' && !node.isConnected) continue
+        list.push(node)
+      }
+    }
+    return list
+  }
+
+  const registerOpticalTargets = () => {
+    if (!opticalEngine) return
+    for (const node of opticalTargets()) {
+      if (opticalEngine.registered?.(node)) continue
+      const rect = node.getBoundingClientRect()
+      const radius = Number.parseFloat(getComputedStyle(node).borderTopLeftRadius) || 0
+      opticalEngine.register(node, { radius, bezelWidth: Math.min(16, Math.max(10, rect.height * 0.34)), thickness: 8 })
+    }
+  }
+
+  const mountOptical = async () => {
+    if (opticalEngine || opticalLoading) return opticalLoading
+    opticalLoading = import('./optical/glass-engine.js').then(module => {
+      if (destroyed) return null
+      opticalEngine = module.createGlassEngine({ document: doc, quality: 'full' })
+      registerOpticalTargets()
+      doc.documentElement.dataset.glassRefraction = 'on'
+      return opticalEngine
+    }).catch(() => null).finally(() => { opticalLoading = null })
+    return opticalLoading
+  }
+
+  const unmountOptical = () => {
+    if (!opticalEngine) return
+    opticalEngine.dispose()
+    opticalEngine = null
+    delete doc.documentElement.dataset.glassRefraction
+  }
+
   const applyTier = (value, { persist = true } = {}) => {
     const resolved = resolveTier({ requested: value, capabilities: capabilitiesNow() })
     currentTier = resolved
@@ -165,14 +213,11 @@ function createInstance({ root, tier: initialTier, storageKey }) {
     // 只有用户显式选择才写偏好；挂载时的默认档不落盘，否则以后改默认值就再也
     // 影响不到这些用户（他们的 localStorage 里已经钉死了一个旧默认）。
     if (persist) writeStored(storageKey, value ?? null)
-    // full 档就是折射档：进入时按需加载 glass-refraction，离开时撤掉。
-    // 动态 import 而不是静态引入：balanced/flat 的用户不该为这 5KB 与滤镜生成付费。
+    // full 档就是折射档：按需加载光学引擎，离开时释放（贴图、滤镜、DOM 全撤）。
+    // 动态 import 而不是静态引入：balanced/flat 的用户不该为这套东西付费。
     if (typeof window !== 'undefined') {
-      import('./glass-refraction.js').then(module => {
-        if (destroyed) return
-        if (resolved === 'full') module.enableRefraction(doc)
-        else module.disableRefraction(doc)
-      }).catch(() => { /* 实验模块缺失时保持纯 CSS 材质 */ })
+      if (resolved === 'full') void mountOptical()
+      else unmountOptical()
     }
     host.dispatchEvent(new CustomEvent('glass:tier', { bubbles: true, detail: { tier: resolved, capabilities: { ...capabilitiesNow() } } }))
     return resolved
@@ -310,7 +355,7 @@ function createInstance({ root, tier: initialTier, storageKey }) {
         added = true
       }
     }
-    if (added) observeSizes()
+    if (added) { observeSizes(); registerOpticalTargets() }
   }) : null
 
   const mediaWatcher = {
@@ -351,11 +396,15 @@ function createInstance({ root, tier: initialTier, storageKey }) {
     // 外部工具与测试可以主动要求重新判定一次。
     recheck: onRecheck,
     refresh: () => { refresh(); observeSizes() },
+    /** 光学引擎（仅 full 档存在）：外部 perf 脚本用它读指标。 */
+    engine: () => opticalEngine,
+    opticalMetrics: () => (opticalEngine ? opticalEngine.metrics() : null),
     surfaces: () => [...known].map(node => ({
       node, kind: node.getAttribute(SURFACE_ATTRIBUTE), size: sizes.get(node) ?? null, glare: glares.get(node)?.opacity ?? 0,
     })),
     destroy: () => {
       destroyed = true
+      unmountOptical()
       if (frame) cancelAnimationFrame(frame)
       window.removeEventListener('pointermove', moveGlare)
       window.removeEventListener('pointerdown', onPointerDown)
