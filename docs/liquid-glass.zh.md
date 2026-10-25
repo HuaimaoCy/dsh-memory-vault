@@ -298,10 +298,27 @@ Alaya 桌面壳的材质层规范：玻璃用在哪、令牌怎么改、三档�
 | 改动 | 位置 | 为什么几何不变 |
 | --- | --- | --- |
 | `.body` 上提 `--glass-bar-h`（73px） | `glass.css` | `.bar` 仍留在流里占同高；`.main` 补回同样的 `padding-top`，未滚动时内容位置逐像素一致 |
-| `.bar` 抬 `z-index` | `glass.css` | 只决定绘制顺序，不参与布局 |
-| 笔记本侧同构（`--glass-mb-bar-h` 76px） | `glass.css` | 同上 |
+| `.workspace` 的子项（bar/body/foot）向左加宽 `--glass-side-total` | `glass.css` | 宽度 +侧栏占位、`margin-left` −同样值：滚动视口盖住侧栏那一列，内容列位置与宽度不变 |
+| `.main` / `.foot` 的左右内边距按「扣掉侧栏占位后的宽度」重算 | `glass.css` | 原公式用 `100%`，视口加宽后会把内容列挤窄；重算后 1440 宽窗口下仍得到 1040 的内容列 |
+| `.side` 从顶栏下方开始（`margin-top: --glass-bar-h`） | `glass.css` | 只移整块侧栏的起点，宽度与 `left` 仍由 flex 与 `--alaya-side-w` 决定；同时避免它那层透明元素盖住顶栏左侧的新建按钮 |
+| `.bar` / `.side` 抬 `z-index` | `glass.css` | 只决定绘制顺序，不参与布局 |
+| 笔记本侧同构（`--glass-mb-bar-h` 76px） | `glass.css` | 同上；笔记本的顶栏仍在自己那一列里 |
 
-`tests/preview-glass.mjs` 会在切档时比对 `.side/.bar/.main/.board-toolbar/.tile` 的矩形，任何布局位移都会让它红。要退回原来的停靠布局，删掉 `glass.css` 里「布局层」一节的 6 条规则即可，其余材质不受影响。
+**一处做不到的事**：侧栏背后无法有内容穿过。卡片列表若从 `x<222` 开始就会被侧栏永久遮住一列，而 Apple 的参照里侧栏背后是照片、不是主内容。所以 Alaya 的侧栏是「磨砂面板」，顶栏才是真正压着滚动内容的那块玻璃。要让侧栏也有内容衬底，只有两条路：给每页加可选的封面图，或接受内容列变窄——都属产品决策，不在材质层里偷做。
+
+`tests/preview-glass.mjs` 会在切档时比对 `.side/.bar/.main/.board-toolbar/.tile` 的矩形，任何布局位移都会让它红。要退回原来的停靠布局，删掉 `glass.css` 里「布局层」一节的规则即可，其余材质不受影响。
+
+### 7.6 顶端布局：左侧新建、右侧圆形搜索
+
+结构在 `index.html` 里，材质层只负责排布：
+
+| 区域 | 内容 | 说明 |
+| --- | --- | --- |
+| `.bar-left` | `#new`（主操作「新建」）+ `.breadcrumb` | 面包屑保留：折叠/专注模式下「展开侧栏」按钮要挂在这里（`app.js` 的 `expandHost`） |
+| `.toolbar-actions` | `#layout-host`、`#refresh`、`#capture`（图标）+ `.search-wrap`（最右） | 次要动作退成图标，捕获仍是独立功能 |
+| `.search-wrap` | 常态 34px 圆，`:focus-within` 展开到 `min(260px, 34vw)` | 纯 CSS：`label` 点击把焦点交给内部 `input`，无 JS |
+
+原来的搜索框是一个常驻 262px 的输入框；现在收起为圆形按钮，点击或 `Ctrl/⌘ F` 才展开。`#capture` 从带文字的 `.btn` 变成 `.icon-button`，`#new` 从 `.toolbar-actions` 移到左侧——两者的 id、事件绑定与快捷键都没变。
 
 ## 8. 集成点
 

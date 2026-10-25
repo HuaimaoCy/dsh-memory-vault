@@ -218,15 +218,27 @@
 
 /* ---------- 布局层：内容从 chrome 底下穿过去 ------------------------------- */
 
-/* 玻璃只在「背后真的有东西在动」时才成立。贴边停靠的顶栏如果和内容各占一块，
-   底下永远是纯白页底，材质就只剩一层白。这里让滚动内容真正从顶栏下方经过：
+/* 玻璃只在「背后真的有东西在动」时才成立，所以顶栏与侧栏都浮在内容之上：
    - .bar 留在流里（几何不变），只抬 z-index 让它盖在内容上；
    - .body 上提一个 bar 的高度，滚动视口因此从 y=0 开始；
-   - .main 用内边距把内容推回原位，所以**未滚动时的第一屏位置与改动前逐像素一致**。
-   只改视觉层，不动 styles.css 里的几何规则。 */
+   - .workspace 的子项向左加宽 side-total，滚动视口同时盖住侧栏所在的列；
+   - .main / .foot 用内边距把内容推回原位，所以**未滚动时的第一屏位置不变**；
+   - .side 仍在流里（宽度、left、分隔条坐标系都不动），只把 z-index 抬到顶栏之上。
+   这样卡片滚动时会从侧栏面板底下经过，侧栏的圆角外侧才有内容衬着。 */
 :root {
   --glass-bar-h: 73px;
   --glass-mb-bar-h: 76px;
+  --glass-side-w: 222px;
+  --glass-splitter-w: 6px;
+}
+
+.app-shell { --glass-side-total: calc(var(--alaya-side-w, var(--glass-side-w)) + var(--glass-splitter-w)); }
+
+.app-shell .workspace > .bar,
+.app-shell .workspace > .body,
+.app-shell .workspace > .foot {
+  width: calc(100% + var(--glass-side-total));
+  margin-left: calc(-1 * var(--glass-side-total));
 }
 
 .app-shell .body { margin-top: calc(-1 * var(--glass-bar-h)); }
@@ -236,12 +248,83 @@
 .app-shell .body.with-inspector > .main { padding-top: calc(var(--glass-bar-h) + 29px); }
 .app-shell[data-density="compact"] .body > .main,
 .app-shell[data-density="compact"] .body.with-inspector > .main { padding-top: calc(var(--glass-bar-h) + 18px); }
+
+/* 左右内边距 = 侧栏占位 + 原来的页面内边距。原公式用到 100%，而视口现在被加宽了
+   （.workspace 的子项向左多占了侧栏那一列），所以这里按「扣掉侧栏占位后的可用宽度」
+   重算：内容列的位置与宽度都与加宽前一致，否则右侧会多出一大块空白。 */
+.app-shell .workspace .main {
+  --glass-page-max: 1040px;
+  --glass-page-min: 26px;
+  padding-left: calc(var(--glass-side-total) + max(var(--glass-page-min), (100% - var(--glass-side-total) - var(--glass-page-max)) / 2));
+  padding-right: max(var(--glass-page-min), (100% - var(--glass-side-total) - var(--glass-page-max)) / 2);
+}
+.app-shell[data-page-width="comfortable"] .main { --glass-page-min: 31px; }
+.app-shell[data-page-width="wide"] .main { --glass-page-max: 1320px; --glass-page-min: 31px; }
+.app-shell[data-page-width="full"] .main {
+  padding-left: calc(var(--glass-side-total) + 31px);
+  padding-right: 31px;
+}
+.app-shell .workspace .foot { padding-left: calc(var(--glass-side-total) + 26px); }
+
+/* 侧栏浮在内容之上：几何不动（宽度、left 仍由 flex 与 --alaya-side-w 决定），只抬层级。
+   整条顶栏横跨窗口，所以侧栏从顶栏下方开始——否则它那块透明元素会盖住顶栏左侧的
+   新建按钮（看不见的命中区域比看得见的边框更麻烦）。 */
+.app-shell > .side { z-index: 7; margin-top: var(--glass-bar-h); }
+.app-shell > #side-splitter { margin-top: var(--glass-bar-h); }
 .bar[data-glass-surface] { position: relative; z-index: 6; }
 
 .mb-shell .mb-body { margin-top: calc(-1 * var(--glass-mb-bar-h)); }
 .mb-shell .mb-main { padding-top: calc(var(--glass-mb-bar-h) + 24px); }
 .mb-shell[data-mb-density="compact"] .mb-main { padding-top: calc(var(--glass-mb-bar-h) + 22px); }
 .mb-bar[data-glass-surface] { position: relative; z-index: 6; }
+
+/* ---------- 顶端：左侧新建、右侧圆形搜索 ---------------------------------- */
+
+/* 顶栏两端的结构由 index.html 决定：.bar-left（新建 + 面包屑）与 .toolbar-actions
+   （布局/刷新/捕获 + 最右的圆形搜索）。这里只负责排布与那个会展开的搜索圆。 */
+.bar-left {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-width: 0;
+}
+
+.bar-left .breadcrumb { min-width: 0; }
+
+.bar-left #new {
+  /* 顶端唯一的主操作：给它一点存在感，但不抢标题的位置 */
+  min-height: 34px;
+  padding: 6px 14px;
+  font-weight: 600;
+}
+
+/* 搜索：常态是一枚圆形按钮，聚焦后向左展开成输入框。
+   没有任何 JS：label 的点击会把焦点交给内部的 input，:focus-within 负责展开。 */
+.search-wrap[data-glass-surface] {
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  justify-content: center;
+  border-radius: 50%;
+  cursor: text;
+  transition: width 220ms var(--glass-spring), border-radius 220ms var(--glass-spring), padding 220ms var(--glass-spring);
+}
+
+.search-wrap[data-glass-surface] .search { width: 0; opacity: 0; transition: opacity 140ms linear; }
+.search-wrap[data-glass-surface] kbd { display: none; }
+
+.search-wrap[data-glass-surface]:hover {
+  border-color: rgb(0 122 255 / .28);
+}
+
+.search-wrap[data-glass-surface]:focus-within {
+  width: min(260px, 34vw);
+  padding: 0 12px 0 8px;
+  justify-content: flex-start;
+  border-radius: var(--glass-radius-control);
+}
+
+.search-wrap[data-glass-surface]:focus-within .search { width: 100%; opacity: 1; }
 
 /* ---------- 框架面：浮起的侧栏与顶栏 -------------------------------------- */
 
