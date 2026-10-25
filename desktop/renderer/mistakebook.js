@@ -9,6 +9,7 @@ import { renderTagEditor, renderTagCloud } from './tags.js'
 import { createSidebarController, renderSidebarConfig, migrateLegacySidebar } from './sidebar.js'
 import { renderRich } from './markdown.js'
 import { createCanvasView } from './freeform-canvas.js'
+import { createPdfExport } from './pdf-export.js'
 import { embedLayout, settingsTabs } from './glass-appearance.js'
 import { createPapers } from './papers.js'
 
@@ -59,12 +60,13 @@ async function filePayload(file, allowPDF = false) {
 }
 const firstMeaningfulLine = text => text.split(/\r?\n/).map(line => line.replace(/^\s*(?:#{1,6}\s*)?(?:[-*+]\s+|>\s*|\d{1,3}[.、)]\s*)?/, '').replace(/[*`]/g, '').trim()).find(Boolean)?.slice(0, 60) ?? ''
 
-export function mountMistakebook({ beforeEnter, appearance }) {
+export function mountMistakebook({ beforeEnter, appearance,standalone=false }) {
   const memory = document.querySelector('.app-shell')
   const shell = h('div', { class: 'mb-shell', hidden: true, 'aria-label': '笔记本' })
   const state = { data: null, view: 'all', type: '', subjectID: '', nodeID: '', query: '', tag: '', order: 'priority', page: 'view', draft: null, dirty: false, busy: false, review: false, showAnswer: false, picking: false, selection: new Set() }
   // 自由画布视图在 shell 装配完成后创建；先声明，避免在视图切换里踩到 TDZ。
   let canvasView = null
+  let pdfView = null
   let paperParent=null
   const handwritingDrafts = new WeakMap()
   let messageTimer
@@ -86,6 +88,7 @@ export function mountMistakebook({ beforeEnter, appearance }) {
   const names = () => new Map((state.data?.taxonomy.nodes ?? []).map(node => [node.id, node.name]))
   const changeView = async (view, subjectID = '', nodeID = '', type = '') => {
     if (canvasView?.isOpen()) await canvasView.close()
+    if (pdfView?.isOpen()) await pdfView.close()
     if (!await discard()) return
     Object.assign(state, { view, subjectID, nodeID, type, tag: '', draft: null, dirty: false, review: false, picking: false }); state.selection.clear(); await load()
   }
@@ -109,12 +112,15 @@ export function mountMistakebook({ beforeEnter, appearance }) {
   }
   // 图标即切换：品牌图标本身是模式切换按钮（与数据库侧一致）。
   const switchButton = button([icon('vault')], async () => {
+    if(standalone)return
     if (document.querySelector('dialog[open]') || !await discard()) return
     if (canvasView?.isOpen()) await canvasView.close()
+    if (pdfView?.isOpen()) await pdfView.close()
     localStorage.setItem('alaya.mode', 'memory')
     state.draft = null; state.dirty = false; shell.hidden = true; memory.hidden = false; document.body.dataset.mode = 'memory'
     document.getElementById('mode-switch').focus()
   }, false, { class: 'mb-book-mark', id: 'mb-mode-switch', title: '切换到数据库', 'aria-label': '切换到数据库', 'aria-pressed': 'true' })
+  if(standalone){switchButton.removeAttribute('id');switchButton.removeAttribute('aria-pressed');switchButton.title='Alaya Notebook';switchButton.setAttribute('aria-label','Alaya Notebook');switchButton.classList.add('brand-mark');switchButton.tabIndex=-1;switchButton.style.pointerEvents='none'}
   const search = h('input', { type: 'search', class: 'search', id: 'mb-query', placeholder: '搜索笔记、模型与单词', 'aria-label': '搜索笔记' })
   let searchTimer
   search.addEventListener('input', () => {
@@ -205,6 +211,7 @@ export function mountMistakebook({ beforeEnter, appearance }) {
     h('summary', { class: 'btn soft', 'aria-label': '导入与导出' }, '导入 / 导出'),
     h('div', { class: 'mb-more-menu' },
       button('导出笔记本 JSON', async () => { moreMenu.removeAttribute('open'); if (await call('export')) notify('笔记本已导出，包含图片') }, false, { id: 'mb-export' }),
+      button('导出错题 PDF…', () => { moreMenu.removeAttribute('open'); return openPDF([...state.selection]) }, false, { id: 'mb-export-pdf' }),
       button('导入旧版错题 JSON', () => { moreMenu.removeAttribute('open'); jsonPicker.click() }, false, { id: 'mb-legacy-import' })))
   document.addEventListener('click', event => { if (moreMenu.open && !moreMenu.contains(event.target)) moreMenu.removeAttribute('open') })
   const pickButton = button('多选', async () => { if (!state.picking && !await discard()) return; state.picking = !state.picking; state.selection.clear(); if (state.picking) { state.draft = null; state.dirty = false; renderDetail() }; renderList() }, false, { class: 'btn ghost', id: 'mb-pick', 'aria-pressed': 'false' })
@@ -375,7 +382,7 @@ export function mountMistakebook({ beforeEnter, appearance }) {
     menuHost: document.createElement('div'),
     expandHost: shell.querySelector('.mb-bar .toolbar-actions'),
     focusExitHost: shell.querySelector('.mb-bar .toolbar-actions'),
-    escapeGuard: () => !shell.hidden && !canvasView?.isOpen(),
+    escapeGuard: () => !shell.hidden && !canvasView?.isOpen() && !pdfView?.isOpen(),
   })
   // —— 自由画布：世界坐标版面，文档存在笔记本域（notebook_meta 的 canvas 键），
   //    随笔记本导出/导入与备份一起走，绝不进入数据库（记忆）域。
@@ -399,10 +406,25 @@ export function mountMistakebook({ beforeEnter, appearance }) {
     if (!await discard()) return
     await canvasView.open()
   }
-  document.getElementById('mode-switch').addEventListener('click', () => void guard(async () => {
+  // —— 错题 PDF：几何与打印 HTML 在 addons/mistakebook/print-layout.mjs，视图只管
+  //    交互。摆放结果与版式写进界面偏好（prefs.pdf），下次打开同一批题目可沿用。
+  pdfView = createPdfExport({
+    host: shell.querySelector('.mb-workspace'), shell, h, icon,
+    call, notify, confirm, renderRich,
+    savePrefs: next => savePrefs(next),
+    readPrefs: () => prefsCache,
+    names,
+  })
+  async function openPDF(ids = []) {
+    if (!await discard()) return
+    if (canvasView?.isOpen()) await canvasView.close()
+    try { await pdfView.open({ ids }) } catch (error) { notify(error.message || String(error), true) }
+  }
+  const enterNotebook=async()=>{
     if (!await beforeEnter()) return
-    await load(); localStorage.setItem('alaya.mode', 'notebook'); document.getElementById('status').classList.remove('show'); memory.hidden = true; shell.hidden = false; document.body.dataset.mode = 'mistakebook'; search.focus()
-  }))
+    await load(); localStorage.setItem('alaya.mode', 'notebook'); document.getElementById('status')?.classList.remove('show');if(memory)memory.hidden=true;shell.hidden=false;document.body.dataset.mode='mistakebook';search.focus()
+  }
+  document.getElementById('mode-switch')?.addEventListener('click',()=>void guard(enterNotebook))
   const wireClassify = (element, payload) => {
     if (!element || !payload || !(payload.subjectID || payload.tag)) return
     element.addEventListener('dragover', event => { if (!dragNoteID) return; event.preventDefault(); element.classList.add('drop-target') })
@@ -527,6 +549,7 @@ export function mountMistakebook({ beforeEnter, appearance }) {
         button(allSelected ? '全不选' : '全选', () => { if (allSelected) state.selection.clear(); else for (const row of rows) state.selection.add(row.id); renderList() }, false, { class: 'btn ghost', id: 'mb-pick-all' }),
         h('span', { class: 'spacer' }),
         state.view!=='trash'?button('编成试卷',()=>compilePaper(null,[...state.selection]),false,{id:'mb-batch-paper',disabled:!state.selection.size}):null,
+        state.view!=='trash'?button('导出 PDF',()=>openPDF([...state.selection]),false,{id:'mb-batch-pdf',disabled:!state.selection.size}):null,
         state.view === 'trash' ? button('恢复所选', () => performBatch('restore'), false, { id: 'mb-batch-restore', disabled: !state.selection.size }) : null,
         state.view === 'trash' ? button('彻底删除', () => performBatch('purge'), false, { class: 'btn ghost danger', id: 'mb-batch-purge', disabled: !state.selection.size }) : button('移入回收站', () => performBatch('delete'), false, { class: 'btn ghost danger', id: 'mb-batch-delete', disabled: !state.selection.size })))
     }
@@ -571,6 +594,7 @@ export function mountMistakebook({ beforeEnter, appearance }) {
     onSaved:async paper=>{state.view='all';state.type='paper';state.subjectID='';state.nodeID='';state.query='';state.tag='';search.value='';state.picking=false;state.selection.clear();state.draft=paper;state.page='view';state.review=false;state.dirty=false;paperParent=null;await load();notify('试卷已保存')},
     onQuestion:async(id,parent)=>{await select(id,parent)},
     onDissolve:async paper=>{await call('action',{id:paper.id,action:'delete'});state.draft=null;state.type='';state.dirty=false;await load();notify('已拆开试卷，原题与复习记录保留')},
+    onExportPdf:async paper=>{const ids=(paper.paper?.questionIds??paper.questions?.map(row=>row.id)??[]).filter(Boolean);await openPDF(ids)},
   })
   async function compilePaper(existing=null,initial=[]){if(!await discard())return;return papers.compile(existing,initial)}
   const backToLibrary=async()=>{
@@ -1131,6 +1155,7 @@ export function mountMistakebook({ beforeEnter, appearance }) {
     const tabs=settingsTabs([
       {id:'appearance',label:'外观',icon:'sparkles',content:appearance.createPanel()},
       {id:'layout',label:'布局',icon:'grid',content:embedLayout(notebookLayout.menu)},
+      {id:'connectors',label:'Codex 与 DSH',icon:'code',content:h('div',{class:'mb-paper-form'},h('h3',{text:'Codex / MCP'}),h('textarea',{class:'area config',readonly:true,value:info.connectors?.codex??'','aria-label':'Notebook Codex 接口配置'}),h('h3',{text:'DSH'}),h('textarea',{class:'area config',readonly:true,value:info.connectors?.dsh??'','aria-label':'Notebook DSH 接口配置'}))},
       {id:'services',label:'服务与数据',icon:'settings',content:serviceForm},
     ],{idPrefix:'mb-preferences'})
     const node=dialog('设置',tabs,true)
@@ -1284,8 +1309,9 @@ export function mountMistakebook({ beforeEnter, appearance }) {
   }
   document.addEventListener('keydown', event => {
     if (document.body.dataset.mode !== 'mistakebook' || document.querySelector('dialog[open]')) return
-    // 画布打开时笔记列表/编辑器是隐藏的：Ctrl+N / Ctrl+F 等不能作用到看不见的 .mb-body。
-    if (canvasView?.isOpen()) return
+    // 画布与 PDF 排版打开时笔记列表/编辑器是隐藏的：Ctrl+N / Ctrl+F 等不能作用到
+    // 看不见的 .mb-body。
+    if (canvasView?.isOpen() || pdfView?.isOpen()) return
     if (event.key === 'Escape' && state.picking) { state.picking = false; state.selection.clear(); renderList(); return }
     if (event.key === 'Escape' && shell.classList.contains('detail-full')) { event.preventDefault();void guard(backToLibrary);return }
     // F 切换全屏查看；只在没有焦点在输入框里时生效，避免把字母打进正文。
@@ -1301,4 +1327,5 @@ export function mountMistakebook({ beforeEnter, appearance }) {
       if (event.key.toLowerCase() === 's' && state.draft && !state.review) { event.preventDefault(); void guard(save) }
     }
   })
+  return {open:enterNotebook,isOpen:()=>!shell.hidden,shell}
 }

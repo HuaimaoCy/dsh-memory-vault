@@ -1,5 +1,5 @@
 /** 试卷只组织题目引用；题干、原图和复习记录继续由原题保存。 */
-export function createPapers({h,icon,button,dialog,call,renderRich,onSaved,onQuestion,onDissolve}) {
+export function createPapers({h,icon,button,dialog,call,renderRich,onSaved,onQuestion,onDissolve,onExportPdf}) {
   const compile=async(existing=null,initial=[])=>{
     const {records}=await call('list',{view:'all',type:'mistake',order:'manual'})
     const available=new Map(records.map(row=>[row.id,row]))
@@ -29,7 +29,7 @@ export function createPapers({h,icon,button,dialog,call,renderRich,onSaved,onQue
     return node
   }
   const render=paper=>h('div',{class:'mb-paper-reader'},
-    h('div',{class:'mb-paper-heading'},h('span',{class:'eyebrow',text:'试卷'}),h('h2',{text:paper.title}),h('span',{class:'cap',text:`${paper.questions.length} 道题`}),h('div',{class:'row'},button('编辑试卷',()=>compile(paper),false,{id:'mb-paper-edit'}),button('拆开试卷',()=>onDissolve(paper),false,{id:'mb-paper-dissolve'}))),
+    h('div',{class:'mb-paper-heading'},h('span',{class:'eyebrow',text:'试卷'}),h('h2',{text:paper.title}),h('span',{class:'cap',text:`${paper.questions.length} 道题`}),h('div',{class:'row'},button('编辑试卷',()=>compile(paper),false,{id:'mb-paper-edit'}),onExportPdf?button('导出 PDF',()=>onExportPdf(paper),false,{id:'mb-paper-pdf'}):null,button('拆开试卷',()=>onDissolve(paper),false,{id:'mb-paper-dissolve'}))),
     ...paper.questions.map((question,index)=>h('details',{class:'mb-paper-question','data-paper-question-id':question.id},
       h('summary',{},h('span',{class:'mb-paper-number',text:String(index+1)}),h('strong',{text:question.title||question.stem.split('\n')[0].slice(0,90)}),icon('chevron-down')),
       h('div',{class:'mb-paper-question-content'},renderRich(question.stem||'打开题目查看原图'),question.referenceAnswer?h('details',{},h('summary',{text:'参考答案'}),renderRich(question.referenceAnswer)):null,button('打开题目',()=>onQuestion(question.id,paper.id),false,{'data-open-paper-question':question.id})))),

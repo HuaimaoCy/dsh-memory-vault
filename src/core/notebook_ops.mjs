@@ -48,6 +48,7 @@ export const NOTEBOOK_OPS = {
   'notebook.simulation.open': { write: false },
   'notebook.import': { write: true },
   'notebook.export': { write: false },
+  'notebook.export.pdf': { write: false },
   'notebook.backup': { write: false },
   'notebook.configure': { write: true },
   'notebook.ocr': { write: false },
@@ -151,6 +152,27 @@ export const handlers = {
     try { hooks.saveAtomically(result.filePath, temporary, temp => hooks.writeFileSync(temp, JSON.stringify(notebook.export(), null, 2))) }
     finally { hooks.discardTemp(temporary) }
     return { path: result.filePath }
+  },
+  // 错题 PDF：正文与排版已由渲染层拼成自包含 HTML（含原图的 data URL），这里只
+  // 选路径、打印、原子落盘。上限 64 MB：一份 100 题、每题带两张原图的版面在
+  // 渲染层已压过图，正常远低于这个数；超过说明调用方塞了不该塞的内容。
+  'notebook.export.pdf': async ({ hooks }, body) => {
+    const html = typeof body?.html === 'string' ? body.html : ''
+    if (!html.trim()) throw new Error('排版内容为空，请先放入题目')
+    if (Buffer.byteLength(html, 'utf8') > 64 * 1024 * 1024) throw new Error('排版内容超过 64 MB，请减少题目或原图后重试')
+    const result = await hooks.showSaveDialog({
+      title: '导出错题 PDF', defaultPath: `错题-${new Date().toISOString().slice(0, 10)}.pdf`,
+      filters: [{ name: 'PDF 文档', extensions: ['pdf'] }],
+    })
+    if (result.canceled || !result.filePath) return null
+    hooks.checkDataTarget(result.filePath)
+    const temporary = `${result.filePath}.${randomUUID()}.tmp`
+    try {
+      const bytes = await hooks.printPDF(html)
+      hooks.saveAtomically(result.filePath, temporary, temp => hooks.writeFileSync(temp, bytes))
+    }
+    finally { hooks.discardTemp(temporary) }
+    return { path: result.filePath, bytes: Buffer.byteLength(html, 'utf8') }
   },
   'notebook.backup': async ({ notebook, hooks }) => {
     const result = await hooks.showSaveDialog({

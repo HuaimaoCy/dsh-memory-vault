@@ -11,12 +11,14 @@ import { validateVaultFile } from './lib/databases.mjs'
 import { createDesktopUpdater } from './lib/updates.mjs'
 import { MistakebookStore } from '../addons/mistakebook/store.mjs'
 import { NOTEBOOK_DISPLAY_VERSION, NOTEBOOK_RELEASE_NAME } from '../src/version.js'
+import {PRODUCTS} from './products.mjs'
 
 const here = dirname(fileURLToPath(import.meta.url))
+const product=PRODUCTS[JSON.parse(readFileSync(join(here,'product.json'),'utf8')).kind]??PRODUCTS.unified
 const argv = process.argv.slice(1)
 const option = name => { const i = argv.indexOf(name); return i < 0 ? undefined : argv[i + 1] }
 const selftest = argv.includes('--selftest')
-app.setPath('userData', join(app.getPath('appData'), 'Memory Vault Mistakebook'))
+app.setPath('userData', join(app.getPath('appData'),product.userData))
 if (option('--user-data')) app.setPath('userData', resolve(option('--user-data')))
 let bridge, window, updater, updateTimer, mistakebook, ocrRequest, aiRequest, preferences = {}, prefsPath
 const simulations = new Set()
@@ -46,8 +48,9 @@ function checkDataTarget(path) {
 }
 async function desktopInfo() {
   return {
-    ...await bridge.info(), version: app.getVersion(), displayVersion:NOTEBOOK_DISPLAY_VERSION, releaseName:NOTEBOOK_RELEASE_NAME, model: preferences.model ?? {}, hasKey: Boolean(preferences.encryptedKey), updates: updater.status(),
+    ...await bridge.info(), version: app.getVersion(), displayVersion:NOTEBOOK_DISPLAY_VERSION, releaseName:NOTEBOOK_RELEASE_NAME,product:{kind:product.kind,name:product.name}, model: preferences.model ?? {}, hasKey: Boolean(preferences.encryptedKey), updates: updater.status(),
     connectors: connectorConfig({
+      kind:product.kind,pluginPath:app.isPackaged?join(process.resourcesPath,'dsh-plugin','index.js'):resolve(here,'..',product.kind==='notebook'?'notebook-plugin.js':'index.js'),
       command: process.execPath,
       args: [app.isPackaged ? join(process.resourcesPath, 'app.asar', 'bin', 'memory-vault.mjs') : resolve(here, '..', 'bin', 'memory-vault.mjs'), 'mcp'],
       databasePath: bridge.databasePath,
@@ -57,11 +60,49 @@ async function desktopInfo() {
 function register(channel, action) {
   ipcMain.handle(channel, async (event, ...args) => {
     try {
-      const expected = pathToFileURL(join(here, 'renderer', 'index.html')).href
+      const expected = pathToFileURL(join(here, 'renderer', product.entry)).href
       if (event.sender !== window?.webContents || event.senderFrame?.url !== expected) throw new Error('不允许的窗口请求')
       return { ok: true, result: await action(...args) }
     } catch (error) { return { ok: false, error: error instanceof Error ? error.message : String(error) } }
   })
+}
+/**
+ * 把一份自包含的打印 HTML 交给 Chromium 打印成 PDF。
+ *
+ * 排版与转义在渲染层与 `addons/mistakebook/print-layout.mjs` 完成；主进程只做
+ * 三件无法在渲染层做的事：隐藏窗口、等字体就绪、printToPDF。窗口不加载 preload、
+ * 不开 node、不允许弹窗与权限请求，也不复用主窗口会话——打印页只是一份静态文档。
+ *
+ * @param {string} html - 完整 HTML 文档。
+ * @returns {Promise<Buffer>} PDF 字节。
+ */
+async function printPDF(html) {
+  // 放在 userData 下的 print 目录，而不是系统 Temp：本机（以及这台机器的
+  // DSH 沙箱上下文）对 %TEMP% 的写入会被 ACL 拒成 EPERM，userData 是应用本来
+  // 就能写的位置（settings.json、updates 都在这里）。
+  const directory = join(app.getPath('userData'), 'print')
+  mkdirSync(directory, { recursive: true })
+  const source = join(directory, `alaya-print-${randomUUID()}.html`)
+  writeFileSync(source, html, 'utf8')
+  const printer = new BrowserWindow({
+    show: false, width: 900, height: 1200, autoHideMenuBar: true, title: 'Alaya 打印',
+    webPreferences: {
+      sandbox: true, contextIsolation: true, nodeIntegration: false, spellcheck: false,
+      partition: `notebook-print-${randomUUID()}`,
+    },
+  })
+  try {
+    printer.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
+    printer.webContents.on('will-navigate', event => event.preventDefault())
+    printer.webContents.session.setPermissionRequestHandler((_contents, _permission, callback) => callback(false))
+    await printer.loadFile(source)
+    // 字体（含中文回退）没就绪就打印会出现整页缺字；等 document.fonts 再出 PDF。
+    await printer.webContents.executeJavaScript('document.fonts && document.fonts.ready ? document.fonts.ready.then(() => true) : true')
+    return await printer.webContents.printToPDF({ printBackground: true, preferCSSPageSize: true, margins: { marginType: 'none' } })
+  } finally {
+    if (!printer.isDestroyed()) printer.destroy()
+    rmSync(source, { force: true })
+  }
 }
 // Notebook handlers live in the shared op table (src/core/notebook_ops.mjs);
 // this hooks object is the only place the main process meets them. The old
@@ -79,6 +120,8 @@ const notebookHooks = {
   encryptText: text => safeStorage.encryptString(text).toString('base64'),
   getOCRKey: () => preferences.encryptedOCRKey ? safeStorage.decryptString(Buffer.from(preferences.encryptedOCRKey, 'base64')) : '',
   showSaveDialog: options => dialog.showSaveDialog(window, options),
+  // 错题 PDF：渲染层给自包含 HTML，这里只负责打印成字节，不碰笔记本数据。
+  printPDF,
   writeFileSync,
   saveAtomically: (target, temporary, write) => { write(temporary); renameSync(temporary, target) },
   discardTemp: temporary => rmSync(temporary, { force: true }),
@@ -99,6 +142,7 @@ function registerDesktop() {
   // 自由画布：画布文档是笔记本域的数据（notebook_meta 的 canvas 键），与笔记同库
   // 但不进入数据库（记忆）域；读写都经过同一个 MistakebookStore 的校验与限流。
   register('notebook:canvas', (action, body = {}) => {
+    if(!mistakebook)throw new Error('此 Database 发行版未启用 Notebook')
     if (action === 'load') {
       const state = mistakebook.canvasState()
       // 保留顶层文档字段：仍按「load 直接返回文档」解析的旧渲染层不会把
@@ -192,7 +236,7 @@ async function openWindow() {
     const actualMessage = event.message ?? message
     if (actualLevel === 'error' || actualLevel >= 3) errors.push(String(actualMessage))
   })
-  await window.loadFile(join(here, 'renderer', 'index.html'))
+  await window.loadFile(join(here,'renderer',product.entry))
   if (selftest) {
     try {
       if (option('--test-module')) {
@@ -239,6 +283,7 @@ app.whenReady().then(async () => {
       // --mistake-db 仍强制走独立文件模式（测试与调试出口）。
       const legacyNotebookPath = option('--mistake-db') ?? join(app.getPath('userData'), 'mistakebook.sqlite')
       bridge = openVault({ databasePath: option('--db') ?? process.env.MEMORY_VAULT_DB ?? preferences.databasePath, updates: updater, ...adapter(), logger: { info: diagnostic, warn: diagnostic } })
+      if(product.kind!=='database'){
       if (option('--mistake-db')) {
         mistakebook = new MistakebookStore(option('--mistake-db'))
       } else {
@@ -246,6 +291,7 @@ app.whenReady().then(async () => {
         try { const migrated = mistakebook.migrateFromFile(legacyNotebookPath); if (migrated?.migrated) diagnostic(`notebook data migrated from ${legacyNotebookPath}`) } catch (error) { diagnostic(`notebook migration failed, falling back to file mode: ${error.message}`); mistakebook.close(); mistakebook = new MistakebookStore(legacyNotebookPath) }
       }
       bridge.attach({ notebook: mistakebook, notebookHooks })
+      }
       registerDesktop(); await openWindow()
       if (app.isPackaged && !selftest) {
         const check = () => { if (updater.status().settings.autoCheck) void updater.check().catch(error => diagnostic(error.message)) }

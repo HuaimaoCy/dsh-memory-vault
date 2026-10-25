@@ -1,5 +1,7 @@
 /* 自由画布的样式单独成文件，由这里引入（index.html 不需要新增资源）。 */
 @import url('./freeform-canvas.css');
+/* 错题 PDF 排版视图的样式，同样单独成文件。 */
+@import url('./pdf-export.css');
 
 [hidden] { display:none !important; }
 body[data-mode="mistakebook"] > #status { display:none; }

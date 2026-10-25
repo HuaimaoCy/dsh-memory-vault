@@ -2,7 +2,7 @@
 
 **独立的学习笔记本桌面端。** 错题、物理模型、解题方法、英语词汇、手写与普通笔记统一收纳；数据保存在本机，界面只属于笔记本——数据库产品是另一个独立发行版，两者共用同一套存储与校验，但界面与数据域严格分离。
 
-当前版本 **0.8.1Alpha**（包内版本号 `0.8.1-alpha`，Windows x64 预览版）。另有数据库产品 [Alaya Database](README.database.md)；`Alaya`（unified 发行版）同时包含两个界面并可在其间切换。
+当前版本 **0.8.2**（Windows x64）。另有数据库产品 [Alaya Database](README.database.md)；`Alaya`（unified 发行版）同时包含两个界面并可在其间切换。
 
 ## 功能
 
@@ -66,6 +66,13 @@
 
 - 满窗画布，底部紧凑的纯图标工具组；文本、便签、笔记引用、连线，支持平移缩放、多选、撤销与重做。
 
+### 导出 PDF（自由排版）
+
+- 三处入口：「导入 / 导出」菜单、多选批量栏、试卷阅读页；错题展开成题目，原图与公式一起打印。
+- **A4 竖版 / 横版**，题目块可拖动、改宽、跨页；1–2 栏自动排列（先估算、再按实测高度排一次），最多 100 题 / 40 页。
+- **显示内容逐项开关**：原图、我的作答、参考答案、错因、复盘、学科与日期、题号；页眉页脚可改，页码固定在右下角。
+- 版面与位置写进笔记本偏好，下次打开同一批题目沿用；撤销最多 50 步；越界与遮挡如实提示。
+
 ### 连接助手
 
 - **设置 → Codex 与 DSH**：直接展示笔记本专用的 MCP / DSH 配置（`alaya_notebook`、`notebook_*` 工具），复制到对应配置文件即可让助手读写笔记本；笔记本接口只注册笔记本工具，不碰数据库的记忆域。
@@ -104,6 +111,8 @@
 
 **编一张试卷**：顶栏「+」→ 编成试卷（或侧栏「试卷」→ 新建）→ 勾选题目（最多 100 道，可上下移动调整顺序）→ 保存；之后可改名、打开原题或拆卷。
 
+**导出错题 PDF**：「导入 / 导出」→ 导出错题 PDF（或在多选栏 / 试卷页点「导出 PDF」）→ 左侧勾题进版面 → 拖动摆放、改宽度、切字段 → 导出 PDF。版面会自动记住，下次打开沿用。
+
 **复习**：侧栏「待复习」→ 单击选中、双击进入专注阅读 → 看完把卡片拖到「已掌握」或「待复习」；回收站里的卡片可恢复或彻底删除。
 
 **查词并积累**：顶栏查词典图标 → 输入单词 → 查询结果自动入库 → 在词条里补充语境，或「再查一个」继续。
@@ -115,7 +124,7 @@
 ### 数据、备份与更新
 
 - **备份笔记本**：设置 → 服务与数据 → 备份笔记本（包含原图）。
-- **导出 / 导入**：列表工具栏「导入 / 导出」→ 导出笔记本 JSON、导入旧版错题 JSON。
+- **导出 / 导入**：列表工具栏「导入 / 导出」→ 导出笔记本 JSON、导出错题 PDF、导入旧版错题 JSON。
 - 记忆库默认位于 `%USERPROFILE%\.dsh\memory-vault\vault.sqlite`（可用 `DSH_HOME` 或 `MEMORY_VAULT_DB` 改）；应用配置与更新缓存在 `%APPDATA%\Memory Vault Mistakebook`。
 - **从旧版升级**：0.6.3 及以上的错题本 / 笔记本数据可直接升级；首次打开旧库会在旁边生成 `.v1-时间戳.bak` 快照再迁移，JSON 导入兼容旧错题本导出。
 - **更新**：应用内检查更新；预览版发布为 GitHub prerelease，不影响正式版更新通道。
@@ -127,9 +136,9 @@ Windows x64；AI 解答与图片识别为可选项，需要兼容 OpenAI 的服�
 ## 文档
 
 - [笔记本说明](docs/notebook.zh.md) —— 逐项功能与操作
-- 界面：[命令面板](docs/command-palette.zh.md)、[布局定制](docs/workspace-layout.zh.md)、[可保存视图](docs/notion-views.zh.md)、[快速捕获](docs/capture.zh.md)、[自由画布](docs/freeform.zh.md)
+- 界面：[命令面板](docs/command-palette.zh.md)、[布局定制](docs/workspace-layout.zh.md)、[可保存视图](docs/notion-views.zh.md)、[快速捕获](docs/capture.zh.md)、[自由画布](docs/freeform.zh.md)、[错题 PDF 导出](docs/pdf-export.zh.md)
 - [在 Codex 里读写笔记本](docs/codex-notebook.zh.md)
 - [独立部署](docs/standalone.zh.md)、[图片](docs/images.zh.md)、[更新](docs/updates.zh.md)
 - 玻璃与视觉：[材质规范](docs/liquid-glass.zh.md)、[光学引擎](docs/optical-engine.zh.md)
-- 版本说明：[0.8.1Alpha](docs/releases/0.8.1-alpha.zh.md)
+- 版本说明：[0.8.2](docs/releases/0.8.2.zh.md)、[0.8.1Alpha](docs/releases/0.8.1-alpha.zh.md)
 - 同类产品：[Alaya Database](README.database.md)（数据库发行版）
