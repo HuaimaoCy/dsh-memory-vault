@@ -17,6 +17,13 @@ window.addEventListener('error', event => record(event.message ?? event.error))
 window.addEventListener('unhandledrejection', event => record(`rejection: ${event.reason?.message ?? event.reason}`))
 Object.defineProperty(window, '__previewErrors', { get: () => errors })
 
+// 预览要能指定从哪一面启动：app.js 用 localStorage 的 alaya.mode 决定开机落在
+// 数据库还是笔记本。服务端已把期望模式写进 body[data-mode]，这里对齐过去。
+const requestedMode = document.body?.dataset?.mode
+if (requestedMode) {
+  try { localStorage.setItem('alaya.mode', requestedMode === 'mistakebook' ? 'notebook' : 'memory') } catch { /* 存储不可用就算了 */ }
+}
+
 const now = Date.now()
 const day = 24 * 60 * 60 * 1000
 
@@ -97,6 +104,57 @@ const stats = {
 
 const settings = { baseUrl: 'https://api.example.invalid/v1', model: 'demo-model', hasKey: true }
 
+// —— 笔记本域的演示数据（形状对齐 notebook.list 的真实返回）——
+const notes = [
+  {
+    id: 'n-1', type: 'physics', title: '水平弹簧振子：从受力到运动方程', stem: '质量块连接轻弹簧，在水平面上无摩擦运动。建立模型并推导周期。',
+    subjectID: 'physics', nodeID: 'node-simple-harmonic', tags: ['错题'], reviewState: 'todo', priority: 88, value: { overallScore: 88, level: 'high' },
+    createdAt: now - 6 * day, updatedAt: now - 1 * day,
+    physics: { object: '质量块与轻弹簧', assumptions: '忽略摩擦，弹簧质量可忽略', equations: 'F = −kx\nm x″ = −kx', derivation: '解得 ω = √(k/m)，周期 T = 2π/ω。' },
+  },
+  {
+    id: 'n-2', type: 'note', title: '今天的学习记录', stem: '先说明假设，再写方程。\n模型是连接现实情境与数学解答的桥梁。',
+    subjectID: 'physics', nodeID: 'node-modeling', tags: ['笔记'], reviewState: 'done', priority: 52, value: { overallScore: 52, level: 'low' },
+    createdAt: now - 3 * day, updatedAt: now - 3 * day,
+  },
+  {
+    id: 'n-3', type: 'method', title: '配方法：求二次函数最值', stem: '把二次函数配成完全平方，再判断顶点与区间边界。',
+    subjectID: 'math', nodeID: 'node-quadratic', tags: ['方法'], reviewState: 'todo', priority: 74, value: { overallScore: 74, level: 'mid' },
+    createdAt: now - 10 * day, updatedAt: now - 4 * day,
+    method: { prerequisites: '先确定定义域和二次项系数', steps: '配成完全平方，找出顶点，再检查区间边界', reasoning: '平方项非负，最值可能出现在顶点或边界' },
+  },
+  {
+    id: 'n-4', type: 'vocabulary', title: 'momentum', stem: '动量；势头',
+    subjectID: 'english', nodeID: 'node-vocab', tags: ['单词'], reviewState: 'todo', priority: 61, value: { overallScore: 61, level: 'mid' },
+    createdAt: now - 2 * day, updatedAt: now - 2 * day,
+    vocabulary: { word: 'momentum', phonetic: '/məˈmentəm/', meaning: '动量；势头', examples: 'Momentum is conserved in an isolated system.' },
+  },
+]
+
+const notebookData = () => ({
+  records: notes,
+  total: notes.length,
+  prefs: { order: 'priority', sideWidth: 220, detailWidth: 440, detailSide: 'right' },
+  sidebar: [{ id: 's-all', label: '全部笔记', view: 'all' }],
+  taxonomy: {
+    subjects: [{ id: 'physics', name: '物理' }, { id: 'math', name: '数学' }, { id: 'english', name: '英语' }],
+    nodes: [
+      { id: 'node-simple-harmonic', name: '简谐运动', subjectID: 'physics' },
+      { id: 'node-modeling', name: '建模', subjectID: 'physics' },
+      { id: 'node-quadratic', name: '二次函数', subjectID: 'math' },
+      { id: 'node-vocab', name: '词汇', subjectID: 'english' },
+    ],
+  },
+  counts: { all: notes.length },
+  stats: {
+    // 视图计数直接用 stats[view]，与 mistakebook.js 的侧栏一致
+    all: notes.length, due: 3, mastered: 1, archived: 0, trash: 0,
+    tags: { 错题: 1, 笔记: 1, 方法: 1, 单词: 1 },
+    types: { physics: 1, note: 1, method: 1, vocabulary: 1 },
+    subjects: { physics: 2, math: 1, english: 1 },
+  },
+})
+
 const ok = result => Promise.resolve({ ok: true, result })
 const filter = body => {
   const query = String(body?.query ?? '').trim().toLowerCase()
@@ -140,7 +198,14 @@ window.vault = {
   settings: body => ok(settings),
   updates: () => ok({ status: 'idle' }),
   onUpdates: () => () => {},
-  mistakebook: (action) => ok({ notes: [], sections: [], prefs: {} }),
-  notebook: (op) => ok(op === 'list' ? { notes: [], canvas: null } : {}),
+  mistakebook: (action) => ok(action === 'list' ? notebookData() : {}),
+  notebook: (op, body) => {
+    if (op === 'list') return ok(notebookData())
+    if (op === 'prefs.save' || op === 'sidebar.save') return ok(op === 'sidebar.save' ? {} : notebookData().prefs)
+    if (op === 'ai.history') return ok({ messages: [] })
+    if (op === 'read') return ok({ record: notes.find(note => note.id === body?.id) ?? notes[0] })
+    if (op === 'save') return ok({ id: `n-${notes.length + 1}`, created: true })
+    return ok({})
+  },
   canvas: (action) => ok({ docs: {}, corrupted: false }),
 }

@@ -154,14 +154,19 @@ try {
 
   // 5. 笔记本模式：同一套材质要覆盖第二张界面
   await withPage({ mode: 'mistakebook' }, async (session) => {
+    // 笔记本是默认门面，但要等它真的切过去（切模式是异步的）
+    await session.waitFor(`document.body.dataset.mode === 'mistakebook' && document.querySelectorAll('#mb-list [data-question-id]').length > 0`, { label: '笔记本界面就绪', timeout: 15000 })
+    await sleep(300)
     const state = JSON.parse(await session.evaluate(`JSON.stringify({
       tier: document.documentElement.dataset.glassTier,
       surfaces: document.querySelectorAll('[data-glass-surface]').length,
       chrome: [...document.querySelectorAll('[data-glass-surface="chrome"]')].map(node => node.className),
       panels: document.querySelectorAll('[data-glass-surface="panel"]').length,
+      barBlur: getComputedStyle(document.querySelector('.mb-bar')).backdropFilter,
     })`))
     assert.ok(state.surfaces > 10, `笔记本模式的表面数量太少：${state.surfaces}`)
-    record('notebook-balanced', await session.screenshot(join(out, 'notebook-balanced.png')), `chrome=${state.chrome.join('/')} surfaces=${state.surfaces}`)
+    assert.ok(state.chrome.some(name => name.includes('mb-bar')), '笔记本顶栏也要被标记为 chrome')
+    record('notebook-balanced', await session.screenshot(join(out, 'notebook-balanced.png')), `bar=${state.barBlur.slice(0, 26)} surfaces=${state.surfaces}`)
   })
 
   // 5. 减少动态效果：材质保留，但不应有常驻动画与指针光源
