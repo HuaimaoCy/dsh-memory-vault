@@ -66,11 +66,23 @@ export const createPreviewServer = (overrides = {}) => createServer((request, re
 const isMain = process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)
 if (isMain) {
   const server = createPreviewServer()
-  await new Promise((done, fail) => { server.once('error', fail); server.listen(0, '127.0.0.1', done) })
+  // 人工检查时端口要稳定（不然每次启动都换地址、书签和标签页全失效）：
+  // 默认 5180，被占用再退回随机端口。
+  const servePort = process.argv.includes('--serve') ? Number(arg('--port') ?? 5180) : 0
+  try {
+    await new Promise((done, fail) => {
+      server.once('error', fail)
+      server.listen(servePort, '127.0.0.1', done)
+    })
+  } catch {
+    await new Promise((done, fail) => { server.once('error', fail); server.listen(0, '127.0.0.1', done) })
+  }
   const base = `http://127.0.0.1:${server.address().port}/`
   try {
     if (process.argv.includes('--serve')) {
       console.log(`Alaya 预览：${base}`)
+      console.log(`材质实验台：${base}glass-lab.html`)
+      console.log(`笔记本界面：${base}?mode=mistakebook`)
       console.log('按 Ctrl+C 退出')
       await new Promise(() => {})
     }

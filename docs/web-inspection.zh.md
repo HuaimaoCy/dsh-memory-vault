@@ -11,12 +11,16 @@ cd C:\Users\mdorn\Documents\Codex\2026-10-01\c-users-mdorn-documents-deepseek-ha
 npm.cmd run preview
 ```
 
-它会在 `127.0.0.1` 上找一个空闲端口并打印地址，例如：
+它默认监听 **5180**（端口被占用才退回随机），并打印四个地址：
 
 ```
-Alaya 预览：http://127.0.0.1:51873/
+Alaya 预览：http://127.0.0.1:5180/
+材质实验台：http://127.0.0.1:5180/glass-lab.html
+笔记本界面：http://127.0.0.1:5180/?mode=mistakebook
 按 Ctrl+C 退出
 ```
+
+换端口：`node tests/preview-app.mjs --serve --port 5190`。
 
 浏览器打开这个地址即可。**服务只用起一次**，模式与档位都用 URL 参数切，不用重启。
 
