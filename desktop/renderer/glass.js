@@ -28,7 +28,7 @@ export const GLASS_SURFACES = Object.freeze([
   { kind: 'hud', label: '状态提示', selectors: ['#status', '.loading-status'] },
   { kind: 'float', label: '浮层', selectors: ['.command-palette', '.quick-capture', '.qc-panel', '.curation-popover', '.ws-panel', '.alaya-preview', '.mb-dialog', 'dialog'] },
   { kind: 'panel', label: '侧板', selectors: ['.drawer', '.mb-detail', '.mb-ai-side'] },
-  { kind: 'chrome', label: '框架', selectors: ['.side', '.bar', '.mb-side', '.mb-bar'] },
+  { kind: 'chrome', label: '框架', selectors: ['.side', '.bar', '.mb-side', '.mb-bar', '.bar .toolbar-actions'] },
 ])
 
 /** 大面积：指针停在控件上时，容器仍然要跟着亮，否则侧栏的光源会「卡住」。 */

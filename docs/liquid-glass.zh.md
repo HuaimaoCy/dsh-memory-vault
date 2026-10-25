@@ -308,17 +308,23 @@ Alaya 桌面壳的材质层规范：玻璃用在哪、令牌怎么改、三档�
 
 `tests/preview-glass.mjs` 会在切档时比对 `.side/.bar/.main/.board-toolbar/.tile` 的矩形，任何布局位移都会让它红。要退回原来的停靠布局，删掉 `glass.css` 里「布局层」一节的规则即可，其余材质不受影响。
 
-### 7.6 顶端布局：左侧新建、右侧圆形搜索
+### 7.6 顶端布局：侧栏 · 圆形搜索 · 右侧胶囊
 
-结构在 `index.html` 里，材质层只负责排布：
+从左到右：**侧栏（贴顶，品牌在最上）→ 圆形搜索 → 右侧胶囊（视图名、布局、刷新、捕获、新建）**。结构在 `index.html` 里，材质层只负责排布：
 
 | 区域 | 内容 | 说明 |
 | --- | --- | --- |
-| `.bar-left` | `#new`（主操作「新建」）+ `.breadcrumb` | 面包屑保留：折叠/专注模式下「展开侧栏」按钮要挂在这里（`app.js` 的 `expandHost`） |
-| `.toolbar-actions` | `#layout-host`、`#refresh`、`#capture`（图标）+ `.search-wrap`（最右） | 次要动作退成图标，捕获仍是独立功能 |
-| `.search-wrap` | 常态 34px 圆，`:focus-within` 展开到 `min(260px, 34vw)` | 纯 CSS：`label` 点击把焦点交给内部 `input`，无 JS |
+| `.side` | 品牌 + 导航 | 贴顶放（`margin-top: --glass-gutter`），所以「Alaya」就在窗口左上，也是草图上那一块 |
+| `.bar` | 透明行，只放两端的浮块 | 面板不再横贯窗口：`padding-left` 让出侧栏占位，`.bar::after { display: none }` |
+| `.bar-left` | `.search-wrap` 圆形搜索 | 紧挨侧栏右侧；`34px` 圆，`:focus-within` 展开到 `min(260px, 34vw)` |
+| `.toolbar-actions` | 视图名（`.breadcrumb`）+ `#layout-host` + `#refresh` + `#capture` + `#new` | 整块是 44px 高的胶囊（`chrome` 类表面）；新建在胶囊最右，是顶端唯一的主操作 |
 
-原来的搜索框是一个常驻 262px 的输入框；现在收起为圆形按钮，点击或 `Ctrl/⌘ F` 才展开。`#capture` 从带文字的 `.btn` 变成 `.icon-button`，`#new` 从 `.toolbar-actions` 移到左侧——两者的 id、事件绑定与快捷键都没变。
+两条不能动的接线：
+
+- `.breadcrumb` 必须留在可见位置：折叠/专注模式下「展开侧栏」按钮由 `app.js` 挂进 `.bar .breadcrumb`（`expandHost`），隐藏它等于让折叠后没法展开；
+- `.toolbar-actions` 同时是 `focusExitHost`，专注模式的退出按钮挂在这里。
+
+搜索是纯 CSS：`label` 点击把焦点交给内部 `input`，`Ctrl/⌘ F` 走原来的 `el('query').focus()`；`#capture` 从带文字的 `.btn` 退成 `.icon-button`，`#new` 从最左移到胶囊最右——两者 id、事件绑定与快捷键都没变。
 
 ## 8. 集成点
 
