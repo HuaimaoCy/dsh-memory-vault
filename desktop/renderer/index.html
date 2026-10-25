@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="zh-CN" data-glass-tier="balanced">
 <head>
   <meta charset="utf-8" />
   <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'none'; form-action 'none'; base-uri 'none'" />
@@ -9,6 +9,8 @@
   <link rel="stylesheet" href="loading.css" />
   <link rel="stylesheet" href="workspace-layout.css" />
   <link rel="stylesheet" href="views.css" />
+  <!-- 材质层最后加载：玻璃令牌与表面基元要赢得层叠，但不改布局几何。 -->
+  <link rel="stylesheet" href="glass.css" />
 </head>
 <body data-mode="memory">
   <div id="alaya-startup" class="alaya-startup" aria-label="Alaya 正在启动"><div class="alaya-loader"><div class="alaya-stage" aria-hidden="true"></div></div></div>

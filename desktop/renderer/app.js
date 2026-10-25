@@ -5,6 +5,7 @@ import { mountMistakebook } from './mistakebook.js'
 import { NOTEBOOK_TARGETS, mountQuickCapture } from './quick-capture.js'
 import { createStorageStore, mountWorkspaceLayout } from './workspace-layout.js'
 import { createLoadingStatus, runAlayaStartup } from './loading.js'
+import { mountGlass } from './glass.js'
 import { enterDialog, enterPanel } from './motion.js'
 import {
   GROUPING_LABELS, KIND_LABELS, SHAPE_LABELS, SORT_LABELS, UNGROUPED, normalizeFilters, normalizeSource, sourceEquals,
@@ -29,6 +30,9 @@ const kinds = KIND_LABELS
 // 统一捕获面板在挂载区赋值；load() 完成后把最新记忆组推给它（见 syncCaptureTargets）。
 let capture = null
 installIcons()
+// 材质层：引擎只负责标记表面、分级、指针光源与按压状态，观感全在 glass.css。
+// 幂等，重复调用返回同一实例；Node/无 DOM 环境下自动退化成 flat，不阻断启动。
+const glass = mountGlass({ tier: 'balanced' })
 
 function h(tag, props = {}, ...children) {
   const node = document.createElement(tag)

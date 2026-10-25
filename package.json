@@ -54,7 +54,10 @@
     "node": ">=22.5.0"
   },
   "scripts": {
-    "test": "node --no-warnings tests/plugin-manifests.mjs && node --no-warnings tests/smoke.mjs && node --no-warnings tests/core-smoke.mjs && node --no-warnings tests/serve-real.mjs && node --no-warnings tests/desktop-smoke.mjs && node --no-warnings tests/mcp-smoke.mjs && node --no-warnings tests/standalone-smoke.mjs && node --no-warnings tests/updates-smoke.mjs && node --no-warnings tests/images-smoke.mjs",
+    "test": "node --no-warnings tests/plugin-manifests.mjs && node --no-warnings tests/smoke.mjs && node --no-warnings tests/core-smoke.mjs && node --no-warnings tests/serve-real.mjs && node --no-warnings tests/desktop-smoke.mjs && node --no-warnings tests/mcp-smoke.mjs && node --no-warnings tests/standalone-smoke.mjs && node --no-warnings tests/updates-smoke.mjs && node --no-warnings tests/images-smoke.mjs && node --no-warnings tests/glass-smoke.mjs",
+    "preview": "node tests/preview-app.mjs --serve",
+    "shot": "node tests/preview-app.mjs --shot test-tmp/preview/ui.png",
+    "shot:glass": "node tests/preview-glass.mjs",
     "desktop": "npm --prefix desktop start",
     "build:desktop": "npm --prefix desktop run build",
     "mcp": "node --no-warnings bin/memory-vault.mjs mcp",
