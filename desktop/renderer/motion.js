@@ -55,10 +55,12 @@ export function springValue({ from = 0, to = 1, velocity = 0, damping = 1, respo
 }
 
 /**
- * 大表面入场：面板从 12px 外弹回原位，透明度同时跟上。
+ * 大表面入场：面板从 6px 外弹回原位，透明度同时跟上。
  * 出场不做弹簧（面板一旦隐藏就没有可抓的對象），只保留即时消失。
+ * 0.7.23 评审后把 distance 从 12 收到 6：面板动 12px 在 1 秒内回弹，
+ * 视觉上就是「抖一下」，而层级关系靠材质与投影已经说清楚了。
  */
-export function enterPanel(element, { distance = 12, axis = 'x', damping = 1, response = 0.32 } = {}) {
+export function enterPanel(element, { distance = 6, axis = 'x', damping = 1, response = 0.28 } = {}) {
   if (!element) return
   if (prefersReducedMotion()) return
   element.dataset.motionState = 'entering'
@@ -82,8 +84,8 @@ export function enterPanel(element, { distance = 12, axis = 'x', damping = 1, re
   })
 }
 
-/** 对话框入场：轻微放大 + 淡入，像一层材质出现而不是一张图淡入。 */
-export function enterDialog(dialog, { scale = 0.985, response = 0.28 } = {}) {
+/** 对话框入场：几乎不缩放地淡入（0.995 只够让边界「出现」而不是「弹出来」）。 */
+export function enterDialog(dialog, { scale = 0.995, response = 0.26 } = {}) {
   if (!dialog) return
   if (prefersReducedMotion()) return
   dialog.style.willChange = 'transform, opacity'

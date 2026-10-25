@@ -35,9 +35,9 @@
   --glass-fringe-warm: rgb(255 226 232 / .55);
   --glass-fringe-cool: rgb(214 238 255 / .55);
 
-  /* 深度 */
-  --glass-shadow: 0 1px 2px rgb(22 34 59 / .05), 0 12px 32px -20px rgb(22 34 59 / .30);
-  --glass-shadow-float: 0 1px 2px rgb(22 34 59 / .06), 0 20px 48px -22px rgb(22 34 59 / .36);
+  /* 深度：全站三档影子，见「主题」一节 */
+  --glass-shadow: var(--glass-elev-1);
+  --glass-shadow-float: var(--glass-elev-3);
 
   /* 圆角：参照 Apple Landmarks 的浮动面板，四角是能看见的大圆角。
      面板与窗口边缘之间留 --glass-gutter，圆角才有东西衬着。 */
@@ -75,8 +75,8 @@
   --glass-hairline: rgb(20 26 38 / .10);
   --glass-bevel-top: transparent;
   --glass-bevel-bottom: transparent;
-  --glass-shadow: 0 1px 2px rgb(22 34 59 / .06), 0 8px 20px -18px rgb(22 34 59 / .24);
-  --glass-shadow-float: 0 1px 2px rgb(22 34 59 / .07), 0 16px 40px -24px rgb(22 34 59 / .30);
+  --glass-shadow: var(--glass-elev-1);
+  --glass-shadow-float: var(--glass-elev-2);
   --glass-glare: 0;
 }
 
@@ -91,9 +91,61 @@
   --glass-edge-line: rgb(255 255 255 / .12);
   --glass-bevel-top: rgb(255 255 255 / .18);
   --glass-bevel-bottom: rgb(0 0 0 / .30);
-  --glass-shadow: 0 1px 2px rgb(0 0 0 / .35), 0 12px 32px -20px rgb(0 0 0 / .60);
-  --glass-shadow-float: 0 1px 2px rgb(0 0 0 / .40), 0 20px 48px -22px rgb(0 0 0 / .68);
+  --glass-shadow: 0 1px 2px rgb(0 0 0 / .35), 0 6px 16px -12px rgb(0 0 0 / .60);
+  --glass-shadow-float: 0 1px 2px rgb(0 0 0 / .40), 0 24px 60px -32px rgb(0 0 0 / .68);
   --glass-glare: .18;
+}
+
+/* ---------- 主题：纯黑文字、背景分级、统一层高 ---------------------------- */
+
+/* 背景预设：默认底色比卡片深一档，让「页面底」与「卡片/控件层」一眼分开。
+   换色只改 data-bg，不需要碰任何组件。 */
+html[data-bg="mist"] { --bg: #eef1f5; }
+html[data-bg="sand"] { --bg: #efe9df; }
+html[data-bg="ink"] { --bg: #dce2ec; }
+
+/* 纯黑正文（评审口径：全部黑色、满不透明度）。只列会显示文字的选择器；
+   主按钮的白字、错误提示的红、危险操作色不在其中——那是信息，不是配色。 */
+body, .cap, .label, .eyebrow, .kind-label, .base-mark, .tile-title, .tile-body,
+.tile-footer, .sec-head, .sub-head, .empty h2, .empty p, .drawer-head h2,
+.library-name, .library-caption, .brand-caption, .foot, .status, .breadcrumb,
+.nav, .nav .count, .sort-control, .sort-control select, .search, .page-heading p,
+.view-total span, .palette-item, .palette-hint, .palette-empty,
+.ws-label, .ws-cap, .ws-value, .ws-section-title, .ws-segment, .ws-preset,
+.curation-popover p, .filter-scope, .tag, .mb-caption { color: #000; }
+
+.search::placeholder { color: #000; opacity: 1; }
+
+/* 笔记本界面的灰字也是同一批口径：整壳继承黑色，再点掉几处写死的灰。
+   主按钮的白字、错题状态色（.mb-state.*）不在其中。 */
+.mb-shell { color: #000; }
+.mb-shell .mb-side-group summary,
+.mb-shell .mb-side-group summary:hover,
+.mb-shell .mb-side-label,
+.mb-shell .mb-side-config-name,
+.mb-shell .mb-local,
+.mb-shell .mb-page-heading p,
+.mb-shell .mb-page-heading .eyebrow,
+.mb-shell .mb-type-label,
+.mb-shell .mb-card-stem,
+.mb-shell .mb-card-foot,
+.mb-shell .mb-word-phonetic,
+.mb-shell .mb-word-sense,
+.mb-shell .mb-total span,
+.mb-shell .mb-side-empty,
+.mb-shell .mb-search-filter-label,
+.mb-shell .mb-detail .eyebrow { color: #000; }
+
+/* 统一层高：全站只有三档影子。任何面都从这三档里取，避免同一层出现两套阴影
+   （之前顶栏胶囊一套、浮层一套、侧栏又来一套，视觉上就是「层级堆叠重复」）。 */
+:root {
+  --glass-elev-1: 0 1px 2px rgb(20 26 38 / .06), 0 6px 16px -12px rgb(20 26 38 / .30);
+  --glass-elev-2: 0 1px 2px rgb(20 26 38 / .07), 0 12px 30px -20px rgb(20 26 38 / .38);
+  --glass-elev-3: 0 1px 3px rgb(20 26 38 / .08), 0 24px 60px -32px rgb(20 26 38 / .45);
+  /* 顶端一行共用的一条顶线与高度带 */
+  --row-top: 10px;
+  --row-height: 44px;
+  --row-gap: 12px;
 }
 
 /* ---------- 圆角、浮起与内缩 ---------------------------------------------- */
@@ -267,8 +319,15 @@
 .app-shell .workspace .foot { padding-left: calc(var(--glass-side-total) + 26px); }
 
 /* 侧栏浮在内容之上：几何不动（宽度、left 仍由 flex 与 --alaya-side-w 决定），只抬层级。
-   侧栏贴顶放（与顶栏同一行起），品牌就在窗口左上——这也是「顶端从左到右」的第一块。 */
-.app-shell > .side { z-index: 7; margin-top: var(--glass-gutter); margin-bottom: var(--glass-gutter); }
+   注意**不要**再给 .side 加 margin-top：面板本身已经 inset 了 --glass-gutter，
+   再加一次外距，面板顶就落在 20px，而右侧胶囊顶在 10px——这就是左右两条顶线对不上。
+   这里让元素从 0 起，面板顶正好等于 --glass-gutter，与胶囊同一条线。 */
+.app-shell > .side {
+  z-index: 7;
+  /* 品牌行（41×43）的中线对齐 --row-height 那条带的中线 */
+  padding-top: calc(var(--row-top) + (var(--row-height) - 43px) / 2);
+}
+.app-shell > #side-splitter { z-index: 6; }
 .app-shell > #side-splitter { margin-top: var(--glass-gutter); margin-bottom: var(--glass-gutter); }
 .bar[data-glass-surface] { position: relative; z-index: 6; }
 
@@ -282,8 +341,14 @@
 /* 顺序由 index.html 决定：.bar-left 只放圆形搜索；.toolbar-actions 是右侧胶囊，
    内含视图名（面包屑）、布局、刷新、捕获，最右是「新建」。顶栏自己不再整条铺玻璃，
    只让这两块浮在内容上——这样顶栏空白处的卡片仍然通透可见。 */
+/* 顶端一行：三块（侧栏面板、搜索圆、胶囊）共用**同一条顶线**与 44px 高度带。
+   之前侧栏面板顶 10、胶囊顶 15、搜索圆顶 20——三条顶线各说各话，这就是「没对齐」。
+   现在：面板与胶囊都从 --row-top 起，搜索圆在 44px 带里垂直居中。 */
 .bar[data-glass-surface] {
-  padding-left: calc(var(--glass-side-total) + 18px);
+  align-items: flex-start;
+  padding-top: var(--row-top);
+  padding-right: var(--row-gap);
+  padding-left: calc(var(--glass-side-total) + var(--row-gap));
 }
 
 /* 顶栏本体透明：面板交给搜索圆与右侧胶囊，避免一条横贯窗口的白带。 */
@@ -292,13 +357,13 @@
 .bar-left {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: var(--row-gap);
   min-width: 0;
 }
 
-/* 右侧胶囊：一条圆角的玻璃工具条，高度 44px，内部间距收紧。 */
+/* 右侧胶囊：一条圆角的玻璃工具条，高度与搜索圆共用同一条带。 */
 .bar .toolbar-actions[data-glass-surface] {
-  height: 44px;
+  height: var(--row-height);
   padding: 5px 6px 5px 14px;
   gap: 4px;
   border-radius: 999px;
@@ -306,8 +371,7 @@
   box-shadow:
     inset 0 1px 0 var(--glass-bevel-top),
     inset 0 -1px 0 var(--glass-bevel-bottom),
-    0 1px 2px rgb(20 26 38 / .05),
-    0 14px 34px -24px rgb(20 26 38 / .45);
+    var(--glass-elev-2);
 }
 
 .bar .toolbar-actions .breadcrumb {
@@ -328,11 +392,13 @@
 .search-wrap[data-glass-surface] {
   width: 34px;
   height: 34px;
+  /* 与胶囊同一条 44px 高度带：圆心和胶囊中线重合 */
+  margin-top: calc((var(--row-height) - 34px) / 2);
   padding: 0;
   justify-content: center;
   border-radius: 50%;
-  border-color: rgb(20 26 38 / .10);
-  box-shadow: inset 0 1px 0 rgb(255 255 255 / .85), 0 1px 2px rgb(20 26 38 / .06);
+  border-color: var(--glass-hairline);
+  box-shadow: inset 0 1px 0 var(--glass-bevel-top), var(--glass-elev-1);
   cursor: text;
   transition: width 220ms var(--glass-spring), border-radius 220ms var(--glass-spring), padding 220ms var(--glass-spring);
 }
@@ -352,6 +418,38 @@
 }
 
 .search-wrap[data-glass-surface]:focus-within .search { width: 100%; opacity: 1; }
+
+/* 笔记本顶栏走同一套：透明行 + 左侧圆形搜索 + 右侧胶囊。
+   笔记本的 .mb-bar 本来就从侧栏右侧开始（不像数据库那边的 .workspace 被拉宽），
+   所以这里只留 --row-gap，别再叠侧栏占位。 */
+.mb-bar[data-glass-surface] {
+  align-items: flex-start;
+  padding-top: var(--row-top);
+  padding-right: var(--row-gap);
+  padding-left: var(--row-gap);
+}
+
+.mb-bar[data-glass-surface]::after { display: none; }
+
+.mb-bar .toolbar-actions[data-glass-surface] {
+  height: var(--row-height);
+  padding: 5px 6px 5px 14px;
+  gap: 4px;
+  border-radius: 999px;
+  border: 1px solid var(--glass-hairline);
+  box-shadow:
+    inset 0 1px 0 var(--glass-bevel-top),
+    inset 0 -1px 0 var(--glass-bevel-bottom),
+    var(--glass-elev-2);
+}
+
+.mb-bar .toolbar-actions .breadcrumb { margin-right: 6px; min-width: 0; }
+.mb-bar .toolbar-actions #mb-new { min-height: 32px; padding: 5px 13px; margin-left: 4px; font-weight: 600; }
+
+/* 笔记本侧栏同样贴顶：品牌行中线对齐顶端那条带 */
+.mb-shell > .mb-side {
+  padding-top: calc(var(--row-top) + (var(--row-height) - 44px) / 2);
+}
 
 /* ---------- 框架面：浮起的侧栏与顶栏 -------------------------------------- */
 
@@ -633,12 +731,15 @@ dialog[data-glass-surface] {
 
 @media (hover: hover) and (pointer: fine) {
   [data-glass-surface="control"]:hover {
-    /* 悬停只抬 1px：超过 2px 就会和行高打架 */
-    transform: translateY(-1px);
+    /* 悬停不再位移：鼠标扫过一排按钮时 1px 的上浮会连成「抖动」。
+       层级变化交给底色与高光，位移只留给按下。 */
+    transform: none;
   }
   [data-glass-surface="control"]:active,
   [data-glass-pressed] {
-    transform: translateY(0) scale(.985);
+    /* 按下 1% 就够：2% 在 40px 高的控件上是 0.8px 的抖动，连着点会像在震。 */
+    transform: scale(.99);
+    transition-duration: 90ms;
   }
 }
 
