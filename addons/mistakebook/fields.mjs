@@ -7,8 +7,9 @@ export const NOTE_TYPES = {
   method: { label: '解题方法', caption: '理解每一步为什么成立', icon: 'decision' },
   vocabulary: { label: '英语词汇', caption: '积累词义、例句，检验记忆', icon: 'book' },
   note: { label: '笔记', caption: '文字、手写画布与图片，随想随记', icon: 'note' },
+  paper: { label: '试卷', caption: '将一组题目收进一张试卷卡片', icon: 'summary' },
 }
-export const NEW_NOTE_TYPES = ['mistake', 'physics', 'method', 'vocabulary', 'note']
+export const NEW_NOTE_TYPES = ['mistake', 'vocabulary', 'note']
 export const typeAlias = type => (type === 'handwriting' ? 'note' : type)
 export const STRUCTURED_FIELDS = {
   physics: [['object', '研究对象与系统边界'], ['assumptions', '建模假设'], ['variables', '变量、单位与坐标约定'], ['equations', '控制方程与守恒关系'], ['derivation', '推导与求解过程'], ['conditions', '适用条件与边界'], ['pitfalls', '易错点与模型检验'], ['example', '应用例题']],
@@ -23,4 +24,4 @@ export function normalizeFields(type, raw = {}) {
   }))
 }
 export const contentOf = record => ({ type: record.type ?? 'mistake', title: record.title ?? '', stem: record.stem, studentWork: record.studentWork,
-  referenceAnswer: record.referenceAnswer, notes: record.notes, cause: record.cause, physics: record.physics, method: record.method, vocabulary: record.vocabulary })
+  referenceAnswer: record.referenceAnswer, notes: record.notes, cause: record.cause, physics: record.physics, method: record.method, vocabulary: record.vocabulary, paper: record.paper, annotations:record.annotations?.length?record.annotations:undefined })

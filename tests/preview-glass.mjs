@@ -36,6 +36,7 @@ const withPage = async ({ mode = 'memory', reducedMotion = false, dark = false }
     if (dark) await session.setMedia({ dark: true })
     await session.goto(base)
     await session.waitFor(`!document.getElementById('alaya-startup') && document.querySelector('[data-glass-surface]')`, { label: `界面就绪 ${mode}`, timeout: 30000 })
+    await session.evaluate(`window.alayaGlass.setTier('balanced')`)
     await sleep(400)
     await run(session, base)
   } finally {

@@ -3,7 +3,7 @@ import { dirname, join, resolve } from 'node:path'
 import { createRequire } from 'node:module'
 import { fileURLToPath } from 'node:url'
 import { build } from 'electron-builder'
-import { CORE_VERSION, NOTEBOOK_VERSION } from '../src/version.js'
+import { CORE_VERSION, NOTEBOOK_VERSION, NOTEBOOK_DISPLAY_VERSION } from '../src/version.js'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const root = resolve(here, '..')
@@ -43,7 +43,7 @@ await build({ projectDir: here, config: {
   ...pkg.build, electronVersion: pkg.devDependencies.electron,
   electronDist: join(here, 'node_modules', 'electron', 'dist'),
   directories: { app: runtime, output: join(here, 'dist') }, npmRebuild: false,
-  artifactName: 'Alaya-${version}-Setup.${ext}',
+  artifactName: `Alaya-${NOTEBOOK_DISPLAY_VERSION}-Setup.\${ext}`,
   win: { target: ['nsis'], icon: join(here, 'assets', 'memory-vault.ico'), signAndEditExecutable: true },
   nsis: { ...pkg.build.nsis, oneClick: false, perMachine: false, allowToChangeInstallationDirectory: true, deleteAppDataOnUninstall: false },
 }, ...(process.argv.includes('--dir') ? { dir: true } : {}) })

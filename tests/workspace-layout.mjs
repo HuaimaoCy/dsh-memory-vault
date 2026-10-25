@@ -21,12 +21,24 @@ export async function run(window, bridge) {
     const status = await js("[document.querySelector('#status')?.textContent, document.querySelector('#mb-status')?.textContent].filter(Boolean).join(' | ')")
     throw new Error(`Layout timeout: ${expression}; ${status}`)
   }
-  const click = selector => js(`document.querySelector(${JSON.stringify(selector)}).click()`)
+  const closeSettings=()=>js(`document.querySelector('#modal[open]')?.close()`)
+  const click = async selector => {
+    if(selector.startsWith('#layout-'))await openPanel()
+    else await closeSettings()
+    return js(`document.querySelector(${JSON.stringify(selector)}).click()`)
+  }
   const exists = selector => js(`Boolean(document.querySelector(${JSON.stringify(selector)}))`)
   const rect = selector => js(`(() => { const node = document.querySelector(${JSON.stringify(selector)}); if (!node) return null; const r = node.getBoundingClientRect(); return { left: r.left, right: r.right, width: r.width, height: r.height, top: r.top, bottom: r.bottom, display: getComputedStyle(node).display } })()`)
   const stored = () => js("JSON.parse(localStorage.getItem('alaya.db.layout'))")
   const styleOf = (selector, property) => js(`getComputedStyle(document.querySelector(${JSON.stringify(selector)}))[${JSON.stringify(property)}]`)
-  const openPanel = async () => { await js("document.querySelector('#layout-menu').open = true") ; await pause(40) }
+  const openPanel = async () => {
+    if(!await js(`Boolean(document.querySelector('#modal[open] #layout-menu'))`)){
+      await js(`document.querySelector('#workspace-settings').click()`)
+      await until(`Boolean(document.querySelector('#tab-layout'))`)
+    }
+    await js(`document.querySelector('#tab-layout').click()`)
+    await pause(40)
+  }
   const segment = (label, value) => `#layout-menu .ws-seg[aria-label="${label}"] .ws-segment[data-value="${value}"]`
   const settle = async () => { await pause(260) }
   const resize = async (width, height) => {
@@ -52,7 +64,8 @@ export async function run(window, bridge) {
     await until(`document.querySelectorAll('#list [data-id]').length >= 1`)
 
     // ---------- 显式入口与默认值 ----------
-    assert.equal(await exists('#layout-host #layout-menu'), true, 'the layout menu must be mounted in the toolbar')
+    await openPanel()
+    assert.equal(await exists('#settings-layout #layout-menu'), true, 'layout belongs in the Settings panel')
     assert.equal(await exists('#side-splitter'), true, 'the sidebar splitter must exist')
     assert.equal(await exists('#detail-splitter'), true, 'the detail splitter must exist')
     assert.equal((await rect('.side')).width, 222, 'default sidebar width')
@@ -95,7 +108,10 @@ export async function run(window, bridge) {
     await click(segment('页面宽度', 'full'))
     assert.equal(parseFloat(await styleOf('.main', 'paddingLeft')), 31, 'full page width uses the base padding')
     await click(segment('页面宽度', 'comfortable'))
+    // 舒适列已扩为 1200px；在有足够内容宽度的窗口验证居中上限。
+    await resize(1680,940)
     assert.ok(parseFloat(await styleOf('.main', 'paddingLeft')) > 31, 'comfortable page width centres a narrower column')
+    await resize(1440,940)
     await click(segment('卡片密度', 'compact'))
     assert.equal(await js("document.querySelector('.app-shell').dataset.density"), 'compact', 'compact density is recorded')
     assert.equal(parseFloat(await styleOf('.grid', 'columnGap')), 10, 'compact density tightens the grid')
@@ -108,6 +124,7 @@ export async function run(window, bridge) {
     await click('.ws-expand')
     assert.equal((await rect('.side')).display, 'flex', 'expanding restores the sidebar')
     await click('#layout-focus')
+    await closeSettings()
     assert.equal(await js("document.querySelector('.app-shell').dataset.focus"), 'on', 'focus mode is recorded')
     assert.equal((await rect('.side')).display, 'none', 'focus mode hides the sidebar')
     assert.notEqual((await rect('.ws-focus-exit')).display, 'none', 'focus mode offers an exit affordance')
@@ -131,7 +148,7 @@ export async function run(window, bridge) {
     assert.ok(panel.left >= -1 && panel.right <= 1040 + 1, `the layout panel stays inside 1040×650 (${panel.left}..${panel.right})`)
     const controlsInside = await js(`(() => {
       const panel = document.querySelector('#layout-menu .ws-panel');
-      const panelRect = panel.getBoundingClientRect();
+      const panelRect = document.querySelector('#modal').getBoundingClientRect();
       if (panelRect.left < -1 || panelRect.right > innerWidth + 1 || panelRect.top < -1 || panelRect.bottom > innerHeight + 1) return 'panel outside the window: ' + JSON.stringify(panelRect);
       // 面板自身可滚动：每个控件滚进可视区后都必须完整可见、尺寸可点。
       for (const node of panel.querySelectorAll('button, input')) {
@@ -146,6 +163,7 @@ export async function run(window, bridge) {
     })()`)
     assert.equal(controlsInside, 'ok', `every layout control is reachable at 1040×650 (${controlsInside})`)
     await resize(1440, 940)
+    await closeSettings()
 
     // ---------- 键盘 ----------
     await js("document.querySelector('#side-splitter').focus()")
@@ -157,6 +175,7 @@ export async function run(window, bridge) {
     assert.equal((await stored()).sideW, 222, 'Enter restores the default width from the keyboard')
 
     // ---------- 重载后仍然生效 ----------
+    await openPanel()
     await js("document.querySelector('#layout-side-width').value = '300'; document.querySelector('#layout-side-width').dispatchEvent(new Event('input')); document.querySelector('#layout-side-width').dispatchEvent(new Event('change'))")
     await click(segment('页面宽度', 'wide'))
     await settle()

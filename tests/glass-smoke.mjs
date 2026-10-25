@@ -37,6 +37,9 @@ check('分级：无障碍偏好压过显式选择，其次能力，最后默认'
   assert.equal(resolveTier({ capabilities: { ...base, backdropFilter: false } }), 'flat')
   assert.equal(resolveTier({ capabilities: { ...base, hardwareConcurrency: 2 } }), 'flat')
   assert.equal(resolveTier({ capabilities: { ...base, hardwareConcurrency: 4 } }), 'balanced')
+  assert.equal(resolveTier({ requested: 'full', capabilities: { ...base, backdropFilter: false } }), 'flat')
+  assert.equal(resolveTier({ requested: 'full', capabilities: { ...base, hardwareConcurrency: 2 } }), 'flat')
+  assert.equal(resolveTier({ requested: 'full', capabilities: { ...base, backdropFilterUrl: false } }), 'balanced')
   // full 永远不会被自动选中
   assert.notEqual(resolveTier({ capabilities: base }), 'full')
 })

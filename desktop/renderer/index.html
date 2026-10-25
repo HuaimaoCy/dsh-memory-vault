@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="zh-CN" data-glass-tier="balanced">
+<html lang="zh-CN" data-glass-tier="full">
 <head>
   <meta charset="utf-8" />
   <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'none'; form-action 'none'; base-uri 'none'" />
@@ -13,6 +13,7 @@
   <link rel="stylesheet" href="glass.css" />
   <!-- 参照图复刻层：排版阶梯、素材卡、底部导航与头像。放在最后，覆盖前两层。 -->
   <link rel="stylesheet" href="replica.css" />
+  <link rel="stylesheet" href="liquid-glass.css" />
 </head>
 <body data-mode="memory">
   <div id="alaya-startup" class="alaya-startup" aria-label="Alaya 正在启动"><div class="alaya-loader"><div class="alaya-stage" aria-hidden="true"></div></div></div>
@@ -21,13 +22,10 @@
       <div class="brand"><button id="mode-switch" class="brand-mark" title="切换到笔记本" aria-label="切换到笔记本" aria-pressed="false"><span data-icon="book"></span></button><div><div class="brand-name">Alaya</div><div class="brand-caption">数据库</div></div></div>
       <div class="side-scroll">
         <div class="side-head">资料库</div><nav id="views" class="views" aria-label="记忆视图"></nav>
-        <div class="side-head views-head"><span>视图</span><button id="new-view" class="icon-button" title="新建视图" aria-label="新建视图"><span data-icon="plus"></span></button></div>
-        <nav id="saved-views" class="saved-views" aria-label="保存的视图"></nav>
         <div class="side-head groups-head"><span>记忆组</span><button id="manage-groups" class="icon-button" title="管理记忆组" aria-label="管理记忆组"><span data-icon="plus"></span></button></div>
         <nav id="tree" class="tree" aria-label="记忆组"></nav>
       </div>
       <div class="side-bottom">
-        <div class="local-library"><span class="library-dot"></span><div><span class="library-name">本地数据库</span><span class="library-caption">保存在你的电脑上</span></div><span data-icon="shield"></span></div>
         <button id="command-palette" class="nav command-palette-link" title="命令面板 · Ctrl/⌘ K" aria-label="命令面板，快捷键 Ctrl K" aria-keyshortcuts="Control+k Meta+k" aria-haspopup="dialog"><span data-icon="search"></span><span>命令面板</span><kbd>Ctrl K</kbd></button>
         <button id="settings" class="nav settings-link"><span data-icon="settings"></span><span>设置与连接</span><span data-icon="chevron-right" class="trailing"></span></button>
       </div>
@@ -41,15 +39,15 @@
         </div>
         <div class="toolbar-actions">
           <div class="breadcrumb"><span data-icon="library"></span><span id="breadcrumb">全部记忆</span></div>
-          <div id="layout-host" class="ws-layout-host"></div>
-          <button id="capture" class="icon-button" title="快速捕获到记忆或笔记 · Ctrl+Shift+N" aria-label="快速捕获到记忆或笔记，快捷键 Ctrl Shift N" aria-keyshortcuts="Control+Shift+n Meta+Shift+n"><span data-icon="plus"></span></button>
+          <button id="workspace-settings" class="icon-button" type="button" title="设置" aria-label="设置"><span data-icon="settings"></span></button>
+          <button id="capture" class="icon-button" title="快速捕获到记忆或笔记 · Ctrl+Shift+N" aria-label="快速捕获到记忆或笔记，快捷键 Ctrl Shift N" aria-keyshortcuts="Control+Shift+n Meta+Shift+n"><span data-icon="pen"></span></button>
           <button id="refresh" class="icon-button" title="刷新记忆" aria-label="刷新记忆"><span data-icon="refresh"></span></button>
-          <button id="new" class="btn primary" title="新建记忆 · Ctrl+N"><span data-icon="plus"></span><span>新建</span></button>
+          <button id="new" class="icon-button create-trigger" title="新建记忆 · Ctrl+N" aria-label="新建记忆"><span data-icon="plus"></span></button>
         </div>
       </header>
       <div class="body">
         <main class="main">
-          <div class="page-heading"><div><h1 id="view-title">全部记忆</h1><p id="view-description">让知识、灵感与约定各归其位。</p></div><div class="view-total"><strong id="view-count">0</strong><span>条记忆</span></div></div>
+          <div class="page-heading"><div><h1 id="view-title">全部记忆</h1></div><div class="view-total"><strong id="view-count">0</strong><span>条记忆</span></div></div>
           <div id="search-context" class="search-context hidden"><span id="search-hint" role="status"></span><span class="spacer"></span><button id="clear-search" type="button" class="btn ghost">清除搜索</button></div>
           <div class="board-toolbar">
             <div class="segmented" role="group" aria-label="显示方式"><button id="view-grid" class="segment active" title="卡片视图" aria-label="卡片视图" aria-pressed="true"><span data-icon="grid"></span></button><button id="view-list" class="segment" title="列表视图" aria-label="列表视图" aria-pressed="false"><span data-icon="list"></span></button><button id="view-table" class="segment" title="表格视图" aria-label="表格视图" aria-pressed="false"><span data-icon="summary"></span></button><button id="view-board" class="segment" title="看板视图" aria-label="看板视图" aria-pressed="false"><span data-icon="layers"></span></button></div>
@@ -61,7 +59,6 @@
         </main>
         <section id="drawer" class="drawer hidden" aria-label="记忆编辑器"></section>
       </div>
-      <footer class="foot"><span id="foot-left"></span><span class="spacer"></span><span id="foot-right">Codex / DSH 接口</span></footer>
     </div>
   </div>
   <div id="status" class="status" role="status" aria-live="polite"></div>

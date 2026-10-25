@@ -157,8 +157,8 @@ const notes = [
   },
 ]
 
-const notebookData = () => ({
-  records: notes,
+const notebookData = (scope={}) => ({
+  records: notes.map(row=>previewReadNote(row.id)).filter(row=>(!scope.type||row.type===scope.type)&&(!scope.subjectID||row.subjectID===scope.subjectID)&&(!scope.tag||row.tags.includes(scope.tag))&&(scope.view!=='mastered'||row.reviewState==='mastered')&&(scope.view!=='due'||row.reviewState!=='mastered')&&(scope.view!=='trash'||row.isSoftDeleted)&&(!scope.query||JSON.stringify(row).toLocaleLowerCase().includes(scope.query.toLocaleLowerCase()))),
   total: notes.length,
   prefs: { order: 'priority', sideWidth: 220, detailWidth: 440, detailSide: 'right' },
   sidebar: [{ id: 's-all', label: '全部笔记', view: 'all' }],
@@ -180,6 +180,11 @@ const notebookData = () => ({
     subjects: { physics: 2, math: 1, english: 1 },
   },
 })
+const previewReadNote=id=>{
+  const row=notes.find(note=>note.id===id)
+  if(!row)throw new Error('笔记不存在')
+  return {...row,revision:row.revision??1,images:row.images??[],annotations:row.annotations??[],repeatCount:row.repeatCount??0,mastery:row.mastery??0,notes:row.notes??'',reviewState:row.reviewState==='done'?'mastered':row.reviewState==='todo'?'new':row.reviewState,physics:row.physics??{},method:row.method??{},vocabulary:row.vocabulary??{}}
+}
 
 const ok = result => Promise.resolve({ ok: true, result })
 const filter = body => {
@@ -215,22 +220,23 @@ const handlers = {
   curate: () => ({ suggestions: [] }),
 }
 
+const previewUpdates={status:'idle',feedUrl:'',settings:{notify:false,autoCheck:false},download:{status:'idle',received:0,total:0}}
 window.vault = {
   invoke: (op, body) => (handlers[op] ? ok(handlers[op](body ?? {})) : Promise.resolve({ ok: false, error: `预览桥没有实现 ${op}` })),
-  info: () => ok({ version: '0.8.0-preview', databasePath: 'C:\\Users\\demo\\AppData\\Roaming\\Alaya\\alaya.sqlite', model: settings, updates: { status: 'idle', settings: { notify: false, autoCheck: false } } }),
+  info: () => ok({ version: '0.8.0-preview', databasePath: 'C:\\Users\\demo\\AppData\\Roaming\\Alaya\\alaya.sqlite', model: settings, connectors:{codex:'# Preview configuration',dsh:'# Preview configuration'}, updates:previewUpdates }),
   confirm: () => ok(false),
   open: () => ok(null),
   backup: () => ok(null),
   settings: body => ok(settings),
-  updates: () => ok({ status: 'idle' }),
+  updates: () => ok(previewUpdates),
   onUpdates: () => () => {},
   mistakebook: (action) => ok(action === 'list' ? notebookData() : {}),
   notebook: (op, body) => {
-    if (op === 'list') return ok(notebookData())
+    if (op === 'list') return ok(notebookData(body))
     if (op === 'prefs.save' || op === 'sidebar.save') return ok(op === 'sidebar.save' ? {} : notebookData().prefs)
     if (op === 'ai.history') return ok({ messages: [] })
-    if (op === 'read') return ok({ record: notes.find(note => note.id === body?.id) ?? notes[0] })
-    if (op === 'save') return ok({ id: `n-${notes.length + 1}`, created: true })
+    if (op === 'read') return ok(previewReadNote(body?.id))
+    if (op === 'save') { const id=body?.id??`n-${notes.length+1}`,index=notes.findIndex(row=>row.id===id),next={...body,id,revision:(notes[index]?.revision??0)+1,updatedAt:Date.now(),value:body.value??{overallScore:50,level:'mid'}};if(index<0)notes.push(next);else notes[index]=next;return ok(previewReadNote(id)) }
     return ok({})
   },
   canvas: (action) => ok({ docs: {}, corrupted: false }),

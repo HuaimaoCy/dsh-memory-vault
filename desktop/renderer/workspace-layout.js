@@ -348,7 +348,7 @@ export function mountWorkspaceLayout({
     set({ focus: false }); flush()
     event.preventDefault(); event.stopPropagation()
   }
-  const onDown = event => { if (menu.menu.open && !menu.menu.contains(event.target)) menu.menu.open = false }
+  const onDown = event => { if (!menu.menu.closest('[data-settings-layout]') && menu.menu.open && !menu.menu.contains(event.target)) menu.menu.open = false }
   document.addEventListener('keydown', onKey, true)
   document.addEventListener('pointerdown', onDown, true)
   window.addEventListener('pagehide', flush)
@@ -453,7 +453,7 @@ export function createNotebookLayoutAdapter({
     event.preventDefault(); event.stopPropagation()
   }
   document.addEventListener('keydown', onKey, true)
-  const onDown = event => { if (menu?.menu.open && !menu.menu.contains(event.target)) menu.menu.open = false }
+  const onDown = event => { if (!menu?.menu.closest('[data-settings-layout]') && menu?.menu.open && !menu.menu.contains(event.target)) menu.menu.open = false }
   document.addEventListener('pointerdown', onDown, true)
   window.addEventListener('pagehide', flush)
 

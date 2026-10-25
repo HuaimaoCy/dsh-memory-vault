@@ -10,7 +10,7 @@
  *    内容卡片、正文、表格永远不是玻璃。
  * 3) 指针光源、按压、分级都写 CSS 变量或 data 属性，动画本身留在 CSS 里；
  *    只有进入/离开高光这种需要从「当前值」起步的收尾用 motion.js 的弹簧。
- * 4) 分级优先顺序：强制色（系统）> 用户显式选择 > 系统偏好/能力 > 默认 balanced。
+ * 4) 分级优先顺序：系统可访问性 > 设备能力 > 用户显式选择 > 默认档位。
  *    flat 档只是把 tier 写出去，CSS 自己撤掉 backdrop-filter。
  */
 
@@ -79,8 +79,8 @@ export function glassCapabilities() {
  * 1. forced-colors（强制色）→ flat
  * 2. prefers-contrast: more（提高对比度）→ flat
  * 3. prefers-reduced-transparency: reduce（减少透明度）→ flat
- * 4. 用户显式选择（full / balanced / flat）
- * 5. 能力探测：没有 backdrop-filter、或只有 1–2 核 → flat
+ * 4. 能力探测：没有 backdrop-filter、或只有 1–2 核 → flat
+ * 5. 用户显式选择（full 不支持 SVG 背景滤镜时退到 balanced）
  * 6. 其余 → balanced。full 永远不自动选中：边缘色散只在 lab 里验证过。
  */
 export function resolveTier({ requested, capabilities } = {}) {
@@ -88,9 +88,10 @@ export function resolveTier({ requested, capabilities } = {}) {
   if (caps.forcedColors) return 'flat'
   if (caps.contrastMore) return 'flat'
   if (caps.reducedTransparency) return 'flat'
-  if (requested && GLASS_TIERS.includes(requested)) return requested
   if (caps.backdropFilter === false) return 'flat'
   if (Number(caps.hardwareConcurrency) > 0 && Number(caps.hardwareConcurrency) <= 2) return 'flat'
+  if (requested === 'full' && caps.backdropFilterUrl === false) return 'balanced'
+  if (requested && GLASS_TIERS.includes(requested)) return requested
   return 'balanced'
 }
 
@@ -160,16 +161,16 @@ function createInstance({ root, tier: initialTier, storageKey }) {
 
   // ---- 光学引擎（full 档） ---------------------------------------------------
   // 后端与数学都在 optical/ 里；这里只负责「哪些面注册进去、什么时候启用」。
-  // 注册的是**背后真有内容**的面：顶栏胶囊与浮层。侧栏与侧板背后是页面底色，
-  // 折射一块纯色没有意义，还要白付一张贴图。
+  // 工具条、搜索、浮层与侧栏共用背景取样。侧栏图形按内缩后的伪元素尺寸注册。
   let opticalEngine = null
   let opticalLoading = null
-  const OPTICAL_SELECTORS = ['.bar .toolbar-actions', '.mb-bar .toolbar-actions', '[data-glass-surface="float"]']
+  const OPTICAL_SELECTORS = ['.bar .toolbar-actions', '.mb-bar .toolbar-actions', '.search-wrap', '.side', '.mb-side', '[data-optical-lens]', '[data-glass-surface="float"]']
 
   const opticalTargets = () => {
     const list = []
     for (const selector of OPTICAL_SELECTORS) {
       for (const node of host.querySelectorAll(selector)) {
+        if(node.closest('[data-settings-layout]') && !node.hasAttribute('data-optical-lens'))continue
         if (node.getAttribute(SURFACE_ATTRIBUTE) === 'float' && !node.isConnected) continue
         list.push(node)
       }
@@ -182,15 +183,20 @@ function createInstance({ root, tier: initialTier, storageKey }) {
     for (const node of opticalTargets()) {
       if (opticalEngine.registered?.(node)) continue
       const rect = node.getBoundingClientRect()
-      const radius = Number.parseFloat(getComputedStyle(node).borderTopLeftRadius) || 0
-      opticalEngine.register(node, { radius, bezelWidth: Math.min(16, Math.max(10, rect.height * 0.34)), thickness: 8 })
+      const panel = node.matches('.side, .mb-side')
+      const lens = node.hasAttribute('data-optical-lens')
+      const material = getComputedStyle(node, panel ? '::after' : null)
+      const radius = Number.parseFloat(material.borderTopLeftRadius) || 0
+      const inset = panel ? Number.parseFloat(material.left) || 0 : 0
+      opticalEngine.register(node, { radius, autoRadius:true, pseudo:panel?'::after':null, inset, bezelWidth:lens?3:panel?12:Math.min(12,Math.max(7,rect.height*.23)), thickness:lens?2:panel?7:5.5, displacementScale:lens?1.3:2.6, ior:1.46, profile:'arc', lensStrength:lens ? .025 : 0, blur:lens?0:panel?10:node.matches('[data-glass-surface="float"]')?8:3.5 })
     }
   }
 
   const mountOptical = async () => {
     if (opticalEngine || opticalLoading) return opticalLoading
     opticalLoading = import('./optical/glass-engine.js').then(module => {
-      if (destroyed) return null
+      // import 期间用户可能已经切到实心或开启了系统高对比。
+      if (destroyed || currentTier !== 'full') return null
       opticalEngine = module.createGlassEngine({ document: doc, quality: 'full' })
       registerOpticalTargets()
       doc.documentElement.dataset.glassRefraction = 'on'
@@ -200,16 +206,30 @@ function createInstance({ root, tier: initialTier, storageKey }) {
   }
 
   const unmountOptical = () => {
-    if (!opticalEngine) return
-    opticalEngine.dispose()
+    opticalEngine?.dispose()
     opticalEngine = null
     delete doc.documentElement.dataset.glassRefraction
+  }
+  const onLensPress=event=>{
+    if(opticalEngine?.registered(event.target))opticalEngine.update(event.target,{lensStrength:event.detail.pressed?.12:.025})
   }
 
   const applyTier = (value, { persist = true } = {}) => {
     const resolved = resolveTier({ requested: value, capabilities: capabilitiesNow() })
     currentTier = resolved
     host.dataset.glassTier = resolved
+    if (resolved === 'flat' || !capabilities.pointerLight) {
+      if (frame) cancelAnimationFrame(frame)
+      frame = 0
+      pending = null
+      for (const node of known) {
+        const light = glares.get(node)
+        light?.cancel?.()
+        if (light) light.opacity = 0
+        for (const name of ['--glass-glare-x', '--glass-glare-y', '--glass-glare-o', '--glass-rim-angle']) node.style.removeProperty(name)
+      }
+      releaseAll()
+    }
     // 只有用户显式选择才写偏好；挂载时的默认档不落盘，否则以后改默认值就再也
     // 影响不到这些用户（他们的 localStorage 里已经钉死了一个旧默认）。
     if (persist) writeStored(storageKey, value ?? null)
@@ -231,6 +251,10 @@ function createInstance({ root, tier: initialTier, storageKey }) {
         node.setAttribute(SURFACE_ATTRIBUTE, surface.kind)
         node.style.setProperty('--glass-press', '0')
         known.add(node)
+        if(node.matches('.side,.mb-side') && !node.querySelector(':scope > .sidebar-coating')){
+          const coating=doc.createElement('div');coating.className='sidebar-coating';coating.setAttribute('aria-hidden','true');node.prepend(coating)
+          const rim=doc.createElement('div');rim.className='sidebar-rim';rim.setAttribute('aria-hidden','true');node.append(rim)
+        }
         return
       }
     }
@@ -277,7 +301,7 @@ function createInstance({ root, tier: initialTier, storageKey }) {
   }
 
   const moveGlare = event => {
-    if (destroyed) return
+    if (destroyed || currentTier === 'flat' || !capabilities.pointerLight) return
     pending = event
     if (frame) return
     frame = requestAnimationFrame(() => {
@@ -325,6 +349,7 @@ function createInstance({ root, tier: initialTier, storageKey }) {
   const releaseAll = () => { for (const node of [...pressed]) release(node) }
 
   const onPointerDown = event => {
+    if (currentTier === 'flat' || !capabilities.pointerLight) return
     const node = event.target instanceof Element ? event.target.closest(`[${SURFACE_ATTRIBUTE}]`) : null
     if (node) press(node)
   }
@@ -349,6 +374,14 @@ function createInstance({ root, tier: initialTier, storageKey }) {
   const mutationObserver = typeof MutationObserver === 'function' ? new MutationObserver(records => {
     let added = false
     for (const record of records) {
+      for (const node of record.removedNodes) {
+        if (node.nodeType !== 1 || node.isConnected) continue
+        for (const target of [node, ...node.querySelectorAll(`[${SURFACE_ATTRIBUTE}]`)]) {
+          if (opticalEngine?.registered(target)) opticalEngine.unregister(target)
+          known.delete(target)
+          resizeObserver?.unobserve(target)
+        }
+      }
       for (const node of record.addedNodes) {
         if (node.nodeType !== 1) continue
         tagTree(node)
@@ -364,14 +397,15 @@ function createInstance({ root, tier: initialTier, storageKey }) {
     motion: typeof matchMedia === 'function' ? matchMedia('(prefers-reduced-motion: reduce)') : null,
     transparency: typeof matchMedia === 'function' ? matchMedia('(prefers-reduced-transparency: reduce)') : null,
   }
-  const onMediaChange = () => applyTier(readStored(storageKey))
+  const onMediaChange = () => applyTier(readStored(storageKey) ?? initialTier, { persist: false })
   // 系统偏好变化时 Chromium 会派发 matchMedia 的 change；但有些环境（远程桌面、
   // 部分主题切换器、以及 CDP 的媒体模拟）只改媒体状态不派发事件。窗口重新获得
   // 焦点时再判定一次，代价可以忽略，也能覆盖「用户去系统设置改完回来」这条最常见的路径。
-  const onRecheck = () => { if (!destroyed) applyTier(readStored(storageKey), { persist: false }) }
+  const onRecheck = () => { if (!destroyed) applyTier(readStored(storageKey) ?? initialTier, { persist: false }) }
 
   // ---- 生命周期 -------------------------------------------------------------
   refresh()
+  doc.addEventListener('glass:lens-press',onLensPress)
   const stored = readStored(storageKey)
   currentTier = applyTier(stored ?? initialTier ?? (document.documentElement.dataset.glassTier || null), { persist: false })
   observeSizes()
@@ -379,14 +413,13 @@ function createInstance({ root, tier: initialTier, storageKey }) {
   for (const query of Object.values(mediaWatcher)) query?.addEventListener?.('change', onMediaChange)
   window.addEventListener('focus', onRecheck)
   document.addEventListener('visibilitychange', onRecheck)
-  if (capabilitiesNow().pointerLight) {
-    window.addEventListener('pointermove', moveGlare, { passive: true })
-    window.addEventListener('pointerdown', onPointerDown, { passive: true })
-    window.addEventListener('pointerup', onPointerUp, { passive: true })
-    window.addEventListener('pointercancel', onPointerUp, { passive: true })
-    window.addEventListener('blur', leaveWindow)
-    document.addEventListener('pointerleave', leaveWindow)
-  }
+  // 始终装配一次，处理函数根据实时能力退出，系统偏好在运行中切换也能生效。
+  window.addEventListener('pointermove', moveGlare, { passive: true })
+  window.addEventListener('pointerdown', onPointerDown, { passive: true })
+  window.addEventListener('pointerup', onPointerUp, { passive: true })
+  window.addEventListener('pointercancel', onPointerUp, { passive: true })
+  window.addEventListener('blur', leaveWindow)
+  document.addEventListener('pointerleave', leaveWindow)
 
   const api = {
     tier: () => currentTier,
@@ -404,6 +437,7 @@ function createInstance({ root, tier: initialTier, storageKey }) {
     })),
     destroy: () => {
       destroyed = true
+      doc.removeEventListener('glass:lens-press',onLensPress)
       unmountOptical()
       if (frame) cancelAnimationFrame(frame)
       window.removeEventListener('pointermove', moveGlare)

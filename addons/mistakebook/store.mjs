@@ -63,6 +63,14 @@ function normalize(raw, previous = {}) {
   const merged = { ...previous, ...raw, type: typeAlias(merged_type(raw, previous)) }
   const type = merged.type
   if (!Object.hasOwn(NOTE_TYPES, type)) throw new Error('无效的笔记类型')
+  const questionIds=merged.paper?.questionIds??[]
+  if(!Array.isArray(questionIds)||questionIds.length>100||questionIds.some(id=>typeof id!=='string'||id.length>100)||new Set(questionIds).size!==questionIds.length)throw new Error('试卷题目列表无效，最多 100 道题且不能重复')
+  const annotations=merged.annotations??[]
+  if(!Array.isArray(annotations)||annotations.length>100)throw new Error('批注最多 100 条')
+  const normalizedAnnotations=annotations.map(item=>{
+    if(!item||typeof item.text!=='string'||!item.text.trim())throw new Error('批注内容不能为空')
+    return {id:bounded(item.id||randomUUID(),100),text:bounded(item.text,5000),quote:bounded(item.quote??'',2000),createdAt:bounded(item.createdAt??new Date().toISOString(),100)}
+  })
   const physics = normalizeFields('physics', merged.physics), method = normalizeFields('method', merged.method), vocabulary = normalizeFields('vocabulary', merged.vocabulary)
   const simulationId = String(merged.simulationId ?? '')
   if (simulationId && !SIMULATIONS.some(item => item.id === simulationId)) throw new Error('无效的物理仿真')
@@ -86,9 +94,9 @@ function normalize(raw, previous = {}) {
       fields: { referenceAnswer: bounded(aiResult.fields?.referenceAnswer), notes: bounded(aiResult.fields?.notes),
         ...fieldsForAI(aiResult.type, aiResult.fields) } }
   }
-  return { id: previous.id ?? randomUUID(), type, title: bounded(merged.title ?? (type === 'vocabulary' ? vocabulary.word : ''), 500), physics, method, vocabulary, aiResult, simulationId,
+  return { id: previous.id ?? randomUUID(), type, title: bounded(merged.title ?? (type === 'vocabulary' ? vocabulary.word : ''), 500), physics, method, vocabulary, aiResult, simulationId, ...(type==='paper'?{paper:{questionIds:[...questionIds]}}:{}),
     stem: bounded(merged.stem), studentWork: bounded(merged.studentWork), referenceAnswer: bounded(merged.referenceAnswer),
-    notes: bounded(merged.notes), errorType: bounded(merged.errorType, 100), cause: bounded(merged.cause ?? merged.analysisResult?.conclusion, 30000),
+    notes: bounded(merged.notes), annotations:normalizedAnnotations, errorType: bounded(merged.errorType, 100), cause: bounded(merged.cause ?? merged.analysisResult?.conclusion, 30000),
     subjectID, nodeID, legacyNodeID: bounded(merged.legacyNodeID, 500), legacySubjectID: bounded(merged.legacySubjectID, 500), classificationSuggested: raw.nodeID !== undefined ? false : Boolean(previous.classificationSuggested ?? classification.assignmentState === 'suggested'),
     tags: Array.isArray(merged.tags) ? merged.tags.slice(0, 30).map(tag => bounded(tag, 100)) : [], target: merged.target === 'huige' ? 'huige' : 'gaokao',
     reviewState, repeatCount, reciteCount, sortIndex, mastery, nextReviewAt: merged.nextReviewAt ?? null, reviewHistory: Array.isArray(merged.reviewHistory) ? merged.reviewHistory.slice(-200).map(item => ({ at: String(item.at), result: item.result === 'pass' ? 'pass' : 'fail' })) : [],
@@ -206,12 +214,22 @@ export class MistakebookStore {
       ...(includeData ? { data: Buffer.from(image.data).toString('base64') } : {}),
     }))
   }
-  read(id) { const record = this.require(id), images = this.listImages(id, true), hash = contentHash({ ...record, images }); return { ...record, images, value: evaluate(record), contentHash: hash, aiStale: Boolean(record.aiResult && record.aiResult.inputHash !== hash) } }
+  projectPaper(record,all=this.records()) {
+    if(record.type!=='paper')return record
+    const lookup=new Map(all.map(row=>[row.id,row]))
+    const questions=(record.paper?.questionIds??[]).map(id=>lookup.get(id)).filter(row=>row&&row.type==='mistake'&&!row.isSoftDeleted)
+    const mastered=questions.length>0&&questions.every(row=>row.reviewState==='mastered')
+    const due=questions.some(row=>row.reviewState!=='mastered'&&(!row.nextReviewAt||Date.parse(row.nextReviewAt)<=Date.now()))
+    return {...record,reviewState:mastered?'mastered':questions.every(row=>row.reviewState==='new')?'new':'reviewing',mastery:questions.length?questions.reduce((sum,row)=>sum+row.mastery,0)/questions.length:0,nextReviewAt:due?null:questions.map(row=>row.nextReviewAt).filter(Boolean).sort()[0]??null,questions}
+  }
+  read(id) { const record = this.projectPaper(this.require(id)), images = this.listImages(id, true), hash = contentHash({ ...record, images }); return { ...record, images, value: evaluate(record), contentHash: hash, aiStale: Boolean(record.aiResult && record.aiResult.inputHash !== hash) } }
   records() { return this.db.prepare(`SELECT payload FROM ${this.tables.questions}`).all().map(row => JSON.parse(row.payload)) }
   list({ view = 'all', type = '', subjectID = '', nodeID = '', query = '', tag = '', order = 'priority' } = {}) {
-    const active = this.records(), now = Date.now()
+    const source=this.records(),active=source.map(row=>this.projectPaper(row,source)), now = Date.now()
+    const grouped=new Set(active.filter(row=>row.type==='paper'&&!row.isSoftDeleted&&!row.isArchived).flatMap(row=>row.paper.questionIds))
     const stats = { all: 0, due: 0, mastered: 0, archived: 0, trash: 0, subjects: {}, types: {}, tags: {} }
     for (const row of active) {
+      if(grouped.has(row.id)&&!row.isSoftDeleted)continue
       if (row.isSoftDeleted) { stats.trash++; continue }
       if (row.isArchived) { stats.archived++; continue }
       stats.all++; stats.types[row.type] = (stats.types[row.type] ?? 0) + 1; stats.subjects[row.subjectID] = (stats.subjects[row.subjectID] ?? 0) + 1
@@ -220,7 +238,7 @@ export class MistakebookStore {
       else if (!row.nextReviewAt || Date.parse(row.nextReviewAt) <= now) stats.due++
     }
     const terms = String(query).toLocaleLowerCase().trim().split(/\s+/).filter(Boolean)
-    const records = active.filter(row => {
+    const matches = active.filter(row => {
       if (view === 'trash') { if (!row.isSoftDeleted) return false } else if (row.isSoftDeleted) return false
       if (view === 'archived') { if (!row.isArchived) return false } else if (view !== 'trash' && row.isArchived) return false
       if (view === 'due' && (row.reviewState === 'mastered' || row.nextReviewAt && Date.parse(row.nextReviewAt) > now)) return false
@@ -230,13 +248,26 @@ export class MistakebookStore {
       if (nodeID && row.nodeID !== nodeID && !row.nodeID.startsWith(`${nodeID}/`)) return false
       if (tag && !row.tags.includes(tag)) return false
       return terms.every(term => `${JSON.stringify(contentOf(row))}\n${row.tags.join(' ')}`.toLocaleLowerCase().includes(term))
-    }).map(row => ({ ...row, imageCount: this.listImages(row.id).length, value: evaluate(row) }))
+    })
+    const visibleMembers=new Set(matches.filter(row=>row.type==='paper').flatMap(row=>row.paper.questionIds))
+    const records=matches.filter(row=>!visibleMembers.has(row.id)).map(row=>({...row,imageCount:this.listImages(row.id).length,value:evaluate(row)}))
     records.sort((a, b) => order === 'updated' ? b.updatedAt.localeCompare(a.updatedAt) : order === 'manual' ? (a.sortIndex ?? Infinity) - (b.sortIndex ?? Infinity) || b.updatedAt.localeCompare(a.updatedAt) : b.value.overallScore - a.value.overallScore || b.updatedAt.localeCompare(a.updatedAt))
     return { records, stats, taxonomy, path: this.path, sidebar: this.sidebarConfig(), prefs: this.prefs() }
   }
   save(raw) {
     if (!raw || typeof raw !== 'object') throw new Error('无效的题目')
+    if(raw.type==='paper'&&(!raw.id||JSON.stringify(raw.paper?.questionIds)!==JSON.stringify(this.require(raw.id).paper?.questionIds)))throw new Error('请通过试卷编成保存试卷')
     return this.transaction(() => this.saveInside(raw))
+  }
+  savePaper({id,revision,title,ids}={}) {
+    return this.transaction(()=>{
+      if(typeof title!=='string'||!title.trim()||title.length>500)throw new Error('请填写试卷名称，最多 500 字')
+      if(!Array.isArray(ids)||!ids.length||ids.length>100||new Set(ids).size!==ids.length)throw new Error('请选择 1 至 100 道不同的题目')
+      for(const key of ids){const row=this.require(key);if(row.type!=='mistake'||row.isSoftDeleted||row.isArchived)throw new Error('试卷只能编入当前可用的错题')}
+      const previous=id?this.require(id):undefined
+      if(previous&&previous.type!=='paper')throw new Error('当前记录不是试卷')
+      return this.saveInside({...(previous??{}),id,revision,type:'paper',title:title.trim(),paper:{questionIds:ids},subjectID:previous?.subjectID??this.require(ids[0]).subjectID})
+    })
   }
   saveInside(raw) {
     const previous = raw.id ? this.require(raw.id) : undefined
@@ -267,6 +298,15 @@ export class MistakebookStore {
   action(id, action) {
     return this.transaction(() => {
       const record = this.require(id)
+      if(['mastered','due'].includes(action)){
+        if(record.isSoftDeleted||record.isArchived)throw new Error('请先恢复笔记再调整复习状态')
+        const lookup=new Map(this.records().map(row=>[row.id,row]))
+        const members=record.type==='paper'?(record.paper?.questionIds??[]).map(key=>lookup.get(key)).filter(row=>row&&!row.isSoftDeleted&&!row.isArchived):[record]
+        if(!members.length)throw new Error('试卷中没有可复习的题目')
+        if(members.some(row=>row.isSoftDeleted||row.isArchived))throw new Error('请先恢复笔记再调整复习状态')
+        for(const row of members)this.saveInside({...row,reviewState:action==='mastered'?'mastered':'reviewing',mastery:action==='mastered'?1:Math.min(row.mastery,.5),nextReviewAt:action==='mastered'?new Date(Date.now()+14*86400000).toISOString():null})
+        return this.read(id)
+      }
       if (action === 'purge') {
         if (!record.isSoftDeleted) throw new Error('只有回收站中的题目可永久删除')
         this.db.prepare(`DELETE FROM ${this.tables.questions} WHERE id=?`).run(id); return { removed: true }
@@ -276,6 +316,7 @@ export class MistakebookStore {
       else if (action === 'archive') record.isArchived = true
       else if (action === 'unarchive') record.isArchived = false
       else if (['pass', 'fail'].includes(action)) {
+        if(record.type==='paper')throw new Error('请打开试卷，逐题进行复习')
         if (record.isSoftDeleted || record.isArchived) throw new Error('请先恢复题目再复习')
         const pass = action === 'pass'
         record.mastery = pass ? Math.min(1, record.mastery + .35) : Math.max(0, record.mastery - .4)
@@ -404,13 +445,14 @@ export class MistakebookStore {
       : null
     if (restored) this.setCanvasDocs(restored)
     return this.transaction(() => {
-      const known = new Set(this.records().filter(record => record.stem.trim() || record.title.trim() || record.type === 'vocabulary').map(dedupKey))
+      const known = new Map(this.records().filter(record => record.stem.trim() || record.title.trim() || record.type === 'vocabulary').map(row=>[dedupKey(row),row.id]))
+      const importedIds=new Map(),importedPapers=[]
       let created = 0, skipped = 0, unmapped = 0, missingImages = 0
       for (const row of rows) {
         if (!row || typeof row !== 'object') throw new Error('导入包含无效题目，尚未保存')
         const stem = bounded(row.stem), draft = { ...row, type: row.type ?? 'mistake', stem, title: bounded(row.title), vocabulary: normalizeFields('vocabulary',row.vocabulary) }, hash = dedupKey(draft)
         const hasKey = stem.trim() || draft.title.trim() || draft.type === 'vocabulary'
-        if (hasKey && known.has(hash)) { skipped++; continue }
+        if (hasKey && known.has(hash)) { if(row.id)importedIds.set(row.id,known.get(hash));skipped++; continue }
         const images = (row.images ?? []).map(image => ({ name: image.name, mimeType: image.mimeType, data: image.data }))
         const candidate = { ...row, id: undefined, revision: undefined, images }
         const legacyNodeID = String(row.nodeID ?? row.classification?.primaryNodeID ?? '')
@@ -418,9 +460,12 @@ export class MistakebookStore {
         if (legacyNodeID && !nodes.has(legacyNodeID)) { candidate.nodeID = ''; candidate.legacyNodeID = legacyNodeID; unmapped++ }
         if (legacySubjectID && !nodes.has(legacySubjectID)) { candidate.subjectID = ''; candidate.legacySubjectID = legacySubjectID }
         if (row.imageAssetID || row.sourceRegions?.length) { candidate.notes = `${text(row.notes)}\n旧版图片为外部资源引用，请从原项目补充原图。`.trim(); missingImages++ }
-        this.saveInside(candidate)
-        if (hasKey) known.add(hash); created++
+        const saved=this.saveInside(candidate)
+        if(row.id)importedIds.set(row.id,saved.id)
+        if(saved.type==='paper')importedPapers.push(saved)
+        if (hasKey) known.set(hash,saved.id); created++
       }
+      for(const paper of importedPapers)this.saveInside({...paper,paper:{questionIds:paper.paper.questionIds.map(id=>importedIds.get(id)).filter(Boolean)}})
       return { created, skipped, unmapped, missingImages, canvases: restored ? restored.canvases.length : 0 }
     })
   }

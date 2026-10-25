@@ -8,7 +8,7 @@
 import assert from 'node:assert/strict'
 import { buildDistanceField, radiusFor, sdfGradient, signedDistance } from '../desktop/renderer/optical/geometry.js'
 import { buildNormalField, normalAt, PROFILES } from '../desktop/renderer/optical/surface.js'
-import { buildDisplacementMap, displacement, fresnel, refract } from '../desktop/renderer/optical/optics.js'
+import { buildDisplacementMap, buildReflectionMap, displacement, fresnel, refract } from '../desktop/renderer/optical/optics.js'
 
 const SIZE = { width: 200, height: 100, radius: 20 }
 let checks = 0
@@ -78,9 +78,18 @@ near('贴图中心是中性值', map.data[centerPixel], 128, 1)
 const maxDeviation = Math.max(...Array.from({ length: map.width * map.height }, (_, i) => Math.abs(map.data[i * 4] - 128)))
 ok('贴图里存在接近饱和的位移', maxDeviation > 100)
 ok('R 与 B 通道相同（x 位移）', map.data[centerPixel] === map.data[centerPixel + 2])
-ok('G 与 A 通道相同（y 位移）', map.data[centerPixel + 1] === map.data[centerPixel + 3])
+ok('位移贴图 alpha 完全不透明，避免预乘污染中性值', map.data.filter((_,index)=>index%4===3).every(value=>value===255))
 ok('滤镜幅值覆盖实际最大位移', map.filterScale / 2 >= map.maxDisplacement - 1e-6)
 ok('滤镜幅值有下限', map.filterScale >= 0.5)
 ok('所有像素都在字节范围内', map.data.every(value => value >= 0 && value <= 255))
 
+const reflections=buildReflectionMap({width:160,height:80,radius:20,bezelWidth:10,thickness:6})
+const alphaAt=(image,x,y)=>image.data[(y*image.width+x)*4+3]
+ok('平坦中心不叠白色反射',alphaAt(reflections,80,40)===0)
+ok('倒角反射有方向：顶部亮于底部',alphaAt(reflections,80,0)>alphaAt(reflections,80,79))
+ok('圆角外不产生反射',alphaAt(reflections,0,0)===0)
+ok('中央磨砂遮罩完整',alphaAt(reflections.frostMask,80,40)===255)
+ok('最外侧倒角保留透明采样',alphaAt(reflections.frostMask,80,0)<8)
+const production=buildDisplacementMap({width:400,height:44,radius:22,bezelWidth:10,thickness:5.5,ior:1.46,profile:'arc',displacementScale:2.6})
+ok('生产位移控制在真实像素量级',production.maxDisplacement>1 && production.maxDisplacement<8)
 console.log(`optical smoke: ${checks} checks, 0 failed`)

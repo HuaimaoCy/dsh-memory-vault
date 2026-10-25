@@ -26,7 +26,7 @@ const DEFAULTS = {
 }
 
 /** 几何不变时，这些参数变了也只更新属性，不重建贴图。 */
-const GEOMETRY_KEYS = ['shape', 'radius', 'bezelWidth', 'thickness', 'ior', 'displacementScale', 'profile']
+const GEOMETRY_KEYS = ['shape', 'radius', 'bezelWidth', 'thickness', 'ior', 'displacementScale', 'profile', 'blur', 'lensStrength']
 
 export function createGlassEngine({
   document: doc = globalThis.document,
@@ -75,16 +75,20 @@ export function createGlassEngine({
 
   const geometryKey = params => GEOMETRY_KEYS.map(key => String(params[key])).join('|')
 
-  const measure = node => {
+  const measure = (node, options = {}) => {
     const rect = node.getBoundingClientRect()
-    return { width: Math.max(1, Math.round(rect.width)), height: Math.max(1, Math.round(rect.height)) }
+    // FLIP 只改变显示 transform，不能把缩放中的尺寸烘进静态位移贴图。
+    return { width: Math.max(1, Math.round((node.offsetWidth || rect.width) - 2*(options.inset||0))), height: Math.max(1, Math.round((node.offsetHeight || rect.height) - 2*(options.inset||0))) }
   }
 
   const applyOne = (node, entry) => {
     if (!svg.supported || state.quality === 'flat') return false
-    const params = { ...entry.options, ...measure(node) }
+    const size = measure(node, entry.options)
+    entry.size = size
+    const params = { ...entry.options, ...size }
+    if (entry.options.autoRadius) params.radius = Number.parseFloat(getComputedStyle(node, entry.options.pseudo).borderTopLeftRadius) || 0
     // 空尺寸（隐藏面板）不生成贴图：滤镜 id 会被复用，但贴图是白算的
-    if (params.width < 8 || params.height < 8) return false
+    if (params.width < 8 || params.height < 8) { svg.release(node);return false }
     const result = svg.apply(node, params)
     if (!result) return false
     entry.applied = { key: geometryKey(entry.options), filterScale: result.filterScale }
@@ -102,7 +106,7 @@ export function createGlassEngine({
     let count = 0
     let rest = 0
     for (const [node, entry] of registrations) {
-      if (!node.isConnected) { registrations.delete(node); continue }
+      if (!node.isConnected) { unregister(node); continue }
       if (!entry.dirty) continue
       if (count >= maxPerFrame) { rest++; continue }
       if (applyOne(node, entry)) count++
@@ -162,10 +166,23 @@ export function createGlassEngine({
     })
   }
 
+  // 搜索框展开、布局面板调整等变化不会触发 window.resize。
+  const resize = typeof ResizeObserver === 'function' ? new ResizeObserver(entries => {
+    for (const { target } of entries) {
+      const entry = registrations.get(target)
+      if (!entry) continue
+      const size = measure(target, entry.options)
+      if (entry.size?.width === size.width && entry.size?.height === size.height) continue
+      entry.dirty = true
+      invalidate()
+    }
+  }) : null
+
   const register = (node, options = {}) => {
     const entry = { options: { ...DEFAULTS, ...options }, dirty: true }
     registrations.set(node, entry)
     visibility?.observe(node)
+    resize?.observe(node)
     invalidate()
     return () => unregister(node)
   }
@@ -173,6 +190,7 @@ export function createGlassEngine({
   const unregister = node => {
     registrations.delete(node)
     visibility?.unobserve(node)
+    resize?.unobserve(node)
     svg.release(node)
   }
 
@@ -238,8 +256,10 @@ export function createGlassEngine({
       state.destroyed = true
       if (frame !== null) { (globalThis.cancelAnimationFrame || clearTimeout)(frame); frame = null }
       visibility?.disconnect()
+      resize?.disconnect()
       for (const cleanup of listenerCleanup) cleanup()
       listenerCleanup = []
+      for (const node of registrations.keys()) svg.release(node)
       svg.dispose()
       registrations.clear()
     }

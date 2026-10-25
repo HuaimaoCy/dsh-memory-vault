@@ -34,6 +34,8 @@ export async function run(window, bridge) {
     writeFileSync(join(shotDirectory, `${name}.png`), (await window.webContents.capturePage()).toPNG())
   }
   const click = selector => js(`document.querySelector(${JSON.stringify(selector)}).click()`)
+  const openLayout=async()=>{await click('#mb-workspace-settings');await until(`Boolean(document.querySelector('.mb-dialog[open] [data-tab="layout"]'))`);await click('.mb-dialog [data-tab="layout"]');await pause(80)}
+  const closeLayout=()=>js(`document.querySelector('.mb-dialog[open]')?.close()`)
   const until = async (expression, label = expression) => {
     for (let index = 0; index < 500; index++) {
       if (await js(expression)) return
@@ -77,7 +79,7 @@ export async function run(window, bridge) {
 
     // 首次打开自动建一张空白画布。
     await until("document.querySelectorAll('#mb-canvas-picker option').length===1", '默认画布')
-    assert.equal(await js("document.querySelector('#mb-canvas-hint')?.hidden"), false, '空画布显示引导')
+    assert.equal(await js("document.querySelector('#mb-canvas-hint')?.hidden"), true, '空画布保持空白，工具集中在底部')
 
     // —— 文本卡片 ——
     await click('#mb-canvas-text')
@@ -178,8 +180,8 @@ export async function run(window, bridge) {
       const r=s.getBoundingClientRect();
       const point=(x,y)=>({bubbles:true,cancelable:true,clientX:x,clientY:y,pointerId:21,pointerType:'mouse',button:0,buttons:1,isPrimary:true});
       s.dispatchEvent(new PointerEvent('pointerdown',point(r.left+r.width-40,r.top+r.height-140)));
-      s.dispatchEvent(new PointerEvent('pointermove',point(r.left+r.width-40-900,r.top+r.height-140-600)));
-      s.dispatchEvent(new PointerEvent('pointerup',point(r.left+r.width-40-900,r.top+r.height-140-600)));
+      s.dispatchEvent(new PointerEvent('pointermove',point(r.left+r.width-40-r.width*2,r.top+r.height-140-r.height*2)));
+      s.dispatchEvent(new PointerEvent('pointerup',point(r.left+r.width-40-r.width*2,r.top+r.height-140-r.height*2)));
       const box=s.getBoundingClientRect();
       return [...document.querySelectorAll('[data-card-id]')].some(node=>{const c=node.getBoundingClientRect();return c.right<box.left||c.bottom<box.top||c.left>box.right||c.top>box.bottom});
     })()`)
@@ -397,12 +399,12 @@ export async function run(window, bridge) {
     window.setContentSize(1040, 650)
     await until("innerWidth===1040 && innerHeight===650", '窗口调整为 1040×650')
     await pause(150)
-    await js("document.querySelector('#mb-layout-menu').open = true")
+    await openLayout()
     await pause(80)
     await shot('笔记本-1040-布局面板')
     const panelFit = await js(`(() => {
       const panel = document.querySelector('#mb-layout-menu .ws-panel');
-      const rect = panel.getBoundingClientRect();
+      const rect = document.querySelector('.mb-dialog').getBoundingClientRect();
       if (rect.left < -1 || rect.right > innerWidth + 1 || rect.top < -1 || rect.bottom > innerHeight + 1) return { ok:false, reason:'panel outside', rect:{ left:rect.left, top:rect.top, right:rect.right, bottom:rect.bottom } };
       for (const node of panel.querySelectorAll('button, input')) {
         const target = node.tagName === 'INPUT' ? (node.closest('label') ?? node) : node;
@@ -430,6 +432,7 @@ export async function run(window, bridge) {
 
     await click('#mb-layout-side-collapsed')
     await pause(120)
+    await closeLayout()
     assert.equal(await js("getComputedStyle(document.querySelector('.mb-side')).display"), 'none', '折叠后侧栏隐藏')
     const expandRect = await js(`(() => {
       const node = document.querySelector('.mb-bar .toolbar-actions .ws-expand');
@@ -445,15 +448,18 @@ export async function run(window, bridge) {
     await pause(150)
     assert.equal(await js("getComputedStyle(document.querySelector('.mb-side')).display"), 'flex', '展开按钮能恢复侧栏')
 
+    await openLayout()
     await click('#mb-layout-focus')
+    await closeLayout()
     await pause(120)
     assert.equal(await js("document.querySelector('.mb-shell').dataset.mbFocus"), 'on', '已进入专注模式')
-    assert.equal(await js("document.querySelector('#mb-layout-menu').open"), false, '进入专注时布局菜单应关闭')
+    assert.equal(await js("Boolean(document.querySelector('.mb-dialog[open]'))"), false, '进入专注后关闭设置')
     await js("document.dispatchEvent(new KeyboardEvent('keydown', { key:'Escape', bubbles:true, cancelable:true }))")
     await pause(120)
     assert.equal(await js("document.querySelector('.mb-shell').dataset.mbFocus"), 'off', '一次 Esc 退出专注')
 
     // 再次折叠并重载渲染器（等价于重启窗口后的首帧）：折叠状态从库里读回。
+    await openLayout()
     await click('#mb-layout-side-collapsed')
     await pause(120)
     let persisted = false
@@ -466,7 +472,7 @@ export async function run(window, bridge) {
     window.webContents.reload()
     await pause(400)
     await until("document.body.dataset.mode==='mistakebook'", '重载后回到笔记本')
-    await until("document.querySelector('#mb-layout-menu')!==null", '重载后布局菜单重建')
+    await openLayout()
     await until("document.querySelector('.mb-shell')?.dataset.mbSide==='collapsed'", '重载后仍是折叠状态（重启不丢）')
     assert.equal(await js("getComputedStyle(document.querySelector('.mb-side')).display"), 'none', '重载后侧栏仍折叠')
     const expandAfterReload = await js(`(() => {
@@ -477,6 +483,7 @@ export async function run(window, bridge) {
     })()`)
     assert.ok(expandAfterReload && expandAfterReload.display !== 'none', '重载后展开按钮仍可见')
     assert.ok(expandAfterReload.left >= 0 && expandAfterReload.right <= 1040 + 1 && expandAfterReload.top >= 0 && expandAfterReload.bottom <= 650 + 1, '重载后展开按钮仍在视口内')
+    await closeLayout()
     await click('.mb-bar .toolbar-actions .ws-expand')
     await pause(150)
     assert.equal(await js("getComputedStyle(document.querySelector('.mb-side')).display"), 'flex', '重载后展开按钮仍能恢复侧栏')

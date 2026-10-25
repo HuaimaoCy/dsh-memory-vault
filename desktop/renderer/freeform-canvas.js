@@ -48,9 +48,8 @@ export function createCanvasView(options) {
   const stateChip = h('button', { type: 'button', class: 'mb-canvas-save cap', id: 'mb-canvas-save-state', title: '画布保存状态；失败时点击重试', text: '已保存' })
   const picker = h('select', { class: 'select', id: 'mb-canvas-picker', 'aria-label': '切换画布' })
   const zoomLabel = h('span', { class: 'mb-canvas-zoom-label', id: 'mb-canvas-zoom', text: '100%' })
-  const undoButton = h('button', { type: 'button', class: 'mb-canvas-icon', id: 'mb-canvas-undo', title: '撤销 · Ctrl / ⌘ Z', 'aria-label': '撤销', disabled: true, onClick: () => undo() }, icon('refresh'))
-  const redoButton = h('button', { type: 'button', class: 'mb-canvas-icon', id: 'mb-canvas-redo', title: '重做 · Ctrl / ⌘ Shift Z', 'aria-label': '重做', disabled: true, onClick: () => redo() }, icon('refresh'))
-  redoButton.classList.add('flip')
+  const undoButton = h('button', { type: 'button', class: 'mb-canvas-icon', id: 'mb-canvas-undo', title: '撤销 · Ctrl / ⌘ Z', 'aria-label': '撤销', disabled: true, onClick: () => undo() }, icon('undo'))
+  const redoButton = h('button', { type: 'button', class: 'mb-canvas-icon', id: 'mb-canvas-redo', title: '重做 · Ctrl / ⌘ Shift Z', 'aria-label': '重做', disabled: true, onClick: () => redo() }, icon('redo'))
 
   const surface = h('div', {
     class: 'mb-canvas-surface', id: 'mb-canvas-surface', tabindex: '0', role: 'application',
@@ -61,25 +60,24 @@ export function createCanvasView(options) {
   surface.append(world, hint)
 
   const bar = h('div', { class: 'mb-canvas-bar', id: 'mb-canvas-bar' },
-    h('button', { type: 'button', class: 'btn ghost mb-canvas-back', id: 'mb-canvas-back', title: '回到笔记列表（Esc）', onClick: () => void close() }, [icon('chevron-right'), '回到笔记']),
-    h('span', { class: 'mb-canvas-bar-sep' }),
-    picker,
+    h('div', {class:'mb-canvas-title-group', 'data-glass-surface':'float'},
+      h('button', { type: 'button', class: 'mb-canvas-icon mb-canvas-back', id: 'mb-canvas-back', title: '回到笔记列表（Esc）', 'aria-label':'回到笔记', onClick: () => void close() }, icon('chevron-right')),
+      picker),
+    h('div', {class:'mb-canvas-actions', 'data-glass-surface':'float'},
     h('button', { type: 'button', class: 'mb-canvas-icon', id: 'mb-canvas-new', title: '新建画布', 'aria-label': '新建画布', onClick: () => void newCanvas() }, icon('plus')),
     h('button', { type: 'button', class: 'mb-canvas-icon', id: 'mb-canvas-rename', title: '重命名当前画布', 'aria-label': '重命名当前画布', onClick: () => void renameActive() }, icon('pen')),
     h('button', { type: 'button', class: 'mb-canvas-icon danger', id: 'mb-canvas-delete', title: '删除当前画布', 'aria-label': '删除当前画布', onClick: () => void deleteActive() }, icon('close')),
-    h('span', { class: 'spacer' }),
-    h('span', { class: 'mb-canvas-hintline cap', text: '拖动空白平移 · 滚轮缩放 · Shift 多选 · Delete 删除 · Ctrl Z 撤销' }),
-    stateChip)
+    stateChip))
 
-  const tools = h('div', { class: 'mb-canvas-tools', id: 'mb-canvas-tools', role: 'toolbar', 'aria-label': '添加卡片' },
+  const tools = h('div', { class: 'mb-canvas-tools', id: 'mb-canvas-tools', role: 'toolbar', 'aria-label': '画布工具', 'data-glass-surface':'float' },
+    undoButton, redoButton,
+    h('span', { class: 'mb-canvas-bar-sep' }),
     h('button', { type: 'button', class: 'mb-canvas-tool', id: 'mb-canvas-text', title: '添加文本卡片', onClick: () => addKind('text') }, [icon('note'), h('span', { text: '文本' })]),
     h('button', { type: 'button', class: 'mb-canvas-tool', id: 'mb-canvas-sticky', title: '添加便签', onClick: () => addKind('sticky') }, [icon('pen'), h('span', { text: '便签' })]),
     h('button', { type: 'button', class: 'mb-canvas-tool', id: 'mb-canvas-reference', title: '引用现有笔记', onClick: () => void pickReference() }, [icon('book'), h('span', { text: '笔记' })]),
     h('button', { type: 'button', class: 'mb-canvas-tool', id: 'mb-canvas-link', title: '把选中的两张卡片连起来', onClick: () => linkSelected() }, [icon('layers'), h('span', { text: '连接' })]))
 
-  const zoomControls = h('div', { class: 'mb-canvas-zoom', id: 'mb-canvas-zoom-controls' },
-    undoButton, redoButton,
-    h('span', { class: 'mb-canvas-bar-sep' }),
+  const zoomControls = h('div', { class: 'mb-canvas-zoom', id: 'mb-canvas-zoom-controls', 'data-glass-surface':'float' },
     h('button', { type: 'button', class: 'mb-canvas-icon', id: 'mb-canvas-zoom-out', title: '缩小', 'aria-label': '缩小', onClick: () => zoomStep(1 / 1.25) }, '−'),
     zoomLabel,
     h('button', { type: 'button', class: 'mb-canvas-icon', id: 'mb-canvas-zoom-in', title: '放大', 'aria-label': '放大', onClick: () => zoomStep(1.25) }, '＋'),
@@ -320,15 +318,8 @@ export function createCanvasView(options) {
         h('button', { type: 'button', class: 'btn primary', id: 'mb-canvas-hint-new', onClick: () => void newCanvas() }, '新建画布')))
       return
     }
-    if (canvas.cards.length) { hint.hidden = true; hint.replaceChildren(); return }
-    hint.hidden = false
-    hint.replaceChildren(h('div', { class: 'mb-canvas-hint-card' },
-      h('strong', { text: '从第一张卡片开始' }),
-      h('p', { class: 'cap', text: '拖动空白处平移，滚轮以指针为中心缩放；卡片可以随意拖动、缩放，也能把两篇笔记连起来。' }),
-      h('div', { class: 'row mb-canvas-hint-actions' },
-        h('button', { type: 'button', class: 'btn primary', id: 'mb-canvas-hint-text', onClick: () => addKind('text') }, '文本'),
-        h('button', { type: 'button', class: 'btn', id: 'mb-canvas-hint-sticky', onClick: () => addKind('sticky') }, '便签'),
-        h('button', { type: 'button', class: 'btn', id: 'mb-canvas-hint-reference', onClick: () => void pickReference() }, '引用笔记'))))
+    hint.hidden = true
+    hint.replaceChildren()
   }
   function paintHistory() {
     undoButton.disabled = history.past.length === 0

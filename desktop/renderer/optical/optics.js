@@ -6,6 +6,7 @@
  * 少任何一步都退化成「磨砂白玻璃」。
  */
 import { normalAt } from './surface.js'
+import { signedDistance } from './geometry.js'
 
 /**
  * 单界面 Snell 折射。入射光 I 从空气进入玻璃（IOR = ior），法线 N 指向玻璃外部；
@@ -65,7 +66,7 @@ export function dispersionIors({ ior = 1.5, dispersion = 0 }) {
  * 编码约定（与 CSS `feDisplacementMap` 对齐）：通道 128 为中性，
  *   c = 128 + (d / maxAbs) · 127
  * 滤镜幅值取 `filterScale = 2·maxAbs`，于是 `feDisplacementMap` 的位移
- *   S·(c/255 − 0.5) = 2·maxAbs · (d/maxAbs · 127/255) ≈ d
+ * 后端先用线性通道变换将 128 精确对齐 .5，再由 S·(c−128)/254 还原位移。
  * 即「贴图里存的是归一化方向，幅值由滤镜的 scale 属性给出」——这样同一张贴图
  * 可以在不同强度档位复用，只需要改一个属性。
  *
@@ -81,6 +82,7 @@ export function buildDisplacementMap({
   ior = 1.5,
   displacementScale = 30,
   profile = 'smooth',
+  lensStrength = 0,
 }) {
   const w = Math.max(Math.round(width) || 1, 1)
   const h = Math.max(Math.round(height) || 1, 1)
@@ -88,8 +90,11 @@ export function buildDisplacementMap({
   let maxAbs = 0
   for (let y = 0; y < h; y++) {
     for (let x = 0; x < w; x++) {
+      const distance = signedDistance({x:x+.5,y:y+.5,width:w,height:h,radius})
+      if(distance>=0 || (distance<=-bezelWidth && !lensStrength))continue
       const normal = normalAt({ x: x + 0.5, y: y + 0.5, width: w, height: h, radius, bezelWidth, thickness, profile })
       const shift = displacement({ height: normal.height, normal, ior, scale: displacementScale })
+      if(lensStrength){const weight=Math.min(1,-distance/2);shift.x-=(x+.5-w/2)*lensStrength*weight;shift.y-=(y+.5-h/2)*lensStrength*weight}
       const index = (y * w + x) * 2
       shifts[index] = shift.x
       shifts[index + 1] = shift.y
@@ -104,7 +109,8 @@ export function buildDisplacementMap({
     data[i * 4] = cx
     data[i * 4 + 1] = cy
     data[i * 4 + 2] = cx
-    data[i * 4 + 3] = cy
+    // 位移仅使用 R/G。alpha 必须不透明，避免 PNG 预乘污染中性区。
+    data[i * 4 + 3] = 255
   }
   return {
     width: w,
@@ -117,6 +123,31 @@ export function buildDisplacementMap({
 }
 
 const clampByte = value => Math.max(0, Math.min(255, Math.round(value)))
+
+/** 同一法线场上的 Fresnel 轮廓反射。中央不铺白，亮暗只集中在倒角。 */
+export function buildReflectionMap({ width, height, radius = 0, bezelWidth = 12, thickness = 6, ior = 1.46, profile = 'arc' }) {
+  const w = Math.max(1, Math.round(width)), h = Math.max(1, Math.round(height))
+  const data = new Uint8ClampedArray(w * h * 4)
+  const frost = new Uint8ClampedArray(w * h * 4)
+  const edge = new Uint8ClampedArray(w * h * 4)
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    const d = -signedDistance({x:x+.5,y:y+.5,width:w,height:h,radius})
+    const i = (y*w+x)*4
+    const t = Math.min(1,Math.max(0,d/bezelWidth))
+    frost[i]=255;frost[i+1]=255;frost[i+2]=255;frost[i+3]=clampByte(t*t*(3-2*t)*255)
+    edge[i]=255;edge[i+1]=255;edge[i+2]=255;edge[i+3]=255-frost[i+3]
+    if (d < 0 || d > bezelWidth) continue
+    const n = normalAt({ x:x+.5, y:y+.5, width:w, height:h, radius, bezelWidth, thickness, profile })
+    const facing = n.x * -.6 + n.y * -.8
+    const rim = Math.pow(Math.max(0, 1 - d / 3.5), 1.5)
+    const reflection = fresnel({ cosTheta:n.z, ior })
+    const light = facing > 0
+    const strength = rim * (light ? .18 + .48 * facing + reflection * .8 : .09 + .25 * -facing + reflection * .24)
+    const color = light ? [255,255,255] : [36,58,76]
+    data[i]=color[0];data[i+1]=color[1];data[i+2]=color[2];data[i+3]=clampByte(Math.min(.9,strength)*255)
+  }
+  return { width:w, height:h, data, frostMask:{width:w,height:h,data:frost}, edgeMask:{width:w,height:h,data:edge} }
+}
 
 /**
  * 把位移贴图编码成 PNG data URI（SVG feImage 只认 data:，`file://` 与打包相对路径都会失败）。

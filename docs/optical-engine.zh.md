@@ -7,6 +7,12 @@
 本文只写实现与实测；设计依据与第三方对照见 `docs/liquid-glass.zh.md`、
 `docs/liquid-glass-compare.zh.md`。
 
+2026-10-25 集成更新：应用默认请求 full，并在两个产品的「外观」面板提供三档选择。
+SVG 后端覆盖两侧工具条、搜索框与浮层；ResizeObserver 跟踪元素尺寸变化。
+滤镜与位移贴图缓存各限制在 16 项，仅回收未使用条目；卸载与节点移除时释放绑定。
+当前浏览器及真实 Electron 验证见 `tests/preview-liquid-glass.mjs`、`tests/desktop-liquid-glass.mjs`；
+下文早期批次关于「真机未测」的描述已由本轮 file://、1440/1040px 与材质切换测试补充。
+
 ---
 
 ## 1. 模块边界

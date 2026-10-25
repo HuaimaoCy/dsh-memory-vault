@@ -42,7 +42,8 @@ const withApp = async (run, { width = 1440, height = 940, tier = 'balanced' } = 
   try {
     await session.goto(base)
     await session.waitFor(`!document.getElementById('alaya-startup') && document.querySelector('[data-glass-surface]')`, { timeout: 30000 })
-    if (tier !== 'balanced') { await session.evaluate(`window.alayaGlass.setTier('${tier}')`); await sleep(600) }
+    await session.evaluate(`window.alayaGlass.setTier('${tier}')`)
+    await sleep(600)
     await sleep(300)
     return await run(session, base)
   } finally { await session.close(); server.close() }

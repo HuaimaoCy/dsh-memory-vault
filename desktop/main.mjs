@@ -10,6 +10,7 @@ import { createModelAdapter, validateModelSettings } from '../src/model.js'
 import { validateVaultFile } from './lib/databases.mjs'
 import { createDesktopUpdater } from './lib/updates.mjs'
 import { MistakebookStore } from '../addons/mistakebook/store.mjs'
+import { NOTEBOOK_DISPLAY_VERSION, NOTEBOOK_RELEASE_NAME } from '../src/version.js'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const argv = process.argv.slice(1)
@@ -45,7 +46,7 @@ function checkDataTarget(path) {
 }
 async function desktopInfo() {
   return {
-    ...await bridge.info(), version: app.getVersion(), model: preferences.model ?? {}, hasKey: Boolean(preferences.encryptedKey), updates: updater.status(),
+    ...await bridge.info(), version: app.getVersion(), displayVersion:NOTEBOOK_DISPLAY_VERSION, releaseName:NOTEBOOK_RELEASE_NAME, model: preferences.model ?? {}, hasKey: Boolean(preferences.encryptedKey), updates: updater.status(),
     connectors: connectorConfig({
       command: process.execPath,
       args: [app.isPackaged ? join(process.resourcesPath, 'app.asar', 'bin', 'memory-vault.mjs') : resolve(here, '..', 'bin', 'memory-vault.mjs'), 'mcp'],

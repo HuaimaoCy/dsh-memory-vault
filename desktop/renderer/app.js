@@ -6,6 +6,8 @@ import { NOTEBOOK_TARGETS, mountQuickCapture } from './quick-capture.js'
 import { createStorageStore, mountWorkspaceLayout } from './workspace-layout.js'
 import { createLoadingStatus, runAlayaStartup } from './loading.js'
 import { mountGlass } from './glass.js'
+import { mountGlassAppearance, embedLayout } from './glass-appearance.js'
+import { mountLiquidMotion } from './liquid-motion.js'
 import { enterDialog, enterPanel } from './motion.js'
 import {
   GROUPING_LABELS, KIND_LABELS, SHAPE_LABELS, SORT_LABELS, UNGROUPED, normalizeFilters, normalizeSource, sourceEquals,
@@ -32,7 +34,9 @@ let capture = null
 installIcons()
 // 材质层：引擎只负责标记表面、分级、指针光源与按压状态，观感全在 glass.css。
 // 幂等，重复调用返回同一实例；Node/无 DOM 环境下自动退化成 flat，不阻断启动。
-const glass = mountGlass({ tier: 'balanced' })
+const glass = mountGlass({ tier: 'full' })
+mountLiquidMotion()
+const appearance = mountGlassAppearance({ glass })
 
 function h(tag, props = {}, ...children) {
   const node = document.createElement(tag)
@@ -487,11 +491,8 @@ function render() {
   const searching = Boolean(state.query)
   el('view-title').textContent = searching ? '搜索结果' : state.current.name
   el('breadcrumb').textContent = label
-  el('view-description').textContent = searching ? `找到 ${state.nextOffset === null ? '' : '至少 '}${state.shown} 条相关记忆。` : state.view.kind === 'hidden' ? '暂时收起的记忆，随时可以恢复。' : state.view.id === 'conversation' ? '留住对话里的线索、进展与上下文。' : state.view.id === 'knowledge' ? '值得复用的知识，下一次也用得上。' : state.view.kind === 'group' ? '围绕一个主题，整理值得保留的内容。' : '让知识、灵感与约定各归其位。'
   renderSearchContext()
   el('view-count').textContent = `${state.nextOffset === null ? '' : '≥'}${state.shown}`
-  el('foot-left').textContent = `${state.data.groups.length} 个记忆组 · ${state.data.stats.totals.entries} 条可见记忆 · ${state.data.stats.hidden} 条隐藏`
-  el('foot-right').title = state.info.databasePath
   el('curate').disabled = el('curate-review').disabled = !state.info.model.baseUrl
   el('curate').title = el('curate-review').title = state.info.model.baseUrl ? '会调用设置中的 AI 服务' : '先在设置中配置 AI 服务'
   el('curation-hint').textContent = state.info.model.baseUrl ? '先预览建议，再决定是否整理保存。整理范围覆盖整个数据库。' : '连接 AI 服务后，即可预览整理建议。'
@@ -576,6 +577,8 @@ function settings() {
   const limits = state.data.limits
   const limitControls = ['maxEntries', 'maxChars', 'baseMaxEntries', 'baseMaxChars'].map((name, i) => field(['知识条数', '知识字符预算', '底层约定条数', '底层约定字符预算'][i], h('input', { class: 'input', type: 'number', min: 1, value: limits[name], 'data-limit': name })))
   const panels = [
+    ['appearance', '外观', 'sparkles', appearance.createPanel()],
+    ['layout', '布局', 'grid', embedLayout(layout.menu)],
     ['general', '通用', 'database',
       h('section', { class: 'col' }, h('h3', { text: '当前数据库' }), h('p', { class: 'cap', text: '记忆保存在本机。打开其他数据库，或为当前内容留一份备份。' }),
         h('code', { class: 'path-box', text: info.databasePath }),
@@ -584,7 +587,7 @@ function settings() {
           const result = await desktop('open')
           if (result) { state.selected = null; state.dirty = false; state.view = { kind: 'all' }; await load(); settings(); say('数据库已切换', 'ok') }
         }), button('备份数据库', async () => { const result = await desktop('backup'); if (result) say(`备份已保存：${result.path}`, 'ok') }))),
-      h('section', {}, h('div', { class: 'settings-info' }, icon('vault'), h('div', {}, h('strong', { text: `Alaya ${info.version}` }), h('p', { text: '独立桌面数据库 · 支持 Codex 与 DSH 接口' }))))],
+      h('section', {}, h('div', { class: 'settings-info' }, icon('vault'), h('div', {}, h('strong', { text: `Alaya ${info.displayVersion??info.version}` }), h('p', { text: info.releaseName??'独立桌面数据库 · 支持 Codex 与 DSH 接口' }))))],
     ['model', 'AI 服务', 'sparkles',
       h('section', { class: 'col' }, h('h3', { text: '连接 AI 服务' }), h('p', { class: 'cap', text: '可选。用于预览和整理记忆。候选内容会发送到你配置的服务；密钥在本机加密保存。' }),
         field('服务地址（含 /v1 等前缀，不含 /chat/completions）', url), field('模型名称', model), field('API 密钥', key), h('label', { class: 'row cap' }, clearKey, '删除已保存密钥'),
@@ -834,9 +837,10 @@ for (const [id, shape] of SHAPE_BUTTONS) el(id).addEventListener('click', () => 
 el('sort').title = '对已加载的记忆排序；加载更多后一起排序'
 el('sort').addEventListener('change', () => { if (el('sort').value !== state.current.sort) updateView({ sort: el('sort').value }) })
 el('view-settings').addEventListener('click', () => viewSettings())
-el('new-view').addEventListener('click', () => void guard(async () => { await saveViewAs(); viewSettings() }))
+el('new-view')?.addEventListener('click', () => void guard(async () => { await saveViewAs(); viewSettings() }))
 el('manage-groups').addEventListener('click', () => void guard(async () => { if (await discard()) groupManager() }))
-el('settings').addEventListener('click', () => void guard(async () => { if (await discard()) settings() }))
+el('settings').addEventListener('click', () => void guard(async () => settings()))
+el('workspace-settings').addEventListener('click', () => { state.settingsTab='appearance';void guard(async()=>settings()) })
 // 右上角圆形头像（若该版本没有这一颗按钮，就跳过，不阻断启动）。
 el('avatar')?.addEventListener('click', () => void guard(async () => { if (await discard()) settings() }))
 el('curation-setup').addEventListener('click', () => void guard(async () => { if (await discard()) { state.settingsTab = 'model'; settings() } }))
@@ -873,11 +877,11 @@ el('query').addEventListener('keydown', event => {
 // 与笔记本写在 notebook prefs 里的布局偏好互不影响。
 const layout = mountWorkspaceLayout({
   shell: document.querySelector('.app-shell'),
-  host: el('layout-host'),
+  host: document.createElement('div'),
   store: createStorageStore(),
   icon,
   onStatus: (message, tone) => say(message, tone),
-  expandHost: document.querySelector('.dock .breadcrumb'),
+  expandHost: document.querySelector('.bar .breadcrumb'),
   focusExitHost: document.querySelector('.bar .toolbar-actions'),
   escapeGuard: () => !state.selected && !state.dirty,
 })
@@ -960,7 +964,7 @@ document.addEventListener('keydown', event => {
 })
 document.addEventListener('click', event => { if (!el('curation-menu').contains(event.target)) el('curation-menu').open = false })
 window.addEventListener('focus', () => { if (document.body.dataset.mode !== 'mistakebook' && !state.dirty && state.data && !document.querySelector('dialog[open]')) void guard(() => load()) })
-mountMistakebook({ beforeEnter: async () => {
+mountMistakebook({ appearance, beforeEnter: async () => {
   if (state.busy || document.querySelector('dialog[open]') || !await discard()) return false
   state.dirty = false; state.selected = null; state.draft = null; render(); return true
 } })
