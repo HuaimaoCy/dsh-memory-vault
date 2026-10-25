@@ -322,9 +322,13 @@ export function mountMistakebook({ beforeEnter }) {
       button([icon('settings'), '笔记本设置'], openSettings, false, { class: 'nav', id: 'mb-settings' }))),
     sideSplitter,
     h('div', { class: 'mb-workspace' }, h('header', { class: 'mb-bar' },
-      // 与数据库侧同一个顶端结构：左侧圆形搜索，右侧胶囊（视图名 + 画布/录入/新建笔记）。
+      // 与数据库侧同一个顶端结构：左侧圆形搜索，右侧一条「新建」组。
       h('div', { class: 'bar-left' }, h('label', { class: 'search-wrap' }, icon('search'), search)),
-      h('div', { class: 'toolbar-actions' }, h('div', { class: 'breadcrumb' }, icon('book'), h('span', { text: '笔记本' })), button([icon('layers'), '画布'], () => openCanvas(), false, { id: 'mb-canvas-button', title: '打开自由画布' }), button('录入', () => openImport(), false, { id: 'mb-import', title: '识别或粘贴，导入错题、笔记与词汇' }), button([icon('plus'), '新建笔记'], openCreate, true, { id: 'mb-new' }))),
+      h('div', { class: 'toolbar-actions' },
+        button([icon('plus'), '新建'], openCreate, true, { id: 'mb-new', title: '新建笔记 · 也可以画布或录入' }),
+        h('span', { class: 'split-divider', 'aria-hidden': 'true' }),
+        button('画布', () => openCanvas(), false, { id: 'mb-canvas-button', class: 'btn ghost', title: '打开自由画布' }),
+        button('录入', () => openImport(), false, { id: 'mb-import', class: 'btn ghost', title: '识别或粘贴，导入错题、笔记与词汇' }))),
       h('div', { class: 'mb-body' }, h('main', { class: 'mb-main' }, h('div', { class: 'mb-page-heading' }, h('div', {}, heading, subtitle), h('div', { class: 'mb-total', id: 'mb-total' })),
         h('div', { class: 'mb-board' }, order, h('span', { class: 'spacer' }), button('AI 助手', toggleAISide, false, { class: 'btn soft', id: 'mb-ai-toggle', title: '打开 AI 学习助手侧边栏' }), button('查词典', openLookup, false, { class: 'btn soft', id: 'mb-lookup', title: '查一个单词，自动存入单词库；重复查询累计背诵次数' }), button('单词检测', openQuiz, false, { class: 'btn soft', id: 'mb-quiz' }), pickButton, moreMenu), searchFilter, list), detailSplitter, detail),
       h('footer', { class: 'mb-foot' }, h('span', { text: '笔记本 · 本地保存' }), h('span', { class: 'spacer' }))), jsonPicker, h('div', { id: 'mb-status', class: 'mb-status', role: 'status', 'aria-live': 'polite' }))

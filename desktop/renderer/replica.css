@@ -1,0 +1,207 @@
+/* ============================================================================
+ * 0.8 光学材质：环境色背景 + 非均匀玻璃着色 + 白色厚边 + 轮廓高光
+ *
+ * 依据用户给的示意图（340×210 那张 SVG）：
+ *   - 背景是三段式极淡渐变（#e7f1ed → #f5f6f3 → #edf1fa），给玻璃提供「可采样的真实背景」；
+ *   - 玻璃是**对角方向的 alpha 渐变**（.82 → .28 → .6）配 1.5px 白边，而不是均匀白底；
+ *   - 侧栏与右上胶囊是玻璃，内容卡片是实心（Solid Content）。
+ * 这三条是「看得出是玻璃」的关键，比单纯提高模糊度有效得多。
+ *
+ * 本文件只覆盖视觉：id、挂载点、数据流都不动（#view-*、#query、#new、#refresh 仍在原处）。
+ * ========================================================================== */
+
+/* ---------- 环境色背景：让玻璃背后真的有色与层次 -------------------------- */
+
+:root {
+  --ambient-a: #e7f1ed;
+  --ambient-b: #f5f6f3;
+  --ambient-c: #edf1fa;
+}
+
+html, body { background: var(--ambient-b); }
+
+/* 环境色层必须是 z-index:-1 + 父级 isolation：写在 0 上会盖住所有未定位的内容
+   （标题与工具栏首当其冲），这是这类「铺底层」最常踩的坑。 */
+.app-shell { position: relative; isolation: isolate; }
+
+.app-shell::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  background-image:
+    radial-gradient(60% 45% at 6% 4%, rgb(255 246 236 / .75), transparent 72%),
+    radial-gradient(55% 50% at 96% 96%, rgb(232 240 255 / .70), transparent 72%),
+    linear-gradient(135deg, var(--ambient-a) 0%, var(--ambient-b) 52%, var(--ambient-c) 100%);
+  pointer-events: none;
+}
+
+/* 工作区与侧栏透明，让环境色透上来 */
+.app-shell, .app-shell .workspace, .app-shell .body, .app-shell .main { background-color: transparent; }
+
+/* ---------- 玻璃：对角 alpha 渐变 + 白厚边 --------------------------------- */
+
+/* 示意图里玻璃的「厚度」来自两件事：alpha 沿对角线变化，以及一条亮白描边。
+   这里把它做成令牌，三类面（侧栏 / 胶囊 / 圆钮）共用，只是半径与厚度不同。 */
+/* 示意图里的玻璃不是「刷白」：内部要透明到能看见背景的位移，亮度集中在那条 1.5px 白边上。
+   之前把 .82 的alpha铺在最上缘，正好把边缘折射糊掉了——这就是「加了折射却看不出」的原因。 */
+:root {
+  --glass-sheen: linear-gradient(
+    135deg,
+    rgb(255 255 255 / .46) 0%,
+    rgb(255 255 255 / .20) 50%,
+    rgb(255 255 255 / .34) 100%
+  );
+  --glass-rim-white: rgb(255 255 255 / .92);
+  --glass-edge-dark: rgb(20 26 38 / .07);
+}
+
+/* 侧栏：玻璃面板（背后有环境色，所以它现在是有色的、会随位置变化） */
+.side[data-glass-surface]::after,
+.mb-side[data-glass-surface]::after {
+  background-image:
+    radial-gradient(
+      circle at calc(var(--glass-glare-x, .5) * 100%) calc(var(--glass-glare-y, .35) * 100%),
+      rgb(255 255 255 / calc(var(--glass-glare-o, 0) * var(--glass-glare))),
+      transparent 60%
+    ),
+    var(--glass-sheen);
+  border: 1.5px solid var(--glass-rim-white);
+  box-shadow:
+    inset 0 0 0 1px rgb(255 255 255 / .28),
+    inset 0 -14px 28px -22px rgb(20 26 38 / .28),
+    0 1px 2px rgb(20 26 38 / .05),
+    0 20px 44px -30px rgb(20 26 38 / .38);
+}
+
+/* 右上胶囊：同一配方，更薄 */
+.bar[data-glass-surface]::after { display: none; }
+
+.bar .toolbar-actions[data-glass-surface],
+.mb-bar .toolbar-actions[data-glass-surface] {
+  background-image:
+    radial-gradient(
+      circle at calc(var(--glass-glare-x, .5) * 100%) calc(var(--glass-glare-y, .35) * 100%),
+      rgb(255 255 255 / calc(var(--glass-glare-o, 0) * var(--glass-glare))),
+      transparent 58%
+    ),
+    var(--glass-sheen);
+  border: 1.5px solid var(--glass-rim-white);
+  box-shadow:
+    inset 0 0 0 1px rgb(255 255 255 / .20),
+    0 1px 2px rgb(20 26 38 / .05),
+    0 16px 36px -26px rgb(20 26 38 / .40);
+  backdrop-filter: blur(26px) saturate(1.85) brightness(1.03);
+  -webkit-backdrop-filter: blur(26px) saturate(1.85) brightness(1.03);
+}
+
+/* 搜索圆：独立的小型玻璃控制体（示意图里右上那枚小圆） */
+.search-wrap[data-glass-surface] {
+  background-image: var(--glass-sheen);
+  border: 1.5px solid var(--glass-rim-white);
+  box-shadow:
+    inset 0 0 0 1px rgb(255 255 255 / .22),
+    0 1px 2px rgb(20 26 38 / .06),
+    0 12px 26px -18px rgb(20 26 38 / .38);
+}
+
+/* 浮层沿用同一套光学配方（更不透明一点，保证小字） */
+.curation-popover[data-glass-surface],
+.ws-panel[data-glass-surface],
+.command-palette[data-glass-surface] {
+  border: 1.5px solid var(--glass-rim-white);
+  background-image:
+    linear-gradient(180deg, rgb(255 255 255 / .86) 0%, rgb(255 255 255 / .74) 100%);
+}
+
+/* ---------- 轮廓高光：随指针角度旋转的白边 --------------------------------- */
+
+/* 用 conic-gradient + mask 做一条只在边缘上的高光带；角度来自 --glass-rim-angle，
+   所以鼠标绕着面板转时，亮段也跟着绕——这是「玻璃有厚度」的动态线索。 */
+.side[data-glass-surface]::before,
+.bar .toolbar-actions[data-glass-surface]::before,
+.mb-side[data-glass-surface]::before {
+  content: '';
+  position: absolute;
+  inset: var(--glass-gutter);
+  z-index: 0;
+  border-radius: inherit;
+  padding: 1.5px;
+  background-image: conic-gradient(
+    from var(--glass-rim-angle, 180deg),
+    rgb(255 255 255 / .95) 0deg,
+    rgb(255 255 255 / .18) 70deg,
+    rgb(255 255 255 / .80) 150deg,
+    rgb(255 255 255 / .22) 230deg,
+    rgb(255 255 255 / .90) 320deg,
+    rgb(255 255 255 / .95) 360deg
+  );
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  mask-composite: exclude;
+  pointer-events: none;
+  opacity: .9;
+}
+
+.bar .toolbar-actions[data-glass-surface]::before { inset: 0; border-radius: inherit; }
+
+/* ---------- 排版与卡片 ---------------------------------------------------- */
+
+.page-heading { margin-bottom: 26px; align-items: flex-end; }
+
+.page-heading h1,
+h1 {
+  font-size: 40px;
+  font-weight: 700;
+  letter-spacing: -.6px;
+  line-height: 1.12;
+}
+
+.page-heading p { margin-top: 10px; font-size: 15px; line-height: 1.55; }
+.view-total strong { font-size: 26px; font-weight: 700; }
+.view-total span { font-size: 12px; }
+
+.sec-head { font-size: 20px; font-weight: 700; letter-spacing: -.2px; margin-bottom: 14px; }
+.sec-head .count { font-size: 12px; font-weight: 500; letter-spacing: 0; }
+
+.grid { grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 16px; }
+
+/* 内容卡保持实心（Solid Content）：只有一点描边和极小投影，不掺玻璃 */
+.tile {
+  min-height: 208px;
+  padding: 20px 20px 16px;
+  border-radius: 18px;
+  border: 1px solid rgb(20 26 38 / .05);
+  background: #fff;
+  box-shadow: 0 1px 2px rgb(20 26 38 / .04);
+}
+
+.tile-title { margin-bottom: 8px; font-size: 18px; font-weight: 650; line-height: 1.45; letter-spacing: -.15px; }
+.tile-body { font-size: 14px; line-height: 1.7; }
+.tile-footer { border-top: 1px solid rgb(20 26 38 / .05); padding-top: 12px; font-size: 12px; }
+.tile .tags { gap: 6px; margin-top: 12px; }
+.tile .tag { padding: 3px 9px; border-radius: 999px; background: rgb(20 26 38 / .05); font-size: 11px; }
+
+/* ---------- 笔记本「新建」组：画布、录入并进同一块 ------------------------ */
+
+.mb-bar .toolbar-actions .split-divider {
+  width: 1px;
+  height: 20px;
+  margin: 0 4px;
+  background: rgb(20 26 38 / .10);
+}
+
+.mb-bar .toolbar-actions .btn.ghost {
+  min-height: 30px;
+  padding: 4px 10px;
+  color: #000;
+  background: transparent;
+  box-shadow: none;
+}
+
+.mb-bar .toolbar-actions .btn.ghost:hover { background: rgb(20 26 38 / .05); }
+.mb-bar .toolbar-actions #mb-new { min-height: 32px; padding: 5px 14px; font-weight: 600; }
+
+/* 状态提示原来贴底，抬一点避免压住内容 */
+.status { bottom: 58px; }

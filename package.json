@@ -69,6 +69,7 @@
     "test:views": "node --no-warnings tests/views-smoke.mjs && node tests/run-desktop-views.mjs && node tests/run-desktop-views-scope.mjs",
     "test:canvas": "node --no-warnings tests/canvas-smoke.mjs && node tests/run-desktop-canvas.mjs && node tests/run-desktop-canvas-undo.mjs",
     "test:capture": "node --no-warnings tests/capture-smoke.mjs && node --no-warnings tests/run-desktop-capture-app.mjs",
-    "test:capture:module": "node --no-warnings tests/run-desktop-capture.mjs"
+    "test:capture:module": "node --no-warnings tests/run-desktop-capture.mjs",
+    "test:optical": "node tests/preview-optical.mjs"
   }
 }

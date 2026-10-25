@@ -165,6 +165,15 @@ function createInstance({ root, tier: initialTier, storageKey }) {
     // 只有用户显式选择才写偏好；挂载时的默认档不落盘，否则以后改默认值就再也
     // 影响不到这些用户（他们的 localStorage 里已经钉死了一个旧默认）。
     if (persist) writeStored(storageKey, value ?? null)
+    // full 档就是折射档：进入时按需加载 glass-refraction，离开时撤掉。
+    // 动态 import 而不是静态引入：balanced/flat 的用户不该为这 5KB 与滤镜生成付费。
+    if (typeof window !== 'undefined') {
+      import('./glass-refraction.js').then(module => {
+        if (destroyed) return
+        if (resolved === 'full') module.enableRefraction(doc)
+        else module.disableRefraction(doc)
+      }).catch(() => { /* 实验模块缺失时保持纯 CSS 材质 */ })
+    }
     host.dispatchEvent(new CustomEvent('glass:tier', { bubbles: true, detail: { tier: resolved, capabilities: { ...capabilitiesNow() } } }))
     return resolved
   }

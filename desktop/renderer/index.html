@@ -11,6 +11,8 @@
   <link rel="stylesheet" href="views.css" />
   <!-- 材质层最后加载：玻璃令牌与表面基元要赢得层叠，但不改布局几何。 -->
   <link rel="stylesheet" href="glass.css" />
+  <!-- 参照图复刻层：排版阶梯、素材卡、底部导航与头像。放在最后，覆盖前两层。 -->
+  <link rel="stylesheet" href="replica.css" />
 </head>
 <body data-mode="memory">
   <div id="alaya-startup" class="alaya-startup" aria-label="Alaya 正在启动"><div class="alaya-loader"><div class="alaya-stage" aria-hidden="true"></div></div></div>
@@ -32,16 +34,16 @@
     </aside>
     <div class="workspace">
       <header class="bar">
-        <!-- 顶端从左到右：侧栏 → 圆形搜索 → 右侧胶囊（视图名、布局、刷新、捕获、新建）。
-             新建在胶囊最右，是顶端唯一的主操作。 -->
+        <!-- 结构按用户给的示意图：左侧玻璃侧栏 → 紧接一枚小搜索圆 → 右上一条玻璃胶囊。
+             内容卡片保持实心（示意标注 Solid Content）。 -->
         <div class="bar-left">
           <label class="search-wrap" title="搜索记忆 · Ctrl F"><span data-icon="search"></span><input id="query" class="search" type="search" placeholder="搜索当前范围" aria-label="搜索当前范围的记忆，空格分隔多个关键词" aria-describedby="search-hint" autocomplete="off" /><kbd>Ctrl F</kbd></label>
         </div>
         <div class="toolbar-actions">
           <div class="breadcrumb"><span data-icon="library"></span><span id="breadcrumb">全部记忆</span></div>
           <div id="layout-host" class="ws-layout-host"></div>
-          <button id="refresh" class="icon-button" title="刷新记忆" aria-label="刷新记忆"><span data-icon="refresh"></span></button>
           <button id="capture" class="icon-button" title="快速捕获到记忆或笔记 · Ctrl+Shift+N" aria-label="快速捕获到记忆或笔记，快捷键 Ctrl Shift N" aria-keyshortcuts="Control+Shift+n Meta+Shift+n"><span data-icon="plus"></span></button>
+          <button id="refresh" class="icon-button" title="刷新记忆" aria-label="刷新记忆"><span data-icon="refresh"></span></button>
           <button id="new" class="btn primary" title="新建记忆 · Ctrl+N"><span data-icon="plus"></span><span>新建</span></button>
         </div>
       </header>

@@ -837,6 +837,8 @@ el('view-settings').addEventListener('click', () => viewSettings())
 el('new-view').addEventListener('click', () => void guard(async () => { await saveViewAs(); viewSettings() }))
 el('manage-groups').addEventListener('click', () => void guard(async () => { if (await discard()) groupManager() }))
 el('settings').addEventListener('click', () => void guard(async () => { if (await discard()) settings() }))
+// 右上角圆形头像（若该版本没有这一颗按钮，就跳过，不阻断启动）。
+el('avatar')?.addEventListener('click', () => void guard(async () => { if (await discard()) settings() }))
 el('curation-setup').addEventListener('click', () => void guard(async () => { if (await discard()) { state.settingsTab = 'model'; settings() } }))
 el('refresh').addEventListener('click', () => void guard(async () => { if (await discard()) { state.selected = null; state.draft = null; state.dirty = false; await load(); say('已刷新', 'ok') } }))
 let timer, composing = false
@@ -875,7 +877,7 @@ const layout = mountWorkspaceLayout({
   store: createStorageStore(),
   icon,
   onStatus: (message, tone) => say(message, tone),
-  expandHost: document.querySelector('.bar .breadcrumb'),
+  expandHost: document.querySelector('.dock .breadcrumb'),
   focusExitHost: document.querySelector('.bar .toolbar-actions'),
   escapeGuard: () => !state.selected && !state.dirty,
 })
