@@ -58,6 +58,7 @@
     "preview": "node tests/preview-app.mjs --serve",
     "shot": "node tests/preview-app.mjs --shot test-tmp/preview/ui.png",
     "shot:glass": "node tests/preview-glass.mjs",
+    "test:acceptance": "node tests/preview-acceptance.mjs",
     "desktop": "npm --prefix desktop start",
     "build:desktop": "npm --prefix desktop run build",
     "mcp": "node --no-warnings bin/memory-vault.mjs mcp",

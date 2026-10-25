@@ -39,12 +39,14 @@
   --glass-shadow: 0 1px 2px rgb(22 34 59 / .05), 0 12px 32px -20px rgb(22 34 59 / .30);
   --glass-shadow-float: 0 1px 2px rgb(22 34 59 / .06), 0 20px 48px -22px rgb(22 34 59 / .36);
 
-  /* 圆角必须与元素自身的 border-radius 对齐，否则斜面会露到圆角外 */
+  /* 圆角：材质层统一 90°（直角）。令牌留在这里是为了以后要恢复圆角时改一处即可；
+     真正的取值见下方「直角与内缩」一节——元素自身的 border-radius 在 styles.css 里，
+     需要在材质层覆盖。 */
   --glass-radius-chrome: 0px;
   --glass-radius-panel: 0px;
-  --glass-radius-float: 16px;
-  --glass-radius-control: 8px;
-  --glass-radius-hud: 12px;
+  --glass-radius-float: 0px;
+  --glass-radius-control: 0px;
+  --glass-radius-hud: 0px;
 
   /* 指针光源上限：指针位置只改梯度位置，不改亮度总量 */
   --glass-glare: .55;
@@ -94,6 +96,44 @@
   --glass-glare: .18;
 }
 
+/* ---------- 直角与内缩 ---------------------------------------------------- */
+
+/* 设计口径（0.7.23 评审）：玻璃面一律 90° 直角；面里的文字与显示内容居中，
+   并与四边保持同样的距离。直角在这里覆盖元素自身的圆角（styles.css 里的
+   .btn / .curation-popover / .search-wrap 等都自带圆角），内容层（卡片、标签、
+   缩略图）不受影响——它们是内容，不是材质。 */
+[data-glass-surface],
+.segmented,
+.palette-item,
+.ws-segment,
+.ws-preset,
+.ws-panel,
+.curation-popover,
+.search-wrap {
+  border-radius: 0;
+}
+
+/* 单行控件：内容居中并与四边等距；高度已经由既有规则定好，这里只改对齐。 */
+.btn[data-glass-surface],
+.icon-button[data-glass-surface],
+.segment[data-glass-surface],
+[data-glass-surface="hud"],
+[data-glass-surface="control"] {
+  align-items: center;
+  justify-content: center;
+}
+
+/* 侧栏导航是多列结构（图标 + 名称 + 计数），居中会破坏扫描路径：
+   只要求与边框等距，不强制居中。 */
+.nav[data-glass-surface] {
+  align-items: center;
+  justify-content: flex-start;
+}
+
+/* 浮层里的内容块：上下左右的留白一致，避免「贴着上边框」的观感。 */
+[data-glass-surface="float"] > :first-child { margin-top: 0; }
+[data-glass-surface="float"] > :last-child { margin-bottom: 0; }
+
 /* ---------- 表面基元 ------------------------------------------------------ */
 
 /* 玻璃本体：tint + 背景模糊 + 指针光源（同一张 background 里的多层渐变）。
@@ -106,7 +146,9 @@
       transparent 62%
     ),
     linear-gradient(180deg, var(--glass-tint) 0%, var(--glass-tint) 100%);
-  background-color: transparent;
+  /* 刻意不写 background-color: 底色是底子里的既有颜色（.btn.primary 的 accent、
+     .side 的 #eef0f4），把它清成 transparent 会让主操作按钮失去品牌色。
+     上面的渐变层盖在它之上，flat 档则由不透明 tint 完全接管。 */
   box-shadow:
     inset 0 1px 0 var(--glass-bevel-top),
     inset 0 -1px 0 var(--glass-bevel-bottom),
@@ -408,11 +450,11 @@ dialog[data-glass-surface] {
     0 1px 3px rgb(20 26 38 / .10);
 }
 
-/* 搜索框：胶囊形玻璃。focus-within 时靠 accent 描边，不靠加亮底色。 */
+/* 搜索框：直角玻璃。focus-within 时靠 accent 描边，不靠加亮底色。 */
 .search-wrap[data-glass-surface] {
   background-image: linear-gradient(180deg, rgb(255 255 255 / .70) 0%, rgb(243 245 249 / .70) 100%);
   border: 1px solid var(--glass-edge-line);
-  border-radius: 999px;
+  border-radius: 0;
   box-shadow: inset 0 1px 0 rgb(255 255 255 / .80), inset 0 -1px 0 rgb(20 26 38 / .03);
   transition: box-shadow var(--glass-duration) var(--glass-spring), border-color var(--glass-duration) var(--glass-spring),
     background-color var(--glass-duration) var(--glass-spring);
@@ -518,7 +560,6 @@ dialog[data-glass-surface] {
   backdrop-filter: none;
   -webkit-backdrop-filter: none;
   background-image: linear-gradient(180deg, var(--glass-tint) 0%, var(--glass-tint) 100%);
-  background-color: transparent;
   box-shadow:
     inset 0 0 0 1px var(--glass-hairline),
     var(--glass-shadow);

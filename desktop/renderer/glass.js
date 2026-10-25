@@ -71,15 +71,24 @@ export function glassCapabilities() {
 
 /**
  * 分级判定（纯函数，测试直接覆盖）。
- * - 强制色是系统级覆盖，任何显式选择都不能把它变回玻璃；
- * - 用户显式选择优先于其它系统偏好与能力探测；
- * - 剩下的情况只给 balanced：full 的边缘色散目前只在实验室里验证过，不默认开。
+ *
+ * 顺序是**无障碍优先**：系统级的可访问性偏好永远压过用户的显式选择。
+ * 理由是这几种偏好不是审美偏好——用户打开高对比或关闭透明度，通常是因为
+ * 看不清。曾经选过 full 的用户，不该因为一次旧选择就让系统设置失效。
+ *
+ * 1. forced-colors（强制色）→ flat
+ * 2. prefers-contrast: more（提高对比度）→ flat
+ * 3. prefers-reduced-transparency: reduce（减少透明度）→ flat
+ * 4. 用户显式选择（full / balanced / flat）
+ * 5. 能力探测：没有 backdrop-filter、或只有 1–2 核 → flat
+ * 6. 其余 → balanced。full 永远不自动选中：边缘色散只在 lab 里验证过。
  */
 export function resolveTier({ requested, capabilities } = {}) {
   const caps = capabilities ?? glassCapabilities()
   if (caps.forcedColors) return 'flat'
+  if (caps.contrastMore) return 'flat'
+  if (caps.reducedTransparency) return 'flat'
   if (requested && GLASS_TIERS.includes(requested)) return requested
-  if (caps.reducedTransparency || caps.contrastMore) return 'flat'
   if (caps.backdropFilter === false) return 'flat'
   if (Number(caps.hardwareConcurrency) > 0 && Number(caps.hardwareConcurrency) <= 2) return 'flat'
   return 'balanced'
@@ -302,6 +311,10 @@ function createInstance({ root, tier: initialTier, storageKey }) {
     transparency: typeof matchMedia === 'function' ? matchMedia('(prefers-reduced-transparency: reduce)') : null,
   }
   const onMediaChange = () => applyTier(readStored(storageKey))
+  // 系统偏好变化时 Chromium 会派发 matchMedia 的 change；但有些环境（远程桌面、
+  // 部分主题切换器、以及 CDP 的媒体模拟）只改媒体状态不派发事件。窗口重新获得
+  // 焦点时再判定一次，代价可以忽略，也能覆盖「用户去系统设置改完回来」这条最常见的路径。
+  const onRecheck = () => { if (!destroyed) applyTier(readStored(storageKey), { persist: false }) }
 
   // ---- 生命周期 -------------------------------------------------------------
   refresh()
@@ -310,6 +323,8 @@ function createInstance({ root, tier: initialTier, storageKey }) {
   observeSizes()
   mutationObserver?.observe(doc.body ?? host, { childList: true, subtree: true })
   for (const query of Object.values(mediaWatcher)) query?.addEventListener?.('change', onMediaChange)
+  window.addEventListener('focus', onRecheck)
+  document.addEventListener('visibilitychange', onRecheck)
   if (capabilitiesNow().pointerLight) {
     window.addEventListener('pointermove', moveGlare, { passive: true })
     window.addEventListener('pointerdown', onPointerDown, { passive: true })
@@ -323,6 +338,9 @@ function createInstance({ root, tier: initialTier, storageKey }) {
     tier: () => currentTier,
     capabilities: () => ({ ...capabilitiesNow() }),
     setTier: value => applyTier(value),
+    // 系统偏好可能在不派发媒体事件的情况下变化（远程桌面、部分主题切换器）。
+    // 外部工具与测试可以主动要求重新判定一次。
+    recheck: onRecheck,
     refresh: () => { refresh(); observeSizes() },
     surfaces: () => [...known].map(node => ({
       node, kind: node.getAttribute(SURFACE_ATTRIBUTE), size: sizes.get(node) ?? null, glare: glares.get(node)?.opacity ?? 0,
@@ -335,6 +353,8 @@ function createInstance({ root, tier: initialTier, storageKey }) {
       window.removeEventListener('pointerup', onPointerUp)
       window.removeEventListener('pointercancel', onPointerUp)
       window.removeEventListener('blur', leaveWindow)
+      window.removeEventListener('focus', onRecheck)
+      document.removeEventListener('visibilitychange', onRecheck)
       document.removeEventListener('pointerleave', leaveWindow)
       mutationObserver?.disconnect()
       resizeObserver?.disconnect()

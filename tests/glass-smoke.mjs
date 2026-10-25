@@ -24,19 +24,21 @@ check('表面表覆盖五类面，且契约里的选择器一个不少', () => {
   assert.deepEqual([...GLASS_TIERS], ['full', 'balanced', 'flat'])
 })
 
-check('分级：强制色最高，其次显式选择，其次系统偏好与能力', () => {
+check('分级：无障碍偏好压过显式选择，其次能力，最后默认', () => {
   const base = { backdropFilter: true, hardwareConcurrency: 8, forcedColors: false, contrastMore: false, reducedTransparency: false }
   assert.equal(resolveTier({ requested: 'full', capabilities: base }), 'full')
   assert.equal(resolveTier({ capabilities: base }), 'balanced')
-  // 强制色是系统级覆盖：连显式选择都要让位
+  // 系统级无障碍偏好：连显式选择都要让位（用户看不清时，材质不该赢）
   assert.equal(resolveTier({ requested: 'full', capabilities: { ...base, forcedColors: true } }), 'flat')
-  // 显式选择优先于其它系统偏好
-  assert.equal(resolveTier({ requested: 'full', capabilities: { ...base, contrastMore: true } }), 'full')
+  assert.equal(resolveTier({ requested: 'full', capabilities: { ...base, contrastMore: true } }), 'flat')
+  assert.equal(resolveTier({ requested: 'full', capabilities: { ...base, reducedTransparency: true } }), 'flat')
+  assert.equal(resolveTier({ requested: 'balanced', capabilities: { ...base, contrastMore: true } }), 'flat')
   // 能力不足时才下降
-  assert.equal(resolveTier({ capabilities: { ...base, reducedTransparency: true } }), 'flat')
   assert.equal(resolveTier({ capabilities: { ...base, backdropFilter: false } }), 'flat')
   assert.equal(resolveTier({ capabilities: { ...base, hardwareConcurrency: 2 } }), 'flat')
   assert.equal(resolveTier({ capabilities: { ...base, hardwareConcurrency: 4 } }), 'balanced')
+  // full 永远不会被自动选中
+  assert.notEqual(resolveTier({ capabilities: base }), 'full')
 })
 
 check('指针角度：顶部为 0deg，右侧 90deg，左下 -135deg', () => {

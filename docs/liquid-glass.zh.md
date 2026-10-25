@@ -104,18 +104,30 @@ Alaya 桌面壳的材质层规范：玻璃用在哪、令牌怎么改、三档�
 2. 不给 `.side` / `.bar` 加 `position: relative`：侧栏里有绝对定位的浮层菜单（`.mb-side-bottom .ws-panel`），加定位上下文会把锚点挪走。
 3. `flat` 不是「少一点玻璃」，而是实心回退：撤掉 `backdrop-filter`，靠 tint 与 hairline 维持层级，保证高对比与关闭透明度时仍然可读可点。
 
+### 3.1 直角与内缩（0.7.23 评审口径）
+
+材质层的形状语言是 **90° 直角**：玻璃面一律不圆角，内容层（卡片、标签、缩略图、头像）不受影响——它们是内容，不是材质。直角由 `glass.css` 的「直角与内缩」一节覆盖元素自身的 `border-radius`（`styles.css` 里 `.btn` 是 8px、`.curation-popover` 14px、`.search-wrap` 是胶囊 999px）。要恢复圆角，把那一节删掉、或给 `--glass-radius-*` 填回数值并让选择器读令牌。
+
+内容与边框的关系是同一条规则的两半：
+
+- **等距内缩**：面的文字/内容与四边保持同样的距离，不允许贴边。`tests/preview-acceptance.mjs` 的 `hit-and-inset` 会遍历所有玻璃面，量每个子元素到四边的最小间距（control ≥ 2px，其余 ≥ 4px），贴边就红。
+- **居中对齐**：单行控件（按钮、图标按钮、分段、hud、状态胶囊）垂直且水平居中；侧栏导航保持左对齐（图标 + 名称 + 计数是多列结构，居中会破坏扫描路径），只保证与边框等距。浮层内容块去掉首尾外边距，避免「贴着上边框」的观感。
+
 ## 4. 三档品质
 
 判定写在 `resolveTier()` 里，纯函数，`tests/glass-smoke.mjs` 直接覆盖。顺序固定，前一条永远压过后一条：
 
 1. `forced-colors: active` → `flat`。系统级接管，连用户显式选择都要让位，且**不写回**偏好。
-2. 用户显式选择（`setGlassTier`，校验必须属于 `GLASS_TIERS`）→ 该档。
-3. `prefers-reduced-transparency: reduce` 或 `prefers-contrast: more` → `flat`。
-4. 能力探测 `backdropFilter === false` → `flat`。
-5. `hardwareConcurrency` 为 1 或 2 → `flat`。
-6. 其余 → `balanced`。
+2. `prefers-contrast: more` → `flat`。
+3. `prefers-reduced-transparency: reduce` → `flat`。
+4. 用户显式选择（`setGlassTier`，校验必须属于 `GLASS_TIERS`）→ 该档。
+5. 能力探测 `backdropFilter === false` → `flat`。
+6. `hardwareConcurrency` 为 1 或 2 → `flat`。
+7. 其余 → `balanced`。
 
-注意第 6 条：**full 不会被自动选中**，只能由用户显式打开。边缘色散目前只在 lab 里验证过，把不确定的档位设成默认，等于让最没把握的渲染路径承担日常观感。
+**第 1–3 条故意压过用户选择**（0.7.23 评审后调整）。理由：高对比、减少透明度不是审美偏好，是用户看不清时才打开的开关。若让「曾经选过 full」赢过系统设置，等于用一个旧选择永久屏蔽无障碍设置。真机上的表现：用户打开高对比 → 下次窗口获得焦点时自动降到 `flat`，关掉后回到原选择（`localStorage` 里存的是请求值，不会被覆盖）。
+
+注意第 7 条：**full 不会被自动选中**，只能由用户显式打开。边缘色散目前只在 lab 里验证过，把不确定的档位设成默认，等于让最没把握的渲染路径承担日常观感。
 
 | 档 | backdrop-filter | 边缘 | 层级表达 | 何时出现 |
 | --- | --- | --- | --- | --- |
@@ -201,6 +213,19 @@ Alaya 桌面壳的材质层规范：玻璃用在哪、令牌怎么改、三档�
 - **装饰不入无障碍树**：承载光源与斜面的伪元素、包装层不承载信息，不参与 tab 顺序；玻璃不改变可点击区域大小，也不改变 DOM 顺序。
 - **档位可降低，不可隐藏**：用户无法关闭材质时，`flat` 就是关闭材质——它必须仍然可读、可点、层级清楚。
 
+### 6.1 实测对比度（0.7.23，合成后的真实像素）
+
+方法：`tests/preview-acceptance.mjs` 在窗口最底层铺四种背景，分别切三档截图；再对截图取顶栏/侧栏上一块无文字区域的平均 RGB，与正文色 `#20232a` 算对比度。测的是**合成之后**的像素，不是 token 的算术值。
+
+| 背景 | full（顶栏 / 侧栏） | balanced | flat |
+| --- | --- | --- | --- |
+| 纯白 | 15.34 / 14.99 | 15.34 / 14.99 | 15.45 / 14.94 |
+| 浅灰 | 15.22 / 14.99 | 15.22 / 14.99 | 15.45 / 14.94 |
+| 暗色 | 12.39 / 14.86 | 12.39 / 14.86 | 15.19 / 14.93 |
+| 高饱和 | 13.68 / 14.99 | 13.68 / 14.99 | 15.35 / 14.94 |
+
+最低 12.39:1，远高于 AA 的 4.5:1。代价是顶栏偏「磨砂亚克力」而不是通透玻璃：暗色背景下顶栏平均色只到 `rgb(228,228,230)`。要更透，改 `--glass-tint`（顶栏用的是 `.bar` 里的上浓下淡渐变），改完必须用同一条命令重测，别用眼睛判断。
+
 ## 7. 已知限制与不做的部分
 
 ### 7.1 `backdrop-filter: url(#svg)`：能用但不稳定
@@ -242,6 +267,7 @@ Alaya 桌面壳的材质层规范：玻璃用在哪、令牌怎么改、三档�
 - **数据域隔离**：材质偏好不写进数据库 `meta` 表，只落本机 `localStorage`；换数据库不改变界面材质。
 - **后台恢复的首帧**：窗口最小化再恢复，合成器可能给出一帧旧的模糊结果；不要为此加补间或强制重绘。
 - **截图工具**：headless 预览以 `--force-device-scale-factor=1` 运行，高 DPI 下的观感必须在 Electron 里看，不要用 1x 截图判断细腻度。
+- **本机 Electron 起不来**：`electron.exe` 从被托管的进程里启动即 `0xC0000005`（只有 `app.whenReady()` 的 hello 应用也一样），所以 `run-desktop-*` 那批真机套件在本机无法执行。可视化验证因此全靠 `tests/preview-*`（真实渲染层 + headless Chromium）。真机只要能在你自己会话里启动，`npm run desktop` 就能补上这一环。
 - **高光用多层 `background` 而不是伪元素**：`.side` / `.bar` / `.status` 都是 flex 容器，`::before` / `::after` 会变成额外的 flex 项，直接改布局；给它们加 `position: relative` 又会把 `.mb-side-bottom .ws-panel` 这类绝对定位浮层的锚点挪走。所以斜面、指针高光、方向光全部落在同一张 `background-image` 与 inset 阴影上。代价是不能做「只在边框上旋转」的高光——需要那种效果时再单独引入包裹层。
 - **白底上的指针光源几乎看不见**：高光是白色径向渐变，落在白色侧栏/卡片上没有对比。这是观感事实，不是 bug；有颜色的背景（lab 页、深色图片、浮层下方的内容）才看得到。`--glass-rim-angle` 供浮层的方向光使用，因此浮层（命令面板、布局菜单）上的光源是可感知的。
 
@@ -378,7 +404,25 @@ Pop-Location
 | 笔记本模式也有 chrome / panel 标记 | 第二张界面同样覆盖 |
 | 减少动态效果下 `reducedMotion` 为 true | 光源与按压按偏好不装配；注意 `finePointer` 描述的是设备，不随动效偏好变 |
 
-**已知的脚本口径问题**：`tests/preview-glass.mjs` 在减少动态效果那一步断言 `capabilities().finePointer === false`，这条会误报失败——`finePointer` 是设备能力（`(hover: hover) and (pointer: fine)`），不会因为减少动态效果变 false；引擎是在装配监听时同时看 `finePointer` 与 `reducedMotion` 两个条件。要断言的是「`reducedMotion === true` 且派发 `pointermove` 后 `--glass-glare-o` 仍为空或 0」。
+**口径修正（已落到脚本里）**：减少动态效果那一步不查 `capabilities().finePointer`——它描述设备（`(hover: hover) and (pointer: fine)`），不随动效偏好变。脚本断言的是 `pointerLight === false`、`finePointer === true`，并派发一次 `pointermove` 确认 `--glass-glare-o` 仍为空。
+
+### 10.1 0.7.23 验收清单：脚本覆盖 vs 必须真机
+
+`node tests/preview-acceptance.mjs`（`npm run test:acceptance`）把下面能自动化的部分做成 21 条记录，截图写到 `test-tmp/preview/acceptance/`：
+
+| 验收项 | 脚本结论 | 说明 |
+| --- | --- | --- |
+| 纯白 / 浅灰 / 暗色 / 高饱和背景 × 三档 | ✅ 12 张截图 + 断言 | 每档断言 `backdrop-filter` 的实际取值；flat 必须为 `none` |
+| 显示缩放 125% / 150% / 200% | ✅ 3 张截图 + 断言 | 顶栏仍 73 CSS px、首屏仍 95px、无横向溢出、材质仍在 |
+| 系统高对比 / 强制色 / 减少透明度 / 减少动态 | ✅ 4 条断言 | 先显式选 `full`，再改媒体偏好，断言降到 `flat`（动效偏好只关光源、不改档位） |
+| 命中区域 | ✅ 断言 | 侧栏导航、顶栏按钮、搜索输入逐个 `elementFromPoint`，被挡住即失败 |
+| 内容与边框的距离 | ✅ 断言 | 所有玻璃面子元素的四边最小间距（control ≥ 2px、其余 ≥ 4px） |
+| 静止 / 滚动 / 浮层的帧间隔 | ⚠️ 仅下限参考 | headless 走软件合成：静止 p50 16.7ms、滚动 p50 16.7 / p95 33.4ms、浮层 p50 16.7ms。真机数值与 GPU 占用必须在 Electron 里测 |
+| 真实 Electron 窗口：滚动、弹窗定位 | ❌ 待真机 | 本机 `electron.exe` 无法启动（0xC0000005），见 §7.4 |
+| 窗口最大化 / 还原 / 多显示器移动 | ❌ 待真机 | 脚本没有窗口管理能力 |
+| GPU 显存占用 | ❌ 待真机 | 需要 `chrome://gpu` 或 `Performance` 面板在同机同窗口下采样 |
+
+脚本末尾会打印「未覆盖」清单，避免把「脚本全绿」误读成「真机验收完成」。
 
 lab 页（`desktop/renderer/glass-lab.html`）存在时脚本会一并截图；缺失只打印 skip，不算失败。手动看参数时也可以 `node tests/preview-app.mjs --serve` 起服务后在浏览器打开它。
 
