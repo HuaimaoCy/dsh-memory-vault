@@ -86,7 +86,7 @@ for (const [label, css] of Object.entries(backdrops)) {
       // 侧栏与顶栏的对比度：文字颜色固定，玻璃着色随背景变化——这里量的是最坏情况下的可见性
       const facts = JSON.parse(await session.evaluate(`JSON.stringify({
         applied: document.documentElement.dataset.glassTier,
-        chromeBlur: getComputedStyle(document.querySelector('.side')).backdropFilter,
+        chromeBlur: getComputedStyle(document.querySelector('.bar'), '::after').backdropFilter,
         navColor: getComputedStyle(document.querySelector('#views button')).color,
       })`))
       assert.equal(facts.applied, tier === 'flat' || !facts.applied ? tier : tier, `档位没生效：${tier}`)
@@ -109,7 +109,7 @@ for (const [dpr, size] of [[1.25, [1250, 820]], [1.5, [1200, 800]], [2, [1100, 7
         devicePixelRatio, overflowX: document.documentElement.scrollWidth > innerWidth + 1,
         barHeight: Math.round(bar.height), sideWidth: Math.round(side.width),
         tileRounded: tile ? Math.round(tile.width) : null,
-        blur: getComputedStyle(document.querySelector('.bar')).backdropFilter,
+        blur: getComputedStyle(document.querySelector('.bar'), '::after').backdropFilter,
         mainTop: Math.round(document.querySelector('.page-heading').getBoundingClientRect().top),
       }
     })())`))
@@ -142,7 +142,7 @@ for (const [label, media, expected] of prefs) {
     const facts = JSON.parse(await session.evaluate(`JSON.stringify({
       applied: document.documentElement.dataset.glassTier,
       caps: window.alayaGlass.capabilities(),
-      chromeBlur: getComputedStyle(document.querySelector('.side')).backdropFilter,
+      chromeBlur: getComputedStyle(document.querySelector('.bar'), '::after').backdropFilter,
       pointerLight: document.querySelector('.side').style.getPropertyValue('--glass-glare-o'),
     })`))
     assert.equal(facts.applied, expected, `${label}：期望 ${expected}，实际 ${facts.applied}`)

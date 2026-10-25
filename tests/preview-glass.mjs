@@ -58,7 +58,7 @@ try {
       chrome: document.querySelectorAll('[data-glass-surface="chrome"]').length,
       controls: document.querySelectorAll('[data-glass-surface="control"]').length,
       floats: document.querySelectorAll('[data-glass-surface="float"]').length,
-      sideBlur: getComputedStyle(document.querySelector('.side')).backdropFilter,
+      sideBlur: getComputedStyle(document.querySelector('.bar'), '::after').backdropFilter,
       api: typeof window.alayaGlass,
     })`)
     const state = JSON.parse(facts)
@@ -107,7 +107,7 @@ try {
     // 3. flat 档：必须真的撤掉 backdrop-filter，而不是只改个属性
     await session.evaluate(`window.alayaGlass.setTier('flat')`)
     await sleep(300)
-    const flatBlur = await session.evaluate(`getComputedStyle(document.querySelector('.side')).backdropFilter`)
+    const flatBlur = await session.evaluate(`getComputedStyle(document.querySelector('.bar'), '::after').backdropFilter`)
     assert.ok(flatBlur === 'none' || flatBlur === '', `flat 档不应再有 backdrop-filter，实际 ${flatBlur}`)
     assert.equal(await measure(), balancedLayout, '切到 flat 也不能改动布局尺寸')
     record('db-flat', await session.screenshot(join(out, 'db-flat.png')), 'flat 无 backdrop-filter')
@@ -162,7 +162,7 @@ try {
       surfaces: document.querySelectorAll('[data-glass-surface]').length,
       chrome: [...document.querySelectorAll('[data-glass-surface="chrome"]')].map(node => node.className),
       panels: document.querySelectorAll('[data-glass-surface="panel"]').length,
-      barBlur: getComputedStyle(document.querySelector('.mb-bar')).backdropFilter,
+      barBlur: getComputedStyle(document.querySelector('.mb-bar'), '::after').backdropFilter,
     })`))
     assert.ok(state.surfaces > 10, `笔记本模式的表面数量太少：${state.surfaces}`)
     assert.ok(state.chrome.some(name => name.includes('mb-bar')), '笔记本顶栏也要被标记为 chrome')
