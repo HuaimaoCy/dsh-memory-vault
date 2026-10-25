@@ -24,6 +24,32 @@ if (requestedMode) {
   try { localStorage.setItem('alaya.mode', requestedMode === 'mistakebook' ? 'notebook' : 'memory') } catch { /* 存储不可用就算了 */ }
 }
 
+// 人工检查用的查询参数：?tier=full|balanced|flat 直接落成「用户显式选择」，
+// 刷新即可换档；不带参数时保留上次在页内用 alayaGlass.setTier() 选的那档。
+const requestedTier = new URLSearchParams(location.search).get('tier')
+if (requestedTier && ['full', 'balanced', 'flat'].includes(requestedTier)) {
+  try { localStorage.setItem('alaya.glass', requestedTier) } catch { /* 同上 */ }
+}
+
+// 人工检查的快捷键（只在预览里存在，不进打包产物）：
+//   Ctrl/⌘ + Alt + 1 / 2 / 3  → full / balanced / flat
+//   Ctrl/⌘ + Alt + M          → 在数据库与笔记本之间切换
+window.addEventListener('keydown', event => {
+  if (!(event.ctrlKey || event.metaKey) || !event.altKey) return
+  const tier = { Digit1: 'full', Digit2: 'balanced', Digit3: 'flat' }[event.code]
+  if (tier) {
+    event.preventDefault()
+    window.alayaGlass?.setTier(tier)
+    return
+  }
+  if (event.code === 'KeyM') {
+    event.preventDefault()
+    const next = document.body.dataset.mode === 'mistakebook' ? 'memory' : 'notebook'
+    try { localStorage.setItem('alaya.mode', next) } catch { /* 忽略 */ }
+    location.reload()
+  }
+})
+
 const now = Date.now()
 const day = 24 * 60 * 60 * 1000
 

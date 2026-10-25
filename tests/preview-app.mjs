@@ -33,9 +33,12 @@ const options = {
 const types = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.mjs': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.png': 'image/png', '.svg': 'image/svg+xml', '.woff2': 'font/woff2', '.json': 'application/json' }
 
 export const createPreviewServer = (overrides = {}) => createServer((request, response) => {
-  const mode = overrides.mode ?? options.mode
-  const theme = overrides.theme ?? options.theme
   const url = new URL(request.url, 'http://127.0.0.1')
+  // 查询参数优先：一个已经在跑的服务就能切模式/主题，人工检查不用反复重启。
+  //   /?mode=mistakebook   进笔记本
+  //   /?mode=memory&theme=dark
+  const mode = url.searchParams.get('mode') ?? overrides.mode ?? options.mode
+  const theme = url.searchParams.get('theme') ?? overrides.theme ?? options.theme
   const target = url.pathname === '/' ? '/index.html' : url.pathname
   if (target === '/__preview-bridge.js') {
     response.writeHead(200, { 'content-type': types['.js'] })
