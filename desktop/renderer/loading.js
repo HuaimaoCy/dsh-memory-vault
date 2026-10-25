@@ -27,7 +27,7 @@ export function createAlayaLoader({ label = '正在载入', compact = false, hid
 export async function runAlayaStartup(load) {
   const startup = document.getElementById('alaya-startup') ?? document.createElement('div')
   startup.id = 'alaya-startup'; startup.className = 'alaya-startup'
-  const shell = document.querySelector('.app-shell')
+  const shell = document.querySelector('.app-shell')??document.querySelector('.mb-shell')
   document.body.classList.add('alaya-booting'); shell.inert = true
   const loader = createAlayaLoader({ label: '正在打开你的记忆库' })
   startup.replaceChildren(loader.element)

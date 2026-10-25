@@ -1,7 +1,6 @@
 import { ownTags, section, subsection } from './grouping.js'
 import { icon, installIcons } from './icons.js'
 import { mountCommandPalette } from './command-palette.js'
-import { mountMistakebook } from './mistakebook.js'
 import { NOTEBOOK_TARGETS, mountQuickCapture } from './quick-capture.js'
 import { createStorageStore, mountWorkspaceLayout } from './workspace-layout.js'
 import { createLoadingStatus, runAlayaStartup } from './loading.js'
@@ -16,6 +15,7 @@ import {
 } from './views.js'
 
 const el = id => document.getElementById(id)
+const productVariant=document.documentElement.dataset.product??'unified'
 // 可保存视图：定义只写渲染层 localStorage（alaya.db.views），绝不进数据库 meta 表——
 // UI 偏好一旦进库就会随备份/导出一起搬，等于污染记忆域。0.7.15 的
 // memory-vault.layout（grid|rows）在这里一次性迁进四个内置视图，用户偏好不丢。
@@ -918,6 +918,7 @@ function ensureCapture() {
   if (!capture) {
     capture = mountQuickCapture({
       h, icon, call,
+      modes:productVariant==='database'?['knowledge','conversation']:undefined,
       notebook: (op, body) => desktop('notebook', op, body),
       say,
       // 记忆域写入后列表要跟着更新；笔记本域由笔记本界面自己刷新。捕获面板是模态的，
@@ -964,14 +965,20 @@ document.addEventListener('keydown', event => {
 })
 document.addEventListener('click', event => { if (!el('curation-menu').contains(event.target)) el('curation-menu').open = false })
 window.addEventListener('focus', () => { if (document.body.dataset.mode !== 'mistakebook' && !state.dirty && state.data && !document.querySelector('dialog[open]')) void guard(() => load()) })
+async function bootstrap(){
+if(productVariant!=='database'){
+const {mountMistakebook}=await import('./mistakebook.js')
 mountMistakebook({ appearance, beforeEnter: async () => {
   if (state.busy || document.querySelector('dialog[open]') || !await discard()) return false
   state.dirty = false; state.selected = null; state.draft = null; render(); return true
 } })
+}
 void guard(async () => {
   await runAlayaStartup(load)
 }).then(() => {
   // Open where the user left off; the notebook is this app's primary face.
-  if ((localStorage.getItem('alaya.mode') ?? 'notebook') === 'notebook') document.getElementById('mode-switch').click()
+  if(productVariant!=='database'&&(localStorage.getItem('alaya.mode')??'notebook')==='notebook')document.getElementById('mode-switch').click()
   else say('Alaya 已打开')
 })
+}
+void bootstrap()

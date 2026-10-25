@@ -301,6 +301,8 @@ function ensureStyle(doc) {
  */
 export function mountQuickCapture(options = {}) {
   const { h, icon, call, notebook, say } = options
+  const modes=Array.isArray(options.modes)?CAPTURE_MODES.filter(mode=>options.modes.includes(mode)):CAPTURE_MODES
+  if(!modes.length)throw new Error('捕获面板至少需要一个可用域')
   if (typeof h !== 'function') throw new TypeError('mountQuickCapture 需要 app.js 的 h 工厂')
   const appSay = typeof say === 'function' ? say : () => {}
   const onStatus = typeof options.onStatus === 'function' ? options.onStatus : null
@@ -315,7 +317,7 @@ export function mountQuickCapture(options = {}) {
 
   const stored = loadCapturePrefs()
   const state = {
-    mode: stored.mode,
+    mode: modes.includes(stored.mode)?stored.mode:modes[0],
     groupIds: { ...stored.groupIds },
     noteType: stored.noteType,
     tagsText: stored.tagsText,
@@ -400,7 +402,7 @@ export function mountQuickCapture(options = {}) {
 
   const modeButtons = new Map()
   const modeRow = h('div', { class: 'qc-modes', role: 'group', 'aria-label': '写入到哪个域' })
-  for (const mode of CAPTURE_MODES) {
+  for (const mode of modes) {
     const button = h('button', {
       type: 'button', class: 'qc-mode', 'data-qc': 'mode', 'data-qc-mode': mode, 'aria-pressed': 'false',
       onClick: () => setMode(mode),
@@ -519,7 +521,7 @@ export function mountQuickCapture(options = {}) {
 
   function setMode(mode, { focus = true } = {}) {
     if (state.busy) return
-    if (CAPTURE_MODES.includes(mode) && mode !== state.mode) {
+    if (modes.includes(mode) && mode !== state.mode) {
       state.mode = mode
       showError('')
       showStatus('')
@@ -644,6 +646,7 @@ export function mountQuickCapture(options = {}) {
   function open(target) {
     if (state.destroyed) return false
     applyTarget(target)
+    if(!modes.includes(state.mode))state.mode=modes[0]
     if (tagsInput.value !== state.tagsText) tagsInput.value = state.tagsText
     if (!dialog.open) dialog.showModal()
     contentInput.focus()

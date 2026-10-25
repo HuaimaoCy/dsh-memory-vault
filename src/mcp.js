@@ -29,8 +29,8 @@ export function validateArguments(value, schema, path = 'arguments') {
   if (type === 'array') for (const [index, item] of value.entries()) validateArguments(item, schema.items, `${path}[${index}]`)
 }
 
-export function createMcpHandler(vault, { sessionId = `codex-${randomUUID()}`, notebook = null } = {}) {
-  const definitions = buildTools({ ...vault, summarize: request => vault.summarize({ ...request, source: 'model-write' }) }).map(definition => ({
+export function createMcpHandler(vault, { sessionId = `codex-${randomUUID()}`, notebook = null,notebookOnly=false } = {}) {
+  const definitions = (notebookOnly?[]:buildTools({ ...vault, summarize: request => vault.summarize({ ...request, source: 'model-write' }) })).map(definition => ({
     ...definition,
     parameters: {
       ...definition.parameters,
@@ -43,7 +43,7 @@ export function createMcpHandler(vault, { sessionId = `codex-${randomUUID()}`, n
       description: '选择当前任务使用的记忆组并返回正文。MCP 不会自动修改 Codex 系统提示：请阅读返回的正文，或调用 memory_context 获取记忆上下文。action=list/set/reset，groups=[] 明确关闭，reset 恢复默认。',
     } : {}),
   }))
-  definitions.push({
+  if(!notebookOnly)definitions.push({
     name: 'memory_context',
     description: '开始任务时获取记忆索引、底层约定和本任务已选择的知识正文。返回内容供调用方阅读；MCP 不会自动注入系统提示。',
     parameters: { type: 'object', additionalProperties: false, properties: { sessionId: { type: 'string' } } },

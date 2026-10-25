@@ -18,6 +18,8 @@ desktop/node_modules/
 desktop/selftest.png
 desktop/dist/
 desktop/.runtime/
+desktop/.runtime-*/
+desktop/.connectors/
 
 test-tmp/
 

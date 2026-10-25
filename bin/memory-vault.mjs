@@ -490,11 +490,13 @@ export async function runCli(argv, io = {}) {
       // 能读写笔记与画布；构造失败就退化成只有记忆工具，不拖垮整条 MCP。
       let notebook = null
       try {
+        if(!flag(parsed.flags,'database-only')){
         notebook = new MistakebookStore({ database: vault.store.db })
+        }
       } catch (error) {
         stderr(`memory-vault: notebook unavailable: ${error?.message ?? error}\n`)
       }
-      const server = serveMcp(vault, { sessionId: option(parsed.flags, 'session'), notebook })
+      const server = serveMcp(vault, { sessionId: option(parsed.flags, 'session'), notebook,notebookOnly:flag(parsed.flags,'notebook-only') })
       const stop = () => server.close()
       process.once('SIGINT', stop)
       process.once('SIGTERM', stop)
