@@ -188,7 +188,11 @@
 
 .app-shell .body { margin-top: calc(-1 * var(--glass-bar-h)); }
 .app-shell .body > .main { padding-top: calc(var(--glass-bar-h) + 22px); }
-.app-shell[data-density="compact"] .body > .main { padding-top: calc(var(--glass-bar-h) + 18px); }
+/* 选中记忆时 .main 的内边距是 29（styles.css 的 .body.with-inspector），
+   密度 compact 时是 18：补回同样的差值，编辑态的第一屏也不位移。 */
+.app-shell .body.with-inspector > .main { padding-top: calc(var(--glass-bar-h) + 29px); }
+.app-shell[data-density="compact"] .body > .main,
+.app-shell[data-density="compact"] .body.with-inspector > .main { padding-top: calc(var(--glass-bar-h) + 18px); }
 .bar[data-glass-surface] { position: relative; z-index: 6; }
 
 .mb-shell .mb-body { margin-top: calc(-1 * var(--glass-mb-bar-h)); }
