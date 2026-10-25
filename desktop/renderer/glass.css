@@ -702,6 +702,30 @@ dialog[data-glass-surface] {
   }
 }
 
+/* ---------- 实验档：把位移滤镜接进表面 -------------------------------------- */
+
+/* glass-refraction.js 只负责生成滤镜并写 --glass-refraction-filter，这里才真正消费它。
+   能接的只有「背后有内容」的面：顶栏胶囊、浮层。侧栏与侧板背后是页面底色，
+   接上去只是把一块纯色再位移一次，白付成本。
+   同时把浮层 tint 降到 0.42/0.34：对照实验里 tint .60–.80 会把位移压得看不见
+   （材质强度 69.5 对 72.5），而 .03 又几乎没着色。这一步只影响实验档，
+   发布形态的 tint 不动——那里的对比度是 §6.1 实测过的。 */
+html[data-glass-refraction="on"] .bar .toolbar-actions[data-glass-refraction="on"],
+html[data-glass-refraction="on"] [data-glass-surface="float"][data-glass-refraction="on"] {
+  backdrop-filter: blur(2px) saturate(1.6) var(--glass-refraction-filter, none);
+  -webkit-backdrop-filter: blur(2px) saturate(1.6) var(--glass-refraction-filter, none);
+}
+
+html[data-glass-refraction="on"] [data-glass-surface="float"][data-glass-refraction="on"] {
+  background-image:
+    radial-gradient(
+      circle at calc(var(--glass-glare-x, .5) * 100%) calc(var(--glass-glare-y, .35) * 100%),
+      rgb(255 255 255 / calc(var(--glass-glare-o, 0) * var(--glass-glare))),
+      transparent 55%
+    ),
+    linear-gradient(180deg, rgb(255 255 255 / .42) 0%, rgb(255 255 255 / .34) 100%);
+}
+
 /* ---------- 回退：flat 档 -------------------------------------------------- */
 /* 放在文件末尾，靠「同特异性、后写者胜」压过 .side / .bar / .search-wrap 等
    具体规则，以及基元上的 backdrop-filter。类名写法同时支持两种情况：

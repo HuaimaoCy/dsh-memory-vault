@@ -95,8 +95,6 @@ const FILTER_PREFIX = 'alaya-glass-rim'
 const REFRACTION_ATTRIBUTE = 'data-glass-refraction'
 let mounted = null
 
-const bucketSize = value => Math.max(16, Math.round(value / 16) * 16)
-
 /**
  * 打开实验档。返回 { supported, filters, surfaces }；
  * 不支持 backdrop-filter: url() 时什么都不做，调用方据此保持默认档位。
@@ -118,38 +116,53 @@ export function enableRefraction(root = document, { band = 14, scale = 30, maxFi
   document.body.append(svg)
 
   const filters = new Map()
+  const created = []
   let surfaces = 0
   const nodes = root.querySelectorAll('[data-glass-surface]')
   for (const node of nodes) {
     const rect = node.getBoundingClientRect()
-    const width = bucketSize(rect.width)
-    const height = bucketSize(rect.height)
-    if (width < 17 || height < 17) continue
-    const radius = bucketSize(Number.parseFloat(getComputedStyle(node).borderTopLeftRadius) || 12)
+    // 贴图按元素**精确尺寸**生成：分桶会让贴图被拉伸不到 1%，但位移在边缘是二阶敏感量，
+    // 这点拉伸就足以让沿边剖面与中位剖面对不上（对照实验：边缘不稳 12–17 → 6 以下）。
+    const width = Math.max(17, Math.round(rect.width))
+    const height = Math.max(17, Math.round(rect.height))
+    const radius = Math.max(0, Math.round(Number.parseFloat(getComputedStyle(node).borderTopLeftRadius) || 0))
     const key = `${width}x${height}r${radius}`
     if (!filters.has(key)) {
-      if (filters.size >= maxFilters) break
-      const id = `${FILTER_PREFIX}-${filters.size}`
-      const filter = document.createElementNS(SVG_NS, 'filter')
-      filter.setAttribute('id', id)
-      filter.setAttribute('x', '0'); filter.setAttribute('y', '0')
-      filter.setAttribute('width', '100%'); filter.setAttribute('height', '100%')
-      filter.setAttribute('color-interpolation-filters', 'sRGB')
-      const image = document.createElementNS(SVG_NS, 'feImage')
-      image.setAttribute('href', rimMapDataUrl({ width, height, radius, band }))
-      image.setAttribute('x', '0'); image.setAttribute('y', '0')
-      image.setAttribute('width', String(width)); image.setAttribute('height', String(height))
-      image.setAttribute('preserveAspectRatio', 'none')
-      image.setAttribute('result', 'map')
-      const displacement = document.createElementNS(SVG_NS, 'feDisplacementMap')
-      displacement.setAttribute('in', 'SourceGraphic')
-      displacement.setAttribute('in2', 'map')
-      displacement.setAttribute('scale', String(scale))
-      displacement.setAttribute('xChannelSelector', 'R')
-      displacement.setAttribute('yChannelSelector', 'G')
-      filter.append(image, displacement)
-      defs.append(filter)
-      filters.set(key, id)
+      if (created.length < maxFilters) {
+        const id = `${FILTER_PREFIX}-${created.length}`
+        const filter = document.createElementNS(SVG_NS, 'filter')
+        filter.setAttribute('id', id)
+        // 滤镜区域必须比元素大：100% 只覆盖元素本身，贴边取样的位移被裁掉，
+        // 实测同一张图在 -50%/200% 下的位移强度是 100% 的 2.3 倍（43.0 vs 18.9）。
+        filter.setAttribute('x', '-50%'); filter.setAttribute('y', '-50%')
+        filter.setAttribute('width', '200%'); filter.setAttribute('height', '200%')
+        filter.setAttribute('color-interpolation-filters', 'sRGB')
+        const image = document.createElementNS(SVG_NS, 'feImage')
+        image.setAttribute('href', rimMapDataUrl({ width, height, radius, band }))
+        image.setAttribute('x', '0'); image.setAttribute('y', '0')
+        image.setAttribute('width', String(width)); image.setAttribute('height', String(height))
+        image.setAttribute('preserveAspectRatio', 'none')
+        image.setAttribute('result', 'map')
+        const displacement = document.createElementNS(SVG_NS, 'feDisplacementMap')
+        displacement.setAttribute('in', 'SourceGraphic')
+        displacement.setAttribute('in2', 'map')
+        displacement.setAttribute('scale', String(scale))
+        displacement.setAttribute('xChannelSelector', 'R')
+        displacement.setAttribute('yChannelSelector', 'G')
+        filter.append(image, displacement)
+        defs.append(filter)
+        created.push(id)
+        filters.set(key, id)
+      } else {
+        // 到达上限时不是跳过这个面，而是复用最接近的一张：宁可尺寸差几像素，
+        // 也不要出现「同一块界面里有的面在折射、有的面没有」的割裂。
+        const [closest] = [...filters.entries()].sort((a, b) => {
+          const [aw, ah] = a[0].split('x').map(Number)
+          const [bw, bh] = b[0].split('x').map(Number)
+          return Math.abs(aw * ah - width * height) - Math.abs(bw * bh - width * height)
+        })[0]
+        filters.set(key, filters.get(closest))
+      }
     }
     const id = filters.get(key)
     node.setAttribute(REFRACTION_ATTRIBUTE, 'on')
@@ -158,7 +171,7 @@ export function enableRefraction(root = document, { band = 14, scale = 30, maxFi
   }
   mounted = { svg, filters }
   document.documentElement.dataset.glassRefraction = 'on'
-  return { supported: true, filters: filters.size, surfaces }
+  return { supported: true, filters: created.length, surfaces, reused: filters.size - created.length }
 }
 
 export function disableRefraction(root = document) {

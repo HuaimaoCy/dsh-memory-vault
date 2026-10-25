@@ -248,28 +248,43 @@ Alaya 桌面壳的材质层规范：玻璃用在哪、令牌怎么改、三档�
 
 ## 7. 已知限制与不做的部分
 
-### 7.1 `backdrop-filter: url(#svg)`：能用但不稳定
+### 7.1 `backdrop-filter: url(#svg)`：能用，但边缘质量与成本要自己扛
 
-实测（`test-tmp/glass-probe/`，headless Chromium）：
+**2026-10-25 修订**：这里原先写的是「圆角裁剪失效、四角方角毛边」。四引擎对照实验
+（`docs/liquid-glass-compare.zh.md` §6）在合成后的像素上重测：四个引擎的圆角**都按
+`border-radius` 裁掉了**，圆角弧线外与「无玻璃基准」的差是 `0/0`，面外 6px 环同样 `0/0`。
+原始探测图（`test-tmp/glass-probe/probe3|4.png`）已不在，无法逐图复查，所以那条说法
+**收窄**为下面这一条真正能复现的：
 
-| 症状 | 现象 |
+| 结论 | 证据 |
 | --- | --- |
-| 解析与能力检测 | `CSS.supports('backdrop-filter', 'url(#a)')` 返回 `true`，背景确实被位移——**所以 `CSS.supports()` 不能当闸门** |
-| 圆角裁剪失效 | 位移后的背景越过 `border-radius` 圆角，四个角出现方角与毛边；`overflow:hidden`、`mask-image` 都兜不住（`probe4.png` 的 A/B/C 三种圆角方案全部失败，E 的纯 `blur()` 正常） |
-| 边缘接缝 | 位移贴图在面边缘取样越界，形成可见的直线接缝与撕裂（`probe3-crop.png` 是放大图）；F 只开 `url()` 时背景被撕成弧形色块 |
-| 几何不稳定 | 同一张贴图在不同尺寸的面里位移量不一致，必须按尺寸重建贴图（canvas → `data:URI`），成本随面积线性增长 |
-| `feImage` 外部引用 | `file://` 与打包后的相对路径都不可靠；**只认 `data:` URI**（canvas → `toDataURL`） |
+| `url()` 确实生效，`CSS.supports()` 不能当闸门 | 隔离实验里第三方链环差 32.5、自研式 28.0，对照「只饱和」13.4、「只镜面」5.3 |
+| **自研位移贴图的沿边不一致**才是可复现的那件事 | 「边缘不稳」（沿边剖面相对中位剖面的 RMS）：CSS 基准 A `5.95–8.95` → 自研折射 B `11.07–17.0`，只换背景采样链路就翻 1.4–2.5 倍；换成第三方贴图 C2 降到 `1.0–6.06` |
+| 滤镜区域决定位移强度 | 同一张图：`0/0/100%/100%` 位移 18.9，`-50%/200%` 为 43.0（2.3 倍）。原来写 100% 是白丢 |
+| 链首 `feGaussianBlur` 不阻断位移 | 隔离实验逐节点验证过（先看截图误判过一次，被像素量测推翻） |
+| 成本随面积与面数线性增长 | 每个面一张独立 SVG 滤镜 + `feImage` + `feDisplacementMap`，逐帧重算；对照实验里开源两行帧时间 13.8ms vs 基线 6.9ms（2 倍） |
+| `feImage` 外部引用不可靠 | `file://` 与打包环境都失败；只认 `data:` URI（canvas → `toDataURL`） |
 
-结论：默认档位用 `backdrop-filter` 的滤镜函数（`blur` / `saturate` / `brightness`）+ 斜面与高光层表达厚度。`url()` 只留在实验模块 `desktop/renderer/glass-refraction.js`：
+结论不变、理由换了：默认档位用 `backdrop-filter` 的滤镜函数（`blur` / `saturate` /
+`brightness`）+ 斜面与高光层表达厚度；`url()` 只留在实验模块，因为它**贵**、而且
+**边缘质量取决于贴图推导**，不是因为它「不生效」或「裁不住圆角」。
+
+`desktop/renderer/glass-refraction.js` 现在的行为：
+
 
 | 实验模块的行为 | 说明 |
 | --- | --- |
-| 开关 | `enableRefraction(root, { band, scale, maxFilters })` / `disableRefraction(root)`，默认关闭 |
-| 资源上限 | 尺寸按 16px 取整分桶、最多 8 张过滤器、小于 17px 的面跳过 |
+| 开关 | `enableRefraction(root, { band, scale, maxFilters })` / `disableRefraction(root)`，默认关闭；`--glass-refraction-on` 不是开关，只认函数调用 |
+| 贴图尺寸 | 按元素**精确尺寸**生成（小面板 17px 起），不再按 16px 分桶；同一尺寸只生成一张 |
+| 资源上限 | 最多 `maxFilters`（默认 8）张过滤器；超出后**复用面积最接近的一张**，而不是跳过这个面——否则同一块界面会有的面在折射、有的面没有 |
+| 滤镜区域 | `-50% / 200%`：100% 会把贴边取样的位移裁掉，实测强度只有 2.3 分之一 |
+| 消费端 | `glass.css` 只在**背后有内容**的面上启用：顶栏胶囊 `.bar .toolbar-actions` 与 `float`。侧栏/侧板背后是页面底色，接上去是把一块纯色再位移一次 |
+| 着色 | 实验档下浮层 tint 降到 `.42/.34`（对照实验：`.60–.80` 白会把位移压得看不见），发布形态的 tint 不受影响 |
 | 标记 | 开启后 `html[data-glass-refraction="on"]`，受影响的节点带 `data-glass-refraction` 与 `--glass-refraction-filter` |
 | 贴图几何 | `rimNormalAt` / `createRimMap` 是纯函数，中心 `128`（不位移），越靠边位移越强，中途在 `band` 内衰减 |
 
-它只服务 lab 对照，不进入分级判定，也不出现在发布默认里。
+它只服务 lab 对照与实验档，不进入分级判定，也不出现在发布默认里。要更好的边缘质量，
+下一步是把贴图推导换成对照实验里的轮廓函数（`docs/liquid-glass-compare.zh.md` §7）。
 
 ### 7.2 不开 Mica、不做无边框窗口
 
@@ -325,6 +340,19 @@ Alaya 桌面壳的材质层规范：玻璃用在哪、令牌怎么改、三档�
 - `.toolbar-actions` 同时是 `focusExitHost`，专注模式的退出按钮挂在这里。
 
 搜索是纯 CSS：`label` 点击把焦点交给内部 `input`，`Ctrl/⌘ F` 走原来的 `el('query').focus()`；`#capture` 从带文字的 `.btn` 退成 `.icon-button`，`#new` 从最左移到胶囊最右——两者 id、事件绑定与快捷键都没变。
+
+### 7.7 外部材质引擎的集成边界（想接 `@xiaojiaenen/liquid-glass` 前先读）
+
+四引擎对照实验（`docs/liquid-glass-compare.zh.md`）实测出的坑，按踩到的顺序：
+
+| 坑 | 实测现象 | 结论 |
+| --- | --- | --- |
+| `exports["./styles"]` 指向 `./dist/index.css` | 包里实际是 `dist/style.css`，`import '…/styles'` 直接 404 | 必须自己引 `dist/style.css`，否则组件没有自带着色与描边 |
+| peer 依赖 React 18 | Alaya 渲染层是无框架 ESM | 只能用它的**光学推导**，用不了它的组件壳 |
+| `useId()` 多 root 撞 filter id | 一个格子挂一个 root 时，8 个组件只有 4 个拿到可用滤镜 | 同一页只能单 root，否则滤镜 id 互相覆盖 |
+| 引擎只写元素级 `backdrop-filter` | Alaya 的 chrome（`.side/.bar/.drawer`）玻璃画在 `::after` 上、元素自身 `backdrop-filter: none` | **任何元素级引擎都接管不了侧栏和顶栏**，要接管必须改造 `::after` 那条路径 |
+| UA 判浏览器 | 它用 UA 认 Chromium，而不是能力检测 | 分级与无障碍层继续用 Alaya 的 `resolveTier()`（强制色 > 高对比 > 减少透明 > 用户选择 > 能力） |
+| 帧时间 | 同环境下开源两行 13.8ms、Alaya 两条引擎 6.9ms（基线） | 需要 36 个现成组件时才局部挂 React，别整体替换 |
 
 ## 8. 集成点
 
