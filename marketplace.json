@@ -5,7 +5,7 @@
     {
       "name": "alaya-notebook",
       "source": "./",
-      "version": "0.7.22",
+      "version": "0.7.23",
       "description": "读写本机 Alaya 笔记本与自由画布（MCP + 技能）。",
       "category": "productivity",
       "tags": [

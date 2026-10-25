@@ -149,11 +149,13 @@ function createInstance({ root, tier: initialTier, storageKey }) {
     return capabilities
   }
 
-  const applyTier = value => {
+  const applyTier = (value, { persist = true } = {}) => {
     const resolved = resolveTier({ requested: value, capabilities: capabilitiesNow() })
     currentTier = resolved
     host.dataset.glassTier = resolved
-    writeStored(storageKey, value ?? null)
+    // 只有用户显式选择才写偏好；挂载时的默认档不落盘，否则以后改默认值就再也
+    // 影响不到这些用户（他们的 localStorage 里已经钉死了一个旧默认）。
+    if (persist) writeStored(storageKey, value ?? null)
     host.dispatchEvent(new CustomEvent('glass:tier', { bubbles: true, detail: { tier: resolved, capabilities: { ...capabilitiesNow() } } }))
     return resolved
   }
@@ -304,7 +306,7 @@ function createInstance({ root, tier: initialTier, storageKey }) {
   // ---- 生命周期 -------------------------------------------------------------
   refresh()
   const stored = readStored(storageKey)
-  currentTier = applyTier(stored ?? initialTier ?? (document.documentElement.dataset.glassTier || null))
+  currentTier = applyTier(stored ?? initialTier ?? (document.documentElement.dataset.glassTier || null), { persist: false })
   observeSizes()
   mutationObserver?.observe(doc.body ?? host, { childList: true, subtree: true })
   for (const query of Object.values(mediaWatcher)) query?.addEventListener?.('change', onMediaChange)
