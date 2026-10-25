@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-glass-tier="balanced">
+<head>
+<meta charset="utf-8" />
+<title>Alaya · 材质实验台</title>
+<link rel="stylesheet" href="glass.css" />
+<style>
+  /* 只给实验台用的布景与排版；材质本身全部来自 glass.css，不在这里复制令牌。 */
+  html, body { margin:0; height:100%; }
+  body {
+    font:13px/1.6 "Microsoft YaHei UI", "Segoe UI", system-ui, sans-serif; color:#20232a;
+    background:#eef1f5; overflow-x:hidden;
+  }
+  /* 折射最容易看出来的布景：高饱和色块 + 细网格 + 文字 */
+  .stage { position:fixed; inset:0; z-index:0; }
+  .stage .photo { position:absolute; inset:0; background:
+      radial-gradient(58% 46% at 14% 22%, #ff8a3d, transparent 72%),
+      radial-gradient(54% 58% at 82% 68%, #0a84ff, transparent 72%),
+      radial-gradient(44% 42% at 56% 8%, #34c759, transparent 72%),
+      linear-gradient(160deg, #f7f1e8, #c9d8e8); }
+  .stage .grid { position:absolute; inset:0; background-image:
+      repeating-linear-gradient(0deg, rgb(15 23 42 / .45) 0 1px, transparent 1px 16px),
+      repeating-linear-gradient(90deg, rgb(15 23 42 / .45) 0 1px, transparent 1px 16px); }
+  .stage .words { position:absolute; inset:0; display:grid; grid-template-columns:repeat(6,1fr); gap:4px;
+      padding:6px; font-weight:800; font-size:12px; color:#0b1522; opacity:.34; }
+
+  .page { position:relative; z-index:1; padding:26px 28px 60px; }
+  /* 文字块给一层实心底：布景是特意做重的，不垫底就没法阅读（也提醒内容层要实心）。 */
+  header.lab, .controls, h2.chapter, .note, table.facts {
+    background:rgb(255 255 255 / .86);
+    border-radius:10px;
+    box-shadow:0 1px 2px rgb(15 23 42 / .06);
+  }
+  header.lab { padding:14px 16px; }
+  .controls { padding:10px 12px; }
+  h2.chapter { padding:9px 14px; }
+  .note { padding:12px 14px; }
+  table.facts { overflow:hidden; }
+  header.lab { display:flex; align-items:flex-end; gap:16px; flex-wrap:wrap; margin-bottom:6px; }
+  header.lab h1 { margin:0; font-size:22px; font-weight:650; letter-spacing:-.2px; }
+  header.lab p { margin:0; color:#4b5563; font-size:12px; max-width:640px; }
+  .controls { display:flex; align-items:center; gap:8px; margin:14px 0 20px; flex-wrap:wrap; }
+  .controls .seg { display:flex; padding:3px; border-radius:9px; background:rgb(255 255 255 / .7);
+      box-shadow:inset 0 1px 2px rgb(15 23 42 / .10); }
+  .controls .seg button { border:0; background:transparent; padding:5px 12px; border-radius:6px; font-size:12px;
+      color:#4b5563; cursor:pointer; }
+  .controls .seg button[aria-pressed="true"] { background:#fff; color:#111827; box-shadow:0 1px 3px rgb(15 23 42 / .16); }
+  .controls .hint { color:#3f4a5a; font-size:11px; }
+
+  h2.chapter { margin:30px 0 10px; font-size:13px; letter-spacing:.06em; color:#374151; text-transform:uppercase; }
+  h2.chapter span { font-weight:400; letter-spacing:0; text-transform:none; color:#6b7280; margin-left:8px; }
+
+  /* 三档并排：容器带 data-glass-tier，glass.css 的分级就跟着容器走 */
+  .tiers { display:grid; grid-template-columns:repeat(3, minmax(0, 1fr)); gap:16px; }
+  .tier { border-radius:14px; padding:12px; background:rgb(255 255 255 / .18); outline:1px solid rgb(255 255 255 / .35); }
+  .tier > .label { margin:0 0 8px; font-size:11px; font-weight:600; letter-spacing:.08em; text-transform:uppercase; color:#111827; }
+  .tier > .label small { display:block; font-weight:400; letter-spacing:0; text-transform:none; color:#374151; }
+
+  /* 模拟真实界面的零件：每个都只靠 data-glass-surface 拿到材质 */
+  .mock { display:flex; flex-direction:column; gap:10px; }
+  .mock-chrome { height:64px; display:flex; align-items:center; gap:8px; padding:0 12px; border-radius:0 0 0 0; }
+  .mock-chrome .crumb { font-size:11px; color:#3f4a5a; margin-right:auto; }
+  .mock-side { display:flex; flex-direction:column; gap:4px; padding:8px; border-radius:0; width:132px; }
+  .mock-row { display:flex; gap:10px; align-items:flex-start; }
+  .mock-nav { display:flex; align-items:center; gap:8px; min-height:28px; padding:5px 8px; border-radius:7px; font-size:11px; }
+  .mock-nav.on { font-weight:600; }
+  .mock-panel { flex:1; padding:10px; border-radius:12px; display:flex; flex-direction:column; gap:8px; }
+  .mock-card { background:#fff; border:1px solid #e4e6eb; border-radius:9px; padding:9px 10px; font-size:11px; color:#374151; }
+  .mock-hud { align-self:flex-start; padding:7px 12px; font-size:11px; border-radius:12px; }
+  .mock-buttons { display:flex; gap:6px; align-items:center; flex-wrap:wrap; }
+  .mock-btn { display:inline-flex; align-items:center; gap:5px; min-height:28px; padding:5px 10px; border:1px solid #e4e6eb;
+      border-radius:8px; background:#fff; font-size:11px; }
+  .mock-btn.primary { background:#007aff; color:#fff; border-color:#007aff; }
+  .mock-btn.soft { background:#eef0f4; border-color:transparent; color:#545d6b; }
+  .mock-icon { width:28px; height:28px; border:0; border-radius:8px; background:transparent; }
+  .mock-search { display:flex; align-items:center; gap:6px; height:28px; padding:0 10px; font-size:11px;
+      color:#6b7280; flex:1; max-width:170px; }
+  .mock-seg { display:flex; padding:2px; border-radius:8px; }
+  .mock-seg span { width:24px; height:20px; display:grid; place-items:center; font-size:10px; border-radius:5px; }
+
+  /* 指针光源演示：直接把引擎会写的变量摆进来 */
+  .glare-demo { display:grid; grid-template-columns:repeat(3, 1fr); gap:16px; }
+  .glare-demo .cell { position:relative; height:120px; border-radius:12px; display:grid; place-items:center;
+      font-size:11px; color:#111827; }
+  .glare-demo .g1 { --glass-glare-x:.22; --glass-glare-y:.25; --glass-glare-o:1; }
+  .glare-demo .g2 { --glass-glare-x:.5; --glass-glare-y:.5; --glass-glare-o:.55; }
+  .glare-demo .g3 { --glass-glare-x:.86; --glass-glare-y:.78; --glass-glare-o:.25; }
+
+  table.facts { border-collapse:collapse; font-size:12px; background:rgb(255 255 255 / .85); border-radius:10px; overflow:hidden; }
+  table.facts th, table.facts td { text-align:left; padding:7px 12px; border-bottom:1px solid #e5e7eb; vertical-align:top; }
+  table.facts th { font-weight:600; background:rgb(255 255 255 / .92); }
+  table.facts code { font:11px/1.5 ui-monospace, Consolas, monospace; }
+
+  .note { font-size:11px; color:#374151; max-width:820px; }
+  .note code { font:11px ui-monospace, Consolas, monospace; background:rgb(15 23 42 / .07); padding:1px 4px; border-radius:4px; }
+
+  /* 假内容的阴影：只为了让"内容层是实心的"看起来像内容，而不是玻璃 */
+  .mock-card h4 { margin:0 0 4px; font-size:12px; }
+  .mock-card p { margin:0; color:#6b7280; }
+</style>
+</head>
+<body>
+<div class="stage" aria-hidden="true"><div class="photo"></div><div class="grid"></div><div class="words" id="words"></div></div>
+
+<div class="page">
+  <header class="lab">
+    <h1>材质实验台 · Liquid Glass</h1>
+    <p>三个并排容器分别带 <code>data-glass-tier</code>，材质全部来自 <code>glass.css</code>。
+      背景是特意做重的：格子、文字、高饱和色块，用来判断模糊、斜面高光与指针光源到底有没有生效。</p>
+  </header>
+
+  <div class="controls">
+    <div class="seg" role="group" aria-label="整页档位">
+      <button type="button" data-set-tier="full">full</button>
+      <button type="button" data-set-tier="balanced" aria-pressed="true">balanced</button>
+      <button type="button" data-set-tier="flat">flat</button>
+    </div>
+    <button type="button" class="mock-btn" id="toggle-motion">模拟指针光源</button>
+    <span class="hint">上排按钮改的是整页（&lt;html&gt;）；下面三列各自固定了自己的档位。</span>
+  </div>
+
+  <h2 class="chapter">一、三档并排 <span>同一套零件，只换档位</span></h2>
+  <div class="tiers" id="tiers"></div>
+
+  <h2 class="chapter">二、指针光源 <span>引擎写 --glass-glare-x/y/o，材质只消费</span></h2>
+  <div class="glare-demo" id="glare"></div>
+
+  <h2 class="chapter">三、五类表面 <span>chrome / panel / float / hud / control</span></h2>
+  <table class="facts">
+    <thead><tr><th>表面</th><th>用在哪</th><th>看什么</th></tr></thead>
+    <tbody>
+      <tr><td><code>chrome</code></td><td>侧栏、顶栏</td><td>中等模糊、上边缘内斜面、贴边一侧的描边</td></tr>
+      <tr><td><code>panel</code></td><td>详情抽屉、AI 侧栏</td><td>与 chrome 同档，方向性高光</td></tr>
+      <tr><td><code>float</code></td><td>菜单、命令面板、模态</td><td>更强着色 + 更深投影；层级靠不透明度差</td></tr>
+      <tr><td><code>hud</code></td><td>状态提示</td><td>最轻的胶囊，不投外部投影</td></tr>
+      <tr><td><code>control</code></td><td>按钮、导航项、搜索、分段</td><td>8px 低模糊、边缘高光、悬停抬 1px、按压 .985</td></tr>
+    </tbody>
+  </table>
+
+  <h2 class="chapter">四、这页能验证什么 <span>以及它不能替代什么</span></h2>
+  <p class="note">
+    能验证：令牌改动后的观感、三档差异、指针光源方向、边缘高光与色散、flat 是否真的丢掉
+    <code>backdrop-filter</code>。<br />
+    不能替代：Electron 里的真实窗口合成（Mica / 无边框 / Snap Layouts 都不在这里）、
+    高 DPI 下的细腻度、触控与键盘焦点。真机走查仍需在安装版里做。
+  </p>
+</div>
+
+<script>
+  const words = document.getElementById('words')
+  let html = ''
+  for (let i = 0; i < 120; i++) html += '<span>ALAYA · GLASS · ALAYA · GLASS</span>'
+  words.innerHTML = html
+
+  // 同一套零件复用三次：只在容器上换档位
+  const parts = () => `
+    <div class="mock">
+      <div class="mock-chrome" data-glass-surface="chrome">
+        <span class="crumb">数据库 / 全部记忆</span>
+        <div class="mock-search" data-glass-surface="control">搜索当前范围</div>
+        <button class="mock-btn soft" data-glass-surface="control">布局</button>
+        <button class="mock-btn primary" data-glass-surface="control">新建记忆</button>
+      </div>
+      <div class="mock-row">
+        <div class="mock-side" data-glass-surface="chrome">
+          <div class="mock-nav on" data-glass-surface="control">全部记忆</div>
+          <div class="mock-nav" data-glass-surface="control">知识库</div>
+          <div class="mock-nav" data-glass-surface="control">对话记忆</div>
+          <div class="mock-nav" data-glass-surface="control">隐藏</div>
+          <div class="mock-hud" data-glass-surface="hud">本地数据库</div>
+        </div>
+        <div class="mock-panel" data-glass-surface="float">
+          <div class="mock-card"><h4>内容层保持实心</h4><p>卡片、正文、表格永远不是玻璃。</p></div>
+          <div class="mock-buttons">
+            <button class="mock-icon" data-glass-surface="control">＋</button>
+            <div class="mock-seg" data-glass-surface="control"><span>卡</span><span>表</span><span>板</span></div>
+            <span class="mock-hud" data-glass-surface="hud">已就绪</span>
+          </div>
+        </div>
+      </div>
+    </div>`
+
+  const tiers = [
+    ['full', '边缘色散打开：冷暖各一条 1px 内描边', '26px 模糊 / 185% 饱和'],
+    ['balanced', '默认档：斜面 + 镜面高光，无色散', '20px 模糊 / 175% 饱和'],
+    ['flat', '不透明回退：没有 backdrop-filter', '实心 tint + 1px hairline'],
+  ]
+  document.getElementById('tiers').innerHTML = tiers.map(([tier, what, how]) => `
+    <section class="tier" data-glass-tier="${tier}">
+      <p class="label">${tier}<small>${how} · ${what}</small></p>
+      ${parts()}
+    </section>`).join('')
+
+  document.getElementById('glare').innerHTML = [
+    ['g1', '光源在左上（0.22, 0.25）'],
+    ['g2', '光源居中（0.5, 0.5）'],
+    ['g3', '光源在右下（0.86, 0.78）'],
+  ].map(([klass, text]) => `<div class="cell ${klass}" data-glass-surface="chrome">${text}</div>`).join('')
+
+  // 整页档位切换：直接改 <html data-glass-tier>
+  for (const button of document.querySelectorAll('[data-set-tier]')) {
+    button.addEventListener('click', () => {
+      document.documentElement.dataset.glassTier = button.dataset.setTier
+      for (const peer of document.querySelectorAll('[data-set-tier]')) peer.setAttribute('aria-pressed', String(peer === button))
+    })
+  }
+
+  // 模拟指针光源：把三块演示面轮流点亮，确认材质只消费变量
+  let on = false
+  document.getElementById('toggle-motion').addEventListener('click', event => {
+    on = !on
+    event.currentTarget.textContent = on ? '停止模拟' : '模拟指针光源'
+    const cells = [...document.querySelectorAll('.glare-demo .cell')]
+    for (const [index, cell] of cells.entries()) {
+      if (on) {
+        cell.animate([{ '--glass-glare-o': '0' }, { '--glass-glare-o': '1' }], { duration: 400, delay: index * 180, fill: 'forwards' })
+      } else {
+        cell.style.removeProperty('--glass-glare-o')
+        cell.getAnimations?.().forEach(animation => animation.cancel())
+      }
+    }
+  })
+</script>
+</body>
+</html>

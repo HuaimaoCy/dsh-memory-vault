@@ -50,18 +50,22 @@ const media = query => typeof matchMedia === 'function' && matchMedia(query).mat
 export function glassCapabilities() {
   const empty = {
     backdropFilter: false, backdropFilterUrl: false, reducedMotion: true, reducedTransparency: false,
-    forcedColors: false, contrastMore: false, hardwareConcurrency: 0, finePointer: false,
+    forcedColors: false, contrastMore: false, hardwareConcurrency: 0, finePointer: false, pointerLight: false,
   }
   if (typeof window === 'undefined' || typeof document === 'undefined') return empty
+  const reducedMotion = media('(prefers-reduced-motion: reduce)')
+  const finePointer = media('(hover: hover) and (pointer: fine)')
   return {
     backdropFilter: supports('backdrop-filter', 'blur(1px)') || supports('-webkit-backdrop-filter', 'blur(1px)'),
     backdropFilterUrl: supports('backdrop-filter', 'url(#alaya-glass-probe)'),
-    reducedMotion: media('(prefers-reduced-motion: reduce)'),
+    reducedMotion,
     reducedTransparency: media('(prefers-reduced-transparency: reduce)'),
     forcedColors: media('(forced-colors: active)'),
     contrastMore: media('(prefers-contrast: more)'),
     hardwareConcurrency: typeof navigator === 'undefined' ? 0 : Number(navigator.hardwareConcurrency ?? 0),
-    finePointer: media('(hover: hover) and (pointer: fine)'),
+    finePointer,
+    // 两个条件都满足才会装配指针光源：触屏没有指针，减少动态效果时不追指针。
+    pointerLight: finePointer && !reducedMotion,
   }
 }
 
@@ -304,7 +308,7 @@ function createInstance({ root, tier: initialTier, storageKey }) {
   observeSizes()
   mutationObserver?.observe(doc.body ?? host, { childList: true, subtree: true })
   for (const query of Object.values(mediaWatcher)) query?.addEventListener?.('change', onMediaChange)
-  if (capabilitiesNow().finePointer && !capabilities.reducedMotion) {
+  if (capabilitiesNow().pointerLight) {
     window.addEventListener('pointermove', moveGlare, { passive: true })
     window.addEventListener('pointerdown', onPointerDown, { passive: true })
     window.addEventListener('pointerup', onPointerUp, { passive: true })
@@ -316,11 +320,7 @@ function createInstance({ root, tier: initialTier, storageKey }) {
   const api = {
     tier: () => currentTier,
     capabilities: () => ({ ...capabilitiesNow() }),
-    setTier: value => {
-      const resolved = applyTier(value)
-      if (!capabilitiesNow().finePointer || capabilities.reducedMotion) return resolved
-      return resolved
-    },
+    setTier: value => applyTier(value),
     refresh: () => { refresh(); observeSizes() },
     surfaces: () => [...known].map(node => ({
       node, kind: node.getAttribute(SURFACE_ATTRIBUTE), size: sizes.get(node) ?? null, glare: glares.get(node)?.opacity ?? 0,

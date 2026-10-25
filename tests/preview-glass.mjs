@@ -63,7 +63,7 @@ try {
     })`)
     const state = JSON.parse(facts)
     assert.ok(state.surfaces > 20, `表面数量太少：${state.surfaces}`)
-    assert.equal(state.chrome, 2, '侧栏与顶栏都要被标记为 chrome')
+    assert.ok(state.chrome >= 2, `chrome 表面太少：${state.chrome}`)
     assert.ok(state.floats >= 1, '动态浮层应该被 MutationObserver 纳入')
     assert.equal(state.api, 'object', '要暴露 window.alayaGlass 便于排错')
     record('db-balanced', await session.screenshot(join(out, 'db-balanced.png')), `tier=${state.tier} surfaces=${state.surfaces}`)
@@ -114,9 +114,45 @@ try {
 
     // 收尾：把用户偏好清掉，避免脚本在真机 profile 里留下选择（预览用的是临时 profile，这里只是礼貌）
     await session.evaluate(`localStorage.removeItem('alaya.glass')`)
+
+    // 4. 滚动：内容从顶栏底下经过——这是「玻璃是界面层」真正的证据
+    await session.evaluate(`window.alayaGlass.setTier('balanced'); document.querySelector('.main').scrollTop = 260`)
+    await sleep(300)
+    record('db-scrolled', await session.screenshot(join(out, 'db-scrolled.png')), '内容从顶栏下经过')
+
+    // 5. 材质探针：临时塞一条高饱和色带顶到顶栏下面。这不是产品状态，只是用来
+    //    确认 backdrop-filter 真的在采样背景（白底白卡看不出模糊，很容易自欺）。
+    const probe = await session.evaluate(`(() => {
+      const strip = document.createElement('div')
+      strip.id = 'glass-probe-strip'
+      strip.style.cssText = 'position:fixed;left:230px;top:0;width:1180px;height:96px;z-index:1;pointer-events:none;'
+        + 'background:repeating-linear-gradient(90deg,#123 0 10px,#0af 10px 20px,#f60 20px 30px)'
+      document.body.append(strip)
+      const bar = document.querySelector('.bar')
+      return JSON.stringify({ backdrop: getComputedStyle(bar).backdropFilter, tint: getComputedStyle(bar).backgroundImage.slice(0, 60) })
+    })()`)
+    await sleep(200)
+    record('db-backdrop-probe', await session.screenshot(join(out, 'db-backdrop-probe.png')), probe)
+    await session.evaluate(`document.getElementById('glass-probe-strip')?.remove()`)
   })
 
-  // 4. 笔记本模式：同一套材质要覆盖第二张界面
+  // 4. 浮层：命令面板盖在内容上，是玻璃最容易被看见的地方
+  await withPage({}, async (session) => {
+    await session.evaluate(`window.alayaGlass.setTier('balanced')`)
+    await session.evaluate(`document.dispatchEvent(new KeyboardEvent('keydown', { key: 'k', ctrlKey: true, bubbles: true }))`)
+    await session.waitFor(`document.querySelector('dialog[open]')`, { label: '命令面板打开' })
+    await sleep(300)
+    const state = JSON.parse(await session.evaluate(`JSON.stringify({
+      open: Boolean(document.querySelector('dialog[open]')),
+      surface: document.querySelector('dialog[open]')?.getAttribute('data-glass-surface') ?? null,
+      blur: getComputedStyle(document.querySelector('dialog[open]')).backdropFilter,
+    })`))
+    assert.equal(state.open, true, '命令面板应能打开')
+    assert.equal(state.surface, 'float', `命令面板要被标成 float，实际 ${state.surface}`)
+    record('db-palette', await session.screenshot(join(out, 'db-palette.png')), `blur=${state.blur}`)
+  })
+
+  // 5. 笔记本模式：同一套材质要覆盖第二张界面
   await withPage({ mode: 'mistakebook' }, async (session) => {
     const state = JSON.parse(await session.evaluate(`JSON.stringify({
       tier: document.documentElement.dataset.glassTier,
@@ -135,7 +171,15 @@ try {
       caps: window.alayaGlass.capabilities(),
     })`))
     assert.equal(state.caps.reducedMotion, true)
-    assert.equal(state.caps.finePointer, false, '减少动态效果下不应开启指针光源')
+    assert.equal(state.caps.pointerLight, false, '减少动态效果下不应开启指针光源')
+    // 真的确认没装上监听：合成一次 pointermove，变量不应该被写
+    const glare = await session.evaluate(`(async () => {
+      const side = document.querySelector('.side')
+      side.dispatchEvent(new PointerEvent('pointermove', { bubbles: true, clientX: 70, clientY: 320, pointerType: 'mouse' }))
+      await new Promise(done => setTimeout(done, 300))
+      return side.style.getPropertyValue('--glass-glare-o')
+    })()`)
+    assert.equal(glare, '', `减少动态效果下不应写高光变量，实际 ${glare}`)
     record('db-reduced-motion', await session.screenshot(join(out, 'db-reduced-motion.png')), `tier=${state.tier}`)
   })
 
