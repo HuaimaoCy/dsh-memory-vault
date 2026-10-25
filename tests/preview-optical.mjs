@@ -7,7 +7,7 @@
  * 2. 真实界面：不注入任何彩色背景，仅凭环境色 + 边缘高光就能看出「这是玻璃」。
  * 3. 动态：指针移动后轮廓高光角度与位置真的变化。
  *
- * 依赖 `tests/fixtures/liquid-glass-compare/png.mjs`（无第三方包的 PNG 解码）。
+ * 依赖 `tests/png.mjs`（无第三方包的 PNG 解码）。
  */
 import assert from 'node:assert/strict'
 import { mkdirSync, writeFileSync } from 'node:fs'
@@ -15,7 +15,7 @@ import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { ChromiumSession } from './preview-cdp.mjs'
 import { createPreviewServer } from './preview-app.mjs'
-import { decodePng } from './fixtures/liquid-glass-compare/png.mjs'
+import { decodePng } from './png.mjs'
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const out = join(root, 'test-tmp', 'preview', 'optical')

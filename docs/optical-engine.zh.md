@@ -4,14 +4,13 @@
 > **SDF → 高度场 → 法线 → Snell 折射 → 背景采样 → Fresnel + 合成**，
 > 数学在 `optical/`，渲染后端可替换（SVG / WebGL2），调度层负责缓存与脏区。
 
-本文只写实现与实测；设计依据与第三方对照见 `docs/liquid-glass.zh.md`、
-`docs/liquid-glass-compare.zh.md`。
+本文只写实现与实测；设计依据与材质规范见 `docs/liquid-glass.zh.md`。
 
-2026-10-25 集成更新：应用默认请求 full，并在两个产品的「外观」面板提供三档选择。
+应用默认请求 full，并在两个产品的「外观」面板提供三档选择。
 SVG 后端覆盖两侧工具条、搜索框与浮层；ResizeObserver 跟踪元素尺寸变化。
 滤镜与位移贴图缓存各限制在 16 项，仅回收未使用条目；卸载与节点移除时释放绑定。
-当前浏览器及真实 Electron 验证见 `tests/preview-liquid-glass.mjs`、`tests/desktop-liquid-glass.mjs`；
-下文早期批次关于「真机未测」的描述已由本轮 file://、1440/1040px 与材质切换测试补充。
+浏览器端与桌面端验证见 `tests/preview-liquid-glass.mjs`、`tests/desktop-liquid-glass.mjs`；
+高 DPI 与窗口合成仍需在真机上确认。
 
 ---
 
@@ -117,5 +116,4 @@ WebGL 不能读任意 DOM 背后的像素，这是浏览器合成器的边界，
   tint/描边/轮廓高光），否则等于「两层玻璃」互相抵消。
 - **首帧成本**：一张贴图的 PNG 编码是几十 ms 级。引擎按每帧 2 个面渐进生成，
   把一次卡顿摊成几帧；面板在完全可见之前不生成（IntersectionObserver）。
-- **真机未测**：本机 `electron.exe` 起不来（`0xC0000005`），GPU 下的真实帧率、
-  高 DPI 细腻度、多显示器仍需在真机 Electron 里补测。
+- **真机未测**：GPU 下的真实帧率、高 DPI 细腻度、多显示器仍需在真机 Electron 里补测。

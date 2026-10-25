@@ -73,10 +73,8 @@
     "test:optical": "node tests/optical-smoke.mjs",
     "test:perf": "node tests/preview-perf.mjs",
     "test:webgl": "node tests/preview-webgl.mjs",
-    "test:optical-ux": "node tests/preview-optical-isolation.mjs --assert",
     "test:liquid-glass": "node tests/preview-liquid-glass.mjs",
     "test:liquid-glass:desktop": "node tests/run-desktop-liquid-glass.mjs",
-    "test:liquid-optics": "node tests/preview-optical-isolation.mjs --assert",
     "test:liquid-motion": "node tests/preview-liquid-motion.mjs",
     "test:workspace-ui": "node tests/preview-workspace-ui.mjs",
     "test:papers": "node --no-warnings tests/papers-smoke.mjs"

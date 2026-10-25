@@ -122,7 +122,7 @@ export function enableRefraction(root = document, { band = 14, scale = 30, maxFi
   for (const node of nodes) {
     const rect = node.getBoundingClientRect()
     // 贴图按元素**精确尺寸**生成：分桶会让贴图被拉伸不到 1%，但位移在边缘是二阶敏感量，
-    // 这点拉伸就足以让沿边剖面与中位剖面对不上（对照实验：边缘不稳 12–17 → 6 以下）。
+    // 这点拉伸就足以让沿边剖面与中位剖面对不上（实测：边缘不稳 12–17 → 6 以下）。
     const width = Math.max(17, Math.round(rect.width))
     const height = Math.max(17, Math.round(rect.height))
     const radius = Math.max(0, Math.round(Number.parseFloat(getComputedStyle(node).borderTopLeftRadius) || 0))

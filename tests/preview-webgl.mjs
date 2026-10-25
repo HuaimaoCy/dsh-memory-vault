@@ -17,7 +17,7 @@ import { mkdirSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { ChromiumSession } from './preview-cdp.mjs'
 import { createPreviewServer } from './preview-app.mjs'
-import { decodePng } from './fixtures/liquid-glass-compare/png.mjs'
+import { decodePng } from './png.mjs'
 
 const root = resolve(import.meta.dirname, '..')
 const out = join(root, 'test-tmp', 'preview', 'webgl')

@@ -71,7 +71,7 @@ export function dispersionIors({ ior = 1.5, dispersion = 0 }) {
  * 可以在不同强度档位复用，只需要改一个属性。
  *
  * 贴图按元素**精确尺寸**生成，不做分桶：位移对边缘是二阶敏感量，1% 的拉伸
- * 就足以破坏轮廓（对照实验：分桶版本边缘不稳 12–17，精确尺寸 1–6）。
+ * 就足以破坏轮廓（实测：分桶版本边缘不稳 12–17，精确尺寸 1–6）。
  */
 export function buildDisplacementMap({
   width,

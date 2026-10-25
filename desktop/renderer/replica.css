@@ -1,7 +1,7 @@
 /* ============================================================================
  * 0.8 光学材质：环境色背景 + 非均匀玻璃着色 + 白色厚边 + 轮廓高光
  *
- * 依据用户给的示意图（340×210 那张 SVG）：
+ * 依据设计稿（340×210 的布局示意）：
  *   - 背景是三段式极淡渐变（#e7f1ed → #f5f6f3 → #edf1fa），给玻璃提供「可采样的真实背景」；
  *   - 玻璃是**对角方向的 alpha 渐变**（.82 → .28 → .6）配 1.5px 白边，而不是均匀白底；
  *   - 侧栏与右上胶囊是玻璃，内容卡片是实心（Solid Content）。
@@ -206,13 +206,13 @@ h1 {
 /* 状态提示原来贴底，抬一点避免压住内容 */
 .status { bottom: 58px; }
 
-/* WebGL ������˽ӹܻ���ɫʱ������ CSS ��һ�㣬�������ݱ�������һ�� */
+/* WebGL ������˽ӹܻ���ɫʱ������ CSS ��һ�㣬�������ݱ�������һ�� */
 html[data-optical-backend="webgl"] .app-shell::before { display: none; }
 html[data-optical-backend="webgl"] .alaya-optical-webgl { z-index: -1; }
 
-/* WebGL ��˽ӹܱ����󣬲����治�ٵ��Լ��� backdrop ģ����
-   ����ģ����Ѳ������λ��Ĩƽ��ʵ�⣺ͬһ��λ��ͼ�� blur(26px) �²�����㣩��
-   ������ CSS ֻ���� tint / ��� / �����߹⣬��ѧ���� canvas�� */
+/* WebGL ��˽ӹܱ����󣬲����治�ٵ��Լ��� backdrop ģ����
+   ����ģ����Ѳ������λ��Ĩƽ��ʵ�⣺ͬһ��λ��ͼ�� blur(26px) �²�����㣩��
+   ������ CSS ֻ���� tint / ��� / �����߹⣬��ѧ���� canvas�� */
 html[data-optical-backend="webgl"] .bar .toolbar-actions[data-glass-surface],
 html[data-optical-backend="webgl"] [data-glass-surface="float"],
 html[data-optical-backend="webgl"] .search-wrap[data-glass-surface],

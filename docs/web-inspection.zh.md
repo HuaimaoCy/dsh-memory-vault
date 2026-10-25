@@ -7,7 +7,7 @@
 ## 起服务
 
 ```powershell
-cd C:\Users\mdorn\Documents\Codex\2026-10-01\c-users-mdorn-documents-deepseek-harness\work\mistake-notebook-addon
+cd <仓库根目录>
 npm.cmd run preview
 ```
 

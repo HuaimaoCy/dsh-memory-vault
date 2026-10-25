@@ -104,7 +104,7 @@ html[data-bg="mist"] { --bg: #eef1f5; }
 html[data-bg="sand"] { --bg: #efe9df; }
 html[data-bg="ink"] { --bg: #dce2ec; }
 
-/* 纯黑正文（评审口径：全部黑色、满不透明度）。只列会显示文字的选择器；
+/* 纯黑正文（取值口径：全部黑色、满不透明度）。只列会显示文字的选择器；
    主按钮的白字、错误提示的红、危险操作色不在其中——那是信息，不是配色。 */
 body, .cap, .label, .eyebrow, .kind-label, .base-mark, .tile-title, .tile-body,
 .tile-footer, .sec-head, .sub-head, .empty h2, .empty p, .drawer-head h2,
@@ -808,7 +808,7 @@ dialog[data-glass-surface] {
 /* glass-refraction.js 只负责生成滤镜并写 --glass-refraction-filter，这里才真正消费它。
    能接的只有「背后有内容」的面：顶栏胶囊、浮层。侧栏与侧板背后是页面底色，
    接上去只是把一块纯色再位移一次，白付成本。
-   同时把浮层 tint 降到 0.42/0.34：对照实验里 tint .60–.80 会把位移压得看不见
+   同时把浮层 tint 降到 0.42/0.34：实测 tint .60–.80 会把位移压得看不见
    （材质强度 69.5 对 72.5），而 .03 又几乎没着色。这一步只影响实验档，
    发布形态的 tint 不动——那里的对比度是 §6.1 实测过的。 */
 html[data-glass-refraction="on"] .bar .toolbar-actions[data-glass-refraction="on"],

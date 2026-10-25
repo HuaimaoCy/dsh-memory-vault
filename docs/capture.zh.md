@@ -172,4 +172,4 @@ node --no-warnings tests/run-desktop-capture.mjs --shot test-tmp/capture-shots/c
   对话记忆分段、笔记本域 `save` 后用 `notebook.list` 读回、笔记本内容不会出现在记忆域、
   偏好只落 `localStorage`、空正文被拒且不写库、IPC 抛错时输入保留 + 错误可见、空目标兜底、
   重挂载恢复偏好、`open(target)` / `toggle` / `Esc` / `destroy`。
-- 测试只使用 `--db` 指向的临时 sqlite（`mkdtemp`），从不碰 `C:\Users\mdorn\.dsh\memory-vault\vault.sqlite`。
+- 测试只使用 `--db` 指向的临时 sqlite（`mkdtemp`），从不碰 `%USERPROFILE%\.dsh\memory-vault\vault.sqlite`。
