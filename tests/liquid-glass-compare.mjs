@@ -29,7 +29,7 @@ import { createServer } from 'node:http'
 import { dirname, extname, join, normalize, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { Session, defaultBrowser } from './fixtures/liquid-glass-compare/cdp.mjs'
-import { decodePng, diffStats, seamScore } from './fixtures/liquid-glass-compare/png.mjs'
+import { decodePng, diffStats, lumaAt, seamScore } from './fixtures/liquid-glass-compare/png.mjs'
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const arg = name => { const index = process.argv.indexOf(name); return index < 0 ? undefined : process.argv[index + 1] }
@@ -55,8 +55,11 @@ const ensureDeps = async () => {
     mkdirSync(probeDir, { recursive: true })
     if (!existsSync(tarball)) {
       step(`下载 ${thirdParty.name}@${thirdParty.version}`)
-      const reply = await fetch(`https://registry.npmjs.org/${thirdParty.name.replace('/', '%2F')}/-/${tarball.split('-').slice(-2).join('-').replace(`${thirdParty.version}`, `${thirdParty.version}`)}`)
-      if (!reply.ok) throw new Error(`下载失败：${reply.status}`)
+      // npm 的 tarball 名去掉作用域：@scope/name@ver → name-ver.tgz
+      const unscoped = thirdParty.name.split('/').pop()
+      const file = `${unscoped}-${thirdParty.version}.tgz`
+      const reply = await fetch(`https://registry.npmjs.org/${thirdParty.name.replace('/', '%2F')}/-/${file}`)
+      if (!reply.ok) throw new Error(`下载失败：${reply.status}（${file}）`)
       writeFileSync(tarball, Buffer.from(await reply.arrayBuffer()))
     }
     execFileSync('tar', ['-xzf', tarball], { cwd: probeDir, stdio: 'inherit' })
@@ -113,28 +116,34 @@ const shrink = (rect, by) => ({ x: rect.x + by, y: rect.y + by, width: rect.widt
 
 /**
  * 圆角弧线之外的像素：位移若把背景推到圆角外，这里会与「无玻璃」基准出现差异。
- * 只取四个角内切弧外侧、但仍在面外接矩形内的像素——这正是「方角与毛边」出现的位置。
+ *
+ * 只在**圆角所在象限**里找（x ≤ cx 且 y ≤ cy）。这一条容易写错：把整个 2r 见方的
+ * 方块都算进去，弧的另一侧其实是形状内部，量出来会是「内部差」而不是「外泄」。
  */
 const cornerBleed = (shown, bare, rect, radius) => {
   const r = Math.min(radius, rect.width / 2, rect.height / 2)
   if (r < 2) return null
+  // 每个角的「外侧象限」方向不同：左上取 x<cx,y<cy，右上取 x>cx,y<cy，依此类推。
+  // 四个角都用 x<cx,y<cy 会量到另外三个角的**形状内部**去了。
   const corners = [
-    { cx: rect.x + r, cy: rect.y + r },
-    { cx: rect.x + rect.width - r, cy: rect.y + r },
-    { cx: rect.x + r, cy: rect.y + rect.height - r },
-    { cx: rect.x + rect.width - r, cy: rect.y + rect.height - r },
+    { cx: rect.x + r, cy: rect.y + r, sx: -1, sy: -1 },
+    { cx: rect.x + rect.width - r, cy: rect.y + r, sx: 1, sy: -1 },
+    { cx: rect.x + r, cy: rect.y + rect.height - r, sx: -1, sy: 1 },
+    { cx: rect.x + rect.width - r, cy: rect.y + rect.height - r, sx: 1, sy: 1 },
   ]
   let sum = 0
   let max = 0
   let count = 0
   let changed = 0
-  for (const { cx, cy } of corners) {
-    const x0 = Math.round(cx - r)
-    const y0 = Math.round(cy - r)
-    for (let y = y0; y < y0 + Math.round(r); y++) {
-      for (let x = x0; x < x0 + Math.round(r); x++) {
-        const distance = Math.hypot(x + 0.5 - cx, y + 0.5 - cy)
-        if (distance <= r + 1.2) continue
+  const pad = 4
+  for (const { cx, cy, sx, sy } of corners) {
+    const x0 = Math.round(sx < 0 ? cx - r - pad : cx)
+    const x1 = Math.round(sx < 0 ? cx : cx + r + pad)
+    const y0 = Math.round(sy < 0 ? cy - r - pad : cy)
+    const y1 = Math.round(sy < 0 ? cy : cy + r + pad)
+    for (let y = y0; y < y1; y++) {
+      for (let x = x0; x < x1; x++) {
+        if (Math.hypot(x + 0.5 - cx, y + 0.5 - cy) <= r + 1.2) continue
         if (x < 0 || y < 0 || x >= shown.width || y >= shown.height) continue
         const i = (y * shown.width + x) * 4
         const d = (Math.abs(shown.data[i] - bare.data[i]) + Math.abs(shown.data[i + 1] - bare.data[i + 1]) + Math.abs(shown.data[i + 2] - bare.data[i + 2])) / 3
@@ -169,6 +178,42 @@ const outsideRing = (shown, bare, rect) => {
   }
 }
 
+/**
+ * 边缘响应的横向一致性：沿边取一堆剖面（离边 start..start+depth 的亮度），
+ * 与中位剖面比较的 RMS。位移贴图被拉伸/分桶/圆角对不上时，边缘响应会随位置变，
+ * 这个数上去；而描边、文字这类位置无关的东西会被中位剖面吃掉，不计入。
+ */
+const edgeInstability = (image, rect, { edge = 'top', start = 3, depth = 22, inset = 12 } = {}) => {
+  const horizontal = edge === 'top' || edge === 'bottom'
+  const along = horizontal ? rect.width : rect.height
+  const safeInset = Math.min(inset, Math.max(2, Math.floor((along - 40) / 2)))
+  const profiles = []
+  for (let t = safeInset; t < along - safeInset; t++) {
+    const profile = []
+    for (let d = 0; d <= depth; d++) {
+      let x
+      let y
+      if (edge === 'top') { x = rect.x + t; y = rect.y + start + d }
+      else if (edge === 'bottom') { x = rect.x + t; y = rect.y + rect.height - start - d }
+      else if (edge === 'left') { x = rect.x + start + d; y = rect.y + t }
+      else { x = rect.x + rect.width - start - d; y = rect.y + t }
+      if (x < 0 || y < 0 || x >= image.width || y >= image.height) { profile.length = 0; break }
+      profile.push(lumaAt(image, x, y))
+    }
+    if (profile.length) profiles.push(profile)
+  }
+  if (profiles.length < 8) return 0
+  const median = profiles[0].map((_, index) => {
+    const values = profiles.map(profile => profile[index]).sort((a, b) => a - b)
+    return values[values.length >> 1]
+  })
+  let sum = 0
+  for (const profile of profiles) {
+    for (let index = 0; index < profile.length; index++) sum += (profile[index] - median[index]) ** 2
+  }
+  return Number(Math.sqrt(sum / (profiles.length * median.length)).toFixed(2))
+}
+
 const measure = ({ shown, bare, scrolled, shapes }) => shapes.map(shape => {
   const radius = shape.materialRadius ?? shape.radius
   const inner = shrink(shape, 4)
@@ -179,6 +224,10 @@ const measure = ({ shown, bare, scrolled, shapes }) => shapes.map(shape => {
   const seamMax = Math.max(...edges.map(edge => edge.p90 ?? 0))
   const edgeEnergy = (diffStats(shown, bare, bandTop).mean + diffStats(shown, bare, bandBottom).mean) / 2
   const centerEnergy = diffStats(shown, bare, center).mean
+  const instability = Math.max(
+    edgeInstability(shown, shape, { edge: 'top', inset: Math.round(radius) + 8 }),
+    edgeInstability(shown, shape, { edge: 'bottom', inset: Math.round(radius) + 8 }),
+  )
   return {
     engine: shape.engine,
     kind: shape.kind,
@@ -191,6 +240,7 @@ const measure = ({ shown, bare, scrolled, shapes }) => shapes.map(shape => {
     centerEnergy: Number(centerEnergy.toFixed(3)),
     edgeCenterRatio: Number((edgeEnergy / Math.max(centerEnergy, 0.01)).toFixed(2)),
     seam: { p90: Number(seamMax.toFixed(2)), max: Number(Math.max(...edges.map(edge => edge.max ?? 0)).toFixed(2)) },
+    seamInstability: instability,
     corner: cornerBleed(shown, bare, shape, radius),
     outside: outsideRing(shown, bare, shape),
     scrollDelta: diffStats(shown, scrolled, inner).mean,
@@ -223,6 +273,8 @@ const main = async () => {
     await session.waitFor('window.LG && window.LG.ready === true', { label: '对照页就绪', timeout: 40000 })
     report.facts = JSON.parse(await session.evaluate('JSON.stringify(window.LG.facts)'))
     assert.equal(report.facts.thirdParty.mounted, 8, `第三方组件应挂 8 个（4 面 × 2 行），实际 ${report.facts.thirdParty.mounted}`)
+    assert.equal(report.facts.thirdParty.glass, 8, '第三方组件应全部走 is-glass（而不是降级到 is-fallback）')
+    assert.equal(new Set(report.facts.thirdParty.filters).size, 8, '八个组件的滤镜 id 必须互不相同（useId 不能撞车）')
     assert.ok(report.facts.refraction.supported, 'Chromium 应支持 backdrop-filter: url()')
     assert.ok(report.facts.refraction.filters > 0, 'Alaya 实验档应生成过滤器')
     assert.equal(report.facts.errors.length, 0, `页面报错：${report.facts.errors.join(' | ')}`)
@@ -243,8 +295,11 @@ const main = async () => {
       probePage: hashOf(join(root, pagePath)),
     }
 
-    step('截图：全引擎 / 无玻璃基准 / 背景滚动')
+    step('截图：全引擎 / 量测档 / 无玻璃基准 / 背景滚动')
     await session.screenshot(join(out, 'compare.png'))
+    await session.evaluate('window.LG.setMeasure(true)')
+    await sleep(400)
+    await session.screenshot(join(out, 'compare-clean.png'))
     await session.evaluate('window.LG.setBare(true)')
     await sleep(400)
     await session.screenshot(join(out, 'bare.png'))
@@ -254,6 +309,8 @@ const main = async () => {
     await sleep(400)
     await session.screenshot(join(out, 'compare-scroll.png'))
     await session.evaluate('window.LG.setScroll(0)')
+    await sleep(250)
+    await session.evaluate('window.LG.setMeasure(false)')
     await sleep(250)
 
     step('放大裁剪：圆角与接缝的证据')
@@ -274,21 +331,31 @@ const main = async () => {
       await session.screenshot(join(out, 'crops', `seam-${engine}.png`), { x: bar.x + 200, y: bar.y - 6, width: 220, height: bar.height + 12, scale: 6 })
     }
 
-    step('性能：背景动画期的 rAF 间隔（每个引擎单独在场）')
+    step('性能：背景动画期的 rAF 间隔（每个引擎单独在场，每个采样 3 次取中位）')
     for (const engine of ['none', ...ENGINES]) {
       await session.evaluate(engine === 'none' ? 'window.LG.setEngineVisible(null, false)' : `window.LG.setEngineVisible(${JSON.stringify(engine)}, true)`)
       await sleep(350)
-      report.perf[engine] = JSON.parse(await session.evaluate(`(async () => JSON.stringify(await window.LG.frameGaps(140)))()`))
+      const samples = []
+      for (let round = 0; round < 3; round++) {
+        samples.push(JSON.parse(await session.evaluate(`(async () => JSON.stringify(await window.LG.frameGaps(120)))()`)))
+        await sleep(150)
+      }
+      const middle = values => [...values].sort((a, b) => a - b)[Math.floor(values.length / 2)]
+      report.perf[engine] = {
+        samples: samples.map(sample => `${sample.median}/${sample.p95}ms 掉${(sample.droppedRatio * 100).toFixed(0)}%`).join(' · '),
+        median: middle(samples.map(sample => sample.median)),
+        p95: middle(samples.map(sample => sample.p95)),
+        droppedRatio: middle(samples.map(sample => sample.droppedRatio)),
+      }
     }
     await session.evaluate('window.LG.setEngineVisible("*", true)')
-
     step('贴图生成本钱')
     report.mapTimings = JSON.parse(await session.evaluate(`(async () => JSON.stringify(await window.LG.mapTimings()))()`))
 
-    const shown = decodePng(readFileSync(join(out, 'compare.png')))
+    const shownClean = decodePng(readFileSync(join(out, 'compare-clean.png')))
     const bare = decodePng(readFileSync(join(out, 'bare.png')))
     const scrolled = decodePng(readFileSync(join(out, 'compare-scroll.png')))
-    report.metrics = measure({ shown, bare, scrolled, shapes: report.layout })
+    report.metrics = measure({ shown: shownClean, bare, scrolled, shapes: report.layout })
 
     writeFileSync(join(out, 'metrics.json'), JSON.stringify(report, null, 2))
 
@@ -298,17 +365,21 @@ const main = async () => {
       '边缘/中心': item.edgeCenterRatio,
       '圆角外泄': item.corner ? `${item.corner.mean}/${item.corner.max}` : '—',
       '面外': `${item.outside.mean}/${item.outside.max}`,
+      '边缘不稳': item.seamInstability,
       '接缝p90': item.seam.p90,
-      '接缝max': item.seam.max,
       '滚动差': item.scrollDelta,
     }))
-    console.log(`\n## 像素量测（${gpu ? 'GPU' : '软件合成'}，值越小越干净，专指圆角外泄/面外/接缝）\n`)
+    console.log(`\n## 像素量测（${gpu ? 'GPU' : '软件合成'}；外泄/面外/接缝越小越干净，材质强度与边缘/中心越大说明真的在折射）\n`)
     console.log(table(cells))
 
+    const ablation = report.metrics.filter(item => item.engine === 'ablation')
+    console.log('\n## 消融（不在本页；见 tests/liquid-glass-isolation.mjs）\n')
+    assert.equal(ablation.length, 0, '消融已移到 isolation 页，本页不应再有 ablation 行')
+
     const perf = Object.entries(report.perf).map(([engine, value]) => ({
-      引擎: engine, p50: value.median, p95: value.p95, max: value.max, '掉帧%': (value.droppedRatio * 100).toFixed(1),
+      引擎: engine, 'p50 中位': value.median, 'p95 中位': value.p95, '掉帧% 中位': (value.droppedRatio * 100).toFixed(1), 三次采样: value.samples,
     }))
-    console.log('\n## 帧间隔（ms，背景动画中，140 帧）\n')
+    console.log('\n## 帧间隔（ms，背景动画中；每个引擎 3 次 × 120 帧取中位）\n')
     console.log(table(perf))
 
     const maps = report.mapTimings.map(item => ({

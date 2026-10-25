@@ -77,29 +77,110 @@ const buildNative = engine => {
   return row
 }
 
-const mountThirdParty = async (engine, { tint, backdropBlur, saturate }) => {
+const mountThirdParty = async (engine, { tint, backdropBlur, saturate } = {}) => {
   const { LiquidGlass } = await import(THIRD_PARTY)
   const row = document.querySelector(`.stage-row[data-engine="${engine}"]`)
-  for (const shape of SHAPES) {
-    const cell = document.createElement('div')
-    cell.className = 'lg-cell'
-    cell.dataset.kind = shape.kind
-    applyGeometry(cell, shape)
-    row.append(cell)
-    const props = {
-      radius: shape.r,
-      ...PRESETS[shape.preset],
-      // 只在「对齐」行覆盖这三项，原版行保持组件默认
-      ...(tint === undefined ? {} : { tint }),
-      ...(backdropBlur === undefined ? {} : { backdropBlur }),
-      ...(saturate === undefined ? {} : { saturate }),
-      'data-kind': shape.kind,
-      style: { position: 'absolute', left: 0, top: 0, width: '100%', height: '100%' },
-    }
-    createRoot(cell).render(createElement(LiquidGlass, props,
-      createElement('span', { className: 'label' }, shape.label)))
+  const host = document.createElement('div')
+  host.style.cssText = 'position:absolute;inset:0'
+  row.append(host)
+  const overrides = {
+    ...(tint === undefined ? {} : { tint }),
+    ...(backdropBlur === undefined ? {} : { backdropBlur }),
+    ...(saturate === undefined ? {} : { saturate }),
   }
+  // 一个 React root 装四个组件：每个组件都用 useId()，分 root 挂载会各自从 r0 重新
+  // 编号，filter id 撞车（重复 id 会让 url(#id) 指到别人的贴图）。
+  createRoot(host).render(createElement(React.Fragment, null, ...SHAPES.map(shape => createElement(LiquidGlass, {
+    key: shape.kind,
+    className: 'lg-cell',
+    radius: shape.r,
+    ...PRESETS[shape.preset],
+    ...overrides,
+    'data-kind': shape.kind,
+    style: {
+      position: 'absolute', left: `${shape.x}px`, top: `${shape.y}px`,
+      width: `${shape.w}px`, height: `${shape.h}px`,
+    },
+  }, createElement('span', { className: 'label' }, shape.label)))))
   return row
+}
+
+/**
+ * 消融实验：用第三方自己的贴图生成器 + 它自己的滤镜链，只把链首的 feGaussianBlur
+ * 拿掉，其余一模一样（同尺寸、同位移、同镜面、不着色）。回答的是「它的光学差在
+ * 哪一步」，而不是「它的光学好不好」——前者才决定能不能直接套用。
+ *
+ * 两个面**不着色**（tint 透明）：只有这样，面的像素变化才只能来自滤镜本身；加了
+ * 白 tint，材质强度就会被 tint 主导，量到的是「有没有变白」而不是「有没有折射」。
+ */
+const buildAblation = async () => {
+  const { generateLiquidGlassMaps } = await import('/test-tmp/liquid-glass-probe/package/dist/lib/displacementMap.js')
+  const row = document.querySelector('.stage-row[data-engine="ablation"]')
+  const width = 220
+  const height = 260
+  const radius = 16
+  const maps = generateLiquidGlassMaps({
+    width, height, radius, bezelWidth: 26, glassThickness: 100,
+    refractiveIndex: 1.5, specularAngleDeg: 60, profile: 'convex_squircle',
+  })
+  const SVG_NS = 'http://www.w3.org/2000/svg'
+  const root = document.createElementNS(SVG_NS, 'svg')
+  root.setAttribute('aria-hidden', 'true')
+  root.setAttribute('width', '0')
+  root.setAttribute('height', '0')
+  root.style.cssText = 'position:absolute;pointer-events:none'
+  const definition = document.createElementNS(SVG_NS, 'defs')
+  root.append(definition)
+  document.body.append(root)
+
+  const build = (id, { keepBlur }) => {
+    const filter = document.createElementNS(SVG_NS, 'filter')
+    filter.setAttribute('id', id)
+    filter.setAttribute('x', '0')
+    filter.setAttribute('y', '0')
+    filter.setAttribute('width', '100%')
+    filter.setAttribute('height', '100%')
+    filter.setAttribute('color-interpolation-filters', 'sRGB')
+    const add = (tag, attributes) => {
+      const node = document.createElementNS(SVG_NS, tag)
+      for (const [name, value] of Object.entries(attributes)) node.setAttribute(name, String(value))
+      filter.append(node)
+      return node
+    }
+    if (keepBlur) add('feGaussianBlur', { in: 'SourceGraphic', stdDeviation: 0.5, result: 'blurred' })
+    add('feImage', { href: maps.displacementUrl, x: 0, y: 0, width, height, preserveAspectRatio: 'none', result: 'map' })
+    add('feDisplacementMap', {
+      in: keepBlur ? 'blurred' : 'SourceGraphic', in2: 'map', scale: 52,
+      xChannelSelector: 'R', yChannelSelector: 'G', result: 'displaced',
+    })
+    add('feColorMatrix', { in: 'displaced', type: 'saturate', values: '1.3', result: 'saturated' })
+    add('feImage', { href: maps.specularUrl, x: 0, y: 0, width, height, preserveAspectRatio: 'none', result: 'specular' })
+    add('feBlend', { in: 'specular', in2: 'saturated', mode: 'screen' })
+    definition.append(filter)
+    return [...filter.children].map(node => node.tagName.toLowerCase())
+  }
+
+  const variants = [
+    { kind: 'orig', id: 'ablation-original', keepBlur: true, label: '原链（链首 feGaussianBlur）' },
+    { kind: 'fixed', id: 'ablation-noblur', keepBlur: false, label: '删掉链首 feGaussianBlur' },
+  ]
+  const chains = {}
+  variants.forEach((variant, index) => {
+    chains[variant.kind] = build(variant.id, { keepBlur: variant.keepBlur })
+    const node = document.createElement('div')
+    node.className = 'shape'
+    node.dataset.kind = variant.kind
+    applyGeometry(node, { kind: variant.kind, x: 130 + index * 260, y: 122, w: width, h: height, r: radius })
+    node.style.border = '1px solid rgb(255 255 255 / .35)'
+    node.style.backdropFilter = `url(#${variant.id})`
+    node.style.webkitBackdropFilter = `url(#${variant.id})`
+    const label = document.createElement('span')
+    label.className = 'label'
+    label.textContent = variant.label
+    node.append(label)
+    row.append(node)
+  })
+  return { built: true, chains, mapBytes: [maps.displacementUrl.length, maps.specularUrl.length] }
 }
 
 const init = async () => {
@@ -107,12 +188,22 @@ const init = async () => {
   const refractionRow = buildNative('alaya-refraction')
   // B 行：实验档接管背景采样。只作用于 B 行——真实集成里 root 是应用根，这里用行根。
   const refraction = enableRefraction(refractionRow, { band: 14, scale: 30, maxFilters: 8 })
-  await mountThirdParty('xiaojiaenen-default', {})
+  await mountThirdParty('xiaojiaenen-default')
   await mountThirdParty('xiaojiaenen-aligned', { tint: 'rgba(255, 255, 255, 0.70)', backdropBlur: 20, saturate: 1.75 })
   // 等第三方的 ResizeObserver（100ms 防抖 + 一帧）把贴图算完
-  await new Promise(done => setTimeout(done, 700))
-
+  await new Promise(done => setTimeout(done, 900))
+  // 先记录第三方自己的产物，再做消融（消融会往同一份 defs 里追加克隆）
   const thirdParty = [...document.querySelectorAll('.stage-row[data-engine^="xiaojiaenen"] .liquid-glass')]
+  const thirdPartyFilters = [...document.querySelectorAll('.liquid-glass svg defs filter')].map(node => node.id)
+  const thirdPartyMaps = document.querySelectorAll('.liquid-glass svg feImage').length
+
+  const gl = (() => {
+    const canvas = document.createElement('canvas')
+    const context = canvas.getContext('webgl2') ?? canvas.getContext('webgl')
+    if (!context) return null
+    const info = context.getExtension('WEBGL_debug_renderer_info')
+    return info ? String(context.getParameter(info.UNMASKED_RENDERER_WEBGL)) : String(context.getParameter(context.RENDERER))
+  })()
   const state = {
     tier: document.documentElement.dataset.glassTier ?? null,
     refraction: {
@@ -123,9 +214,10 @@ const init = async () => {
       mounted: thirdParty.length,
       glass: thirdParty.filter(node => node.classList.contains('is-glass')).length,
       fallback: thirdParty.filter(node => node.classList.contains('is-fallback')).length,
-      filters: document.querySelectorAll('svg[aria-hidden="true"] defs filter').length,
-      maps: document.querySelectorAll('svg[aria-hidden="true"] feImage').length,
+      filters: thirdPartyFilters,
+      maps: thirdPartyMaps,
     },
+    renderer: gl,
     supportsUrl: CSS.supports('backdrop-filter', 'url(#probe)'),
     userAgent: navigator.userAgent,
     // 结构性缺口：Alaya 的 chrome 面（.side/.bar/.drawer）把玻璃画在 ::after 上，
@@ -159,6 +251,7 @@ const init = async () => {
     layout,
     setEngineVisible,
     setBare,
+    setMeasure,
     setScroll,
     frameGaps,
     mapTimings,
@@ -170,7 +263,8 @@ const init = async () => {
 const layout = () => [...document.querySelectorAll('.stage-row')].flatMap(row => {
   const engine = row.dataset.engine
   return [...row.querySelectorAll('.shape, .lg-cell')].map(cell => {
-    const inner = cell.classList.contains('lg-cell') ? cell.querySelector('.liquid-glass') : cell
+    // 第三方的组件根节点同时带 .lg-cell；Alaya 的面就是节点本身。
+    const inner = cell.classList.contains('liquid-glass') ? cell : cell.querySelector('.liquid-glass')
     const rect = cell.getBoundingClientRect()
     const target = inner ?? cell
     const style = getComputedStyle(target)
@@ -180,7 +274,7 @@ const layout = () => [...document.querySelectorAll('.stage-row')].flatMap(row =>
       x: rect.x, y: rect.y, width: rect.width, height: rect.height,
       radius: Number.parseFloat(getComputedStyle(cell).borderTopLeftRadius) || 0,
       materialRadius: Number.parseFloat(style.borderTopLeftRadius) || 0,
-      mounted: Boolean(inner),
+      mounted: Boolean(inner) || cell.classList.contains('liquid-glass'),
       backdropFilter: style.backdropFilter,
       backgroundColor: style.backgroundColor,
       backgroundImage: style.backgroundImage.slice(0, 70),
@@ -208,6 +302,12 @@ const setEngineVisible = (engine, visible = true) => {
 const setBare = bare => {
   document.documentElement.dataset.bare = bare ? '1' : '0'
   return bare
+}
+
+/** 量测档：藏文字 + 掐投影（见 probe.css）。观感截图保持默认档。 */
+const setMeasure = measure => {
+  document.documentElement.dataset.measure = measure ? '1' : '0'
+  return measure
 }
 
 /** 背景位移：模拟「内容从玻璃底下滚过」。 */

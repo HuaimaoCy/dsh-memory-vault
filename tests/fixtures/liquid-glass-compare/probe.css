@@ -134,6 +134,14 @@ body {
 html[data-bare="1"] .shape,
 html[data-bare="1"] .lg-cell { visibility: hidden; }
 
+/* 量测档：藏掉文字与投影，只留材质本身。
+ * 文字会污染接缝检测（白字的二阶差分比接缝大两个数量级）；投影是设计令牌而不是
+ * 光学路径，落在圆角外不等于「裁剪失效」。观感截图用默认档，量测用这一档。 */
+html[data-measure="1"] .label { visibility: hidden; }
+html[data-measure="1"] .shape,
+html[data-measure="1"] .lg-cell,
+html[data-measure="1"] .border-glow-effect { box-shadow: none !important; }
+
 .shape .label,
 .lg-cell .label {
   position: absolute;

@@ -1,0 +1,197 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<title>滤镜组合隔离：哪一步让 url() 折射失效</title>
+<style>
+  body { margin: 0; background: #0b1220; color: #fff; font: 12px/1.4 ui-monospace, monospace; }
+  #bg { position: fixed; inset: 0; background-color: #0b1220;
+    background-image:
+      repeating-linear-gradient(0deg, rgb(255 255 255 / .8) 0 1px, transparent 1px 12px),
+      repeating-linear-gradient(90deg, rgb(255 255 255 / .8) 0 1px, transparent 1px 12px),
+      conic-gradient(from 200deg, #ff375f, #ffd60a, #30d158, #0a84ff, #bf5af2, #ff375f);
+    background-size: 12px 12px, 12px 12px, 160px 160px; }
+  #stage { position: relative; z-index: 1; padding: 24px; display: grid; grid-template-columns: repeat(3, 440px); gap: 18px 24px; }
+  .cell { position: relative; width: 420px; height: 240px; border-radius: 20px; }
+  .cell > span { position: absolute; left: 10px; top: 8px; color: #fff; text-shadow: 0 1px 2px #000; z-index: 5; }
+  .cell.is-filtered { border: 1px solid rgb(255 255 255 / .35); }
+  /* 基准档：把所有滤镜关掉，同一张页面就是「无玻璃」参考图 */
+  html[data-off="1"] .cell { backdrop-filter: none !important; -webkit-backdrop-filter: none !important; }
+  html[data-off="1"] .cell { border-color: transparent !important; }
+  html[data-off="1"] .cell > span { visibility: hidden; }
+</style>
+</head>
+<body>
+<div id="bg"></div>
+<main id="stage"></main>
+<script type="module">
+// 用第三方自己的贴图生成器，保证位移数据一致；变的只有滤镜的组合方式。
+const { generateLiquidGlassMaps } = await import('/test-tmp/liquid-glass-probe/package/dist/lib/displacementMap.js')
+const maps = generateLiquidGlassMaps({
+  width: 420, height: 240, radius: 20, bezelWidth: 26, glassThickness: 100,
+  refractiveIndex: 1.5, specularAngleDeg: 60, profile: 'convex_squircle',
+})
+const SVG_NS = 'http://www.w3.org/2000/svg'
+
+const variants = [
+  {
+    label: 'V1 Alaya 式：feImage→feDisplacementMap，区域 100%',
+    region: { x: '0', y: '0', width: '100%', height: '100%' },
+    nodes: [['feImage', { href: maps.displacementUrl, x: 0, y: 0, width: 420, height: 240, preserveAspectRatio: 'none', result: 'map' }],
+      ['feDisplacementMap', { in: 'SourceGraphic', in2: 'map', scale: 52, xChannelSelector: 'R', yChannelSelector: 'G' }]],
+  },
+  {
+    label: 'V2 加预模糊，区域 100%',
+    region: { x: '0', y: '0', width: '100%', height: '100%' },
+    nodes: [['feGaussianBlur', { in: 'SourceGraphic', stdDeviation: 0.5, result: 'blurred' }],
+      ['feImage', { href: maps.displacementUrl, x: 0, y: 0, width: 420, height: 240, preserveAspectRatio: 'none', result: 'map' }],
+      ['feDisplacementMap', { in: 'blurred', in2: 'map', scale: 52, xChannelSelector: 'R', yChannelSelector: 'G' }]],
+  },
+  {
+    label: 'V3 加预模糊，区域 -50%/200%',
+    region: { x: '-50%', y: '-50%', width: '200%', height: '200%' },
+    nodes: [['feGaussianBlur', { in: 'SourceGraphic', stdDeviation: 0.5, result: 'blurred' }],
+      ['feImage', { href: maps.displacementUrl, x: 0, y: 0, width: 420, height: 240, preserveAspectRatio: 'none', result: 'map' }],
+      ['feDisplacementMap', { in: 'blurred', in2: 'map', scale: 52, xChannelSelector: 'R', yChannelSelector: 'G' }]],
+  },
+  {
+    label: 'V4 第三方原链（模糊+位移+饱和+镜面 screen），区域 -50%/200%',
+    region: { x: '-50%', y: '-50%', width: '200%', height: '200%' },
+    nodes: [['feGaussianBlur', { in: 'SourceGraphic', stdDeviation: 0.5, result: 'blurred' }],
+      ['feImage', { href: maps.displacementUrl, x: 0, y: 0, width: 420, height: 240, preserveAspectRatio: 'none', result: 'map' }],
+      ['feDisplacementMap', { in: 'blurred', in2: 'map', scale: 52, xChannelSelector: 'R', yChannelSelector: 'G', result: 'displaced' }],
+      ['feColorMatrix', { in: 'displaced', type: 'saturate', values: '1.3', result: 'saturated' }],
+      ['feImage', { href: maps.specularUrl, x: 0, y: 0, width: 420, height: 240, preserveAspectRatio: 'none', result: 'specular' }],
+      ['feBlend', { in: 'specular', in2: 'saturated', mode: 'screen' }]],
+  },
+  {
+    label: 'V5 第三方原链，区域改成 100%',
+    region: { x: '0', y: '0', width: '100%', height: '100%' },
+    nodes: [['feGaussianBlur', { in: 'SourceGraphic', stdDeviation: 0.5, result: 'blurred' }],
+      ['feImage', { href: maps.displacementUrl, x: 0, y: 0, width: 420, height: 240, preserveAspectRatio: 'none', result: 'map' }],
+      ['feDisplacementMap', { in: 'blurred', in2: 'map', scale: 52, xChannelSelector: 'R', yChannelSelector: 'G', result: 'displaced' }],
+      ['feColorMatrix', { in: 'displaced', type: 'saturate', values: '1.3', result: 'saturated' }],
+      ['feImage', { href: maps.specularUrl, x: 0, y: 0, width: 420, height: 240, preserveAspectRatio: 'none', result: 'specular' }],
+      ['feBlend', { in: 'specular', in2: 'saturated', mode: 'screen' }]],
+  },
+  {
+    label: 'V6 只开 blur(20px)（无 url），对照',
+    region: null,
+    nodes: [],
+  },
+  {
+    label: 'V7 只 feGaussianBlur（stdDeviation .5），区域 100%',
+    region: { x: '0', y: '0', width: '100%', height: '100%' },
+    nodes: [['feGaussianBlur', { in: 'SourceGraphic', stdDeviation: 0.5 }]],
+  },
+  {
+    label: 'V8 feGaussianBlur 在前但位移取 SourceGraphic，区域 100%',
+    region: { x: '0', y: '0', width: '100%', height: '100%' },
+    nodes: [['feGaussianBlur', { in: 'SourceGraphic', stdDeviation: 0.5, result: 'blurred' }],
+      ['feImage', { href: maps.displacementUrl, x: 0, y: 0, width: 420, height: 240, preserveAspectRatio: 'none', result: 'map' }],
+      ['feDisplacementMap', { in: 'SourceGraphic', in2: 'map', scale: 52, xChannelSelector: 'R', yChannelSelector: 'G' }]],
+  },
+  {
+    label: 'V9 feGaussianBlur stdDeviation 0 + 位移，区域 100%',
+    region: { x: '0', y: '0', width: '100%', height: '100%' },
+    nodes: [['feGaussianBlur', { in: 'SourceGraphic', stdDeviation: 0, result: 'blurred' }],
+      ['feImage', { href: maps.displacementUrl, x: 0, y: 0, width: 420, height: 240, preserveAspectRatio: 'none', result: 'map' }],
+      ['feDisplacementMap', { in: 'blurred', in2: 'map', scale: 52, xChannelSelector: 'R', yChannelSelector: 'G' }]],
+  },
+  {
+    label: 'V10 位移 + 镜面 feBlend screen（无预模糊），区域 100%',
+    region: { x: '0', y: '0', width: '100%', height: '100%' },
+    nodes: [['feImage', { href: maps.displacementUrl, x: 0, y: 0, width: 420, height: 240, preserveAspectRatio: 'none', result: 'map' }],
+      ['feDisplacementMap', { in: 'SourceGraphic', in2: 'map', scale: 52, xChannelSelector: 'R', yChannelSelector: 'G', result: 'displaced' }],
+      ['feImage', { href: maps.specularUrl, x: 0, y: 0, width: 420, height: 240, preserveAspectRatio: 'none', result: 'specular' }],
+      ['feBlend', { in: 'specular', in2: 'displaced', mode: 'screen' }]],
+  },
+  {
+    label: 'V11 位移 + 饱和度（无模糊无镜面），区域 100%',
+    region: { x: '0', y: '0', width: '100%', height: '100%' },
+    nodes: [['feImage', { href: maps.displacementUrl, x: 0, y: 0, width: 420, height: 240, preserveAspectRatio: 'none', result: 'map' }],
+      ['feDisplacementMap', { in: 'SourceGraphic', in2: 'map', scale: 52, xChannelSelector: 'R', yChannelSelector: 'G', result: 'displaced' }],
+      ['feColorMatrix', { in: 'displaced', type: 'saturate', values: '1.3' }]],
+  },
+  {
+    label: 'V12 原链去掉 feGaussianBlur（位移+饱和+镜面），区域 100%',
+    region: { x: '0', y: '0', width: '100%', height: '100%' },
+    nodes: [['feImage', { href: maps.displacementUrl, x: 0, y: 0, width: 420, height: 240, preserveAspectRatio: 'none', result: 'map' }],
+      ['feDisplacementMap', { in: 'SourceGraphic', in2: 'map', scale: 52, xChannelSelector: 'R', yChannelSelector: 'G', result: 'displaced' }],
+      ['feColorMatrix', { in: 'displaced', type: 'saturate', values: '1.3', result: 'saturated' }],
+      ['feImage', { href: maps.specularUrl, x: 0, y: 0, width: 420, height: 240, preserveAspectRatio: 'none', result: 'specular' }],
+      ['feBlend', { in: 'specular', in2: 'saturated', mode: 'screen' }]],
+  },
+  {
+    label: 'V13 位移之后再 feGaussianBlur（后置模糊），区域 100%',
+    region: { x: '0', y: '0', width: '100%', height: '100%' },
+    nodes: [['feImage', { href: maps.displacementUrl, x: 0, y: 0, width: 420, height: 240, preserveAspectRatio: 'none', result: 'map' }],
+      ['feDisplacementMap', { in: 'SourceGraphic', in2: 'map', scale: 52, xChannelSelector: 'R', yChannelSelector: 'G', result: 'displaced' }],
+      ['feGaussianBlur', { in: 'displaced', stdDeviation: 2 }]],
+  },
+  {
+    // 对照：只做饱和度，不位移。用来证明「环差」不是饱和或镜面刷出来的。
+    label: 'V14 对照：只 feColorMatrix 饱和 1.3（无位移）',
+    region: { x: '0', y: '0', width: '100%', height: '100%' },
+    nodes: [['feColorMatrix', { in: 'SourceGraphic', type: 'saturate', values: '1.3' }]],
+  },
+  {
+    // 对照：只叠镜面高光，不位移。
+    label: 'V15 对照：只 feImage 镜面 + screen（无位移）',
+    region: { x: '0', y: '0', width: '100%', height: '100%' },
+    nodes: [['feImage', { href: maps.specularUrl, x: 0, y: 0, width: 420, height: 240, preserveAspectRatio: 'none', result: 'specular' }],
+      ['feBlend', { in: 'specular', in2: 'SourceGraphic', mode: 'screen' }]],
+  },
+]
+
+const defs = document.createElementNS(SVG_NS, 'svg')
+defs.setAttribute('aria-hidden', 'true')
+defs.setAttribute('width', '0')
+defs.setAttribute('height', '0')
+defs.style.cssText = 'position:absolute;pointer-events:none'
+const defsRoot = document.createElementNS(SVG_NS, 'defs')
+defs.append(defsRoot)
+document.body.append(defs)
+
+variants.forEach((variant, index) => {
+  const cell = document.createElement('div')
+  cell.className = 'cell is-filtered'
+  const label = document.createElement('span')
+  label.textContent = variant.label
+  cell.append(label)
+  if (variant.region) {
+    const id = `iso-${index}`
+    const filter = document.createElementNS(SVG_NS, 'filter')
+    filter.setAttribute('id', id)
+    for (const [name, value] of Object.entries(variant.region)) filter.setAttribute(name, value)
+    filter.setAttribute('color-interpolation-filters', 'sRGB')
+    for (const [tag, attributes] of variant.nodes) {
+      const node = document.createElementNS(SVG_NS, tag)
+      for (const [name, value] of Object.entries(attributes)) node.setAttribute(name, String(value))
+      filter.append(node)
+    }
+    defsRoot.append(filter)
+    cell.style.backdropFilter = `url(#${id})`
+    cell.style.webkitBackdropFilter = `url(#${id})`
+  } else {
+    cell.style.backdropFilter = 'blur(20px)'
+  }
+  document.getElementById('stage').append(cell)
+})
+
+await new Promise(done => setTimeout(done, 400))
+window.__facts = {
+  variants: variants.map((variant, index) => ({ label: variant.label, filter: getComputedStyle(document.getElementById('stage').children[index]).backdropFilter })),
+  supportsUrl: CSS.supports('backdrop-filter', 'url(#x)'),
+  mapBytes: [maps.displacementUrl.length, maps.specularUrl.length],
+}
+// 量测用：每个格子的矩形 + 一个「全部滤镜关掉」的基准开关（布局不变）。
+window.__cells = [...document.querySelectorAll('#stage .cell')].map((node, index) => {
+  const rect = node.getBoundingClientRect()
+  return { index, label: variants[index].label, x: rect.x, y: rect.y, width: rect.width, height: rect.height }
+})
+window.__setOff = off => { document.documentElement.dataset.off = off ? '1' : '0' }
+
+</script>
+</body>
+</html>
