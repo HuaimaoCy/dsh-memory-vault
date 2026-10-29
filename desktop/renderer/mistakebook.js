@@ -886,7 +886,7 @@ export function mountMistakebook({ beforeEnter, appearance,standalone=false }) {
     const saveResult=button('保存为新笔记',async()=>{
       if(!result)throw new Error('请先生成预览')
       const saved=await call('organize.save',{title:title.value,content:content.value,sources:result.sources})
-      node.close();Object.assign(state,{view:'all',type:'',subjectID:'',nodeID:'',query:'',tag:'',picking:false,draft:saved,page:'view',review:false,dirty:false});state.selection.clear();search.value='';await load();notify('已保存为新笔记，来源保留')
+      node.close();node.remove();Object.assign(state,{view:'all',type:'',subjectID:'',nodeID:'',query:'',tag:'',picking:false,draft:saved,page:'view',review:false,dirty:false});state.selection.clear();search.value='';await load();notify('已保存为新笔记，来源保留')
     },false,{id:'mb-organize-save',disabled:true})
     const node=dialog('AI 整理笔记',h('div',{class:'mb-settings-form'},h('p',{class:'cap',text:'选中的笔记文字会发送给已配置的 AI 服务。图片和手写画布不参与；最多 20 篇、100000 字。原笔记保留。'}),sourceCount,sources,field('整理要求（可选）',instruction),h('div',{class:'row'},generate,cancel,saveResult),status,preview),true)
     node.addEventListener('close',()=>{generation++;if(running)void call('cancelAI').catch(()=>{});running=false})
