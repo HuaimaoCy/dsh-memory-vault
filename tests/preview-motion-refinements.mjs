@@ -41,6 +41,14 @@ try{
       await session.waitFor(`document.body.dataset.mode==='mistakebook'&&document.querySelector('#mb-query')`)
     }
     const selector=mode==='memory'?'.bar .search-wrap':'.mb-bar .search-wrap'
+    const nav=mode==='memory'?'#views .nav':'#mb-views .nav'
+    const point=await js(`(()=>{const r=document.querySelector('${nav}').getBoundingClientRect();return{x:r.x+r.width/2,y:r.y+r.height/2}})()`)
+    await session.send('Input.dispatchMouseEvent',{type:'mousePressed',...point,button:'left',buttons:1,clickCount:1})
+    await pause(100)
+    const stable=await js(`(()=>{const nav=document.querySelector('${nav}'),side=nav.closest('.side,.mb-side'),bar=document.querySelector('${selector}').closest('header');return [nav,side,bar].map(node=>({transform:getComputedStyle(node).transform,pressed:node.hasAttribute('data-glass-pressed')}))})()`)
+    assert.ok(stable.every(item=>item.transform==='none'&&!item.pressed),'top and side panels must stay still on press')
+    await session.send('Input.dispatchMouseEvent',{type:'mouseReleased',...point,button:'left',buttons:0,clickCount:1})
+    await pause(100)
     await js(`window.__searchAnimationCount=0;window.__searchAnimateOriginal??=Element.prototype.animate;Element.prototype.animate=function(...args){if(this.matches('.search-wrap,.search-wrap input'))window.__searchAnimationCount++;return window.__searchAnimateOriginal.apply(this,args)}`)
     const before=await js(`(()=>{const r=document.querySelector('${selector} .icon').getBoundingClientRect();return{x:r.x,y:r.y,w:r.width,h:r.height}})()`)
     await click(`${selector} .search-trigger`)
@@ -59,5 +67,5 @@ try{
   }
   assert.deepEqual(session.exceptions,[])
   writeFileSync(join(out,'results.json'),JSON.stringify(report,null,2))
-  console.log('Three-phase lens, stable search icon, repeated trigger and internal focus passed in both modes')
+  console.log('Three-phase lens, stable top/side panels, stable search icon, repeated trigger and internal focus passed in both modes')
 }finally{await session.close();server.close()}

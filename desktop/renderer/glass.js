@@ -42,6 +42,7 @@ const LARGE_KINDS = new Set(['chrome', 'panel', 'float'])
 
 const SURFACE_ATTRIBUTE = 'data-glass-surface'
 const PRESS_ATTRIBUTE = 'data-glass-pressed'
+const STABLE_CHROME_SELECTOR='.side,.mb-side,.bar,.mb-bar'
 
 const supports = (property, value) => {
   if (typeof CSS === 'undefined' || typeof CSS.supports !== 'function') return false
@@ -292,6 +293,11 @@ function createInstance({ root, tier: initialTier, storageKey }) {
     const state = glares.get(node) ?? { opacity: 0, cancel: null }
     glares.set(node, state)
     state.cancel?.()
+    if(node.closest(STABLE_CHROME_SELECTOR)&&!node.hasAttribute('data-optical-lens')){
+      state.opacity=targetOpacity
+      node.style.setProperty('--glass-glare-o',targetOpacity.toFixed(3))
+      return
+    }
     if (Math.abs(state.opacity - targetOpacity) < 0.005) {
       state.opacity = targetOpacity
       node.style.setProperty('--glass-glare-o', targetOpacity.toFixed(3))
@@ -352,7 +358,7 @@ function createInstance({ root, tier: initialTier, storageKey }) {
 
   // ---- 按压 -----------------------------------------------------------------
   const press = node => {
-    if (!node || pressed.has(node)) return
+    if (!node || node.closest(STABLE_CHROME_SELECTOR) || pressed.has(node)) return
     pressed.add(node)
     node.setAttribute(PRESS_ATTRIBUTE, '')
     node.style.setProperty('--glass-press', '1')

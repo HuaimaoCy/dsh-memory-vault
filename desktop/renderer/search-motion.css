@@ -14,3 +14,12 @@
 .search-wrap .search-trigger:focus-visible {outline:2px solid var(--accent);outline-offset:2px;}
 :is(.bar,.mb-bar) .search-wrap .search {min-width:0;width:100%;opacity:1;transition:none;}
 :is(.bar,.mb-bar) .search-wrap[data-search-expanded="false"] .search {width:0;opacity:0;pointer-events:none;}
+
+/* Persistent chrome stays still on press. Selection lenses move independently. */
+:is(.side,.mb-side,.bar,.mb-bar)[data-glass-surface] { transform:none!important; }
+:is(.side,.mb-side,.bar,.mb-bar) :is(.nav,.btn,.icon-button,.segment,.brand-mark,.mb-book-mark,.search-trigger) {
+  transform:none!important;
+  transition-property:background-color,border-color,color,box-shadow;
+  transition-duration:120ms;
+  transition-timing-function:ease-out;
+}
