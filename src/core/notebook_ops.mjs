@@ -17,7 +17,7 @@ import { randomUUID } from 'node:crypto'
 import { segmentQuestions } from '../../addons/mistakebook/store.mjs'
 import {
   analyze, createCloze, extractWordsWithAI, lookupWord, recognize,
-  solve, validateOCRSettings,
+  solve, organizeNotes, validateOCRSettings,
 } from '../../addons/mistakebook/services.mjs'
 import { SIMULATIONS, simulationURL } from '../../addons/mistakebook/simulations.mjs'
 
@@ -41,6 +41,8 @@ export const NOTEBOOK_OPS = {
   'notebook.ai.accept': { write: true },
   'notebook.cancelAI': { write: true },
   'notebook.solve': { write: true },
+  'notebook.organize': { write: false },
+  'notebook.organize.save': { write: true },
   'notebook.quiz.start': { write: true },
   'notebook.quiz.submit': { write: true },
   'notebook.words.extract': { write: true },
@@ -73,6 +75,16 @@ function endRequest(hooks, kind, request) {
   if (current === request) { if (kind === 'ai') hooks.setAI(undefined); else hooks.setOCR(undefined) }
 }
 
+async function waitForAI(task,signal){
+  let abort
+  try{
+    return await Promise.race([task,new Promise((resolve,reject)=>{
+      abort=()=>reject(new Error('AI 整理已取消'))
+      if(signal.aborted)abort();else signal.addEventListener('abort',abort,{once:true})
+    })])
+  }finally{if(abort)signal.removeEventListener('abort',abort)}
+}
+
 /**
  * Run one notebook operation.
  *
@@ -94,6 +106,15 @@ export const handlers = {
   'notebook.assign': ({ notebook }, body) => notebook.assign(body?.id, body?.target ?? {}),
   'notebook.ai.accept': ({ notebook }, body) => notebook.acceptAI(body.id),
   'notebook.cancelAI': ({ hooks }) => { hooks.getAI()?.abort(); return { cancelled: true } },
+  'notebook.organize.save': ({ notebook }, body) => notebook.saveOrganized(body),
+  'notebook.organize': async ({ notebook, hooks }, body) => {
+    if(!Array.isArray(body?.ids)||!body.ids.length||body.ids.length>20||new Set(body.ids).size!==body.ids.length)throw new Error('请选择 1 至 20 篇不同的笔记')
+    const records=body.ids.map(id=>notebook.read(id))
+    if(records.some(row=>row.isSoftDeleted))throw new Error('回收站中的笔记不能整理')
+    const request=beginRequest(hooks,'ai')
+    try { const result=await waitForAI(organizeNotes(records,body.instruction??'',hooks.getModel(),request.signal),request.signal); if(request.signal.aborted)throw new Error('AI 整理已取消'); return result }
+    finally { endRequest(hooks,'ai',request) }
+  },
   'notebook.solve': async ({ notebook, hooks }, body) => {
     const request = beginRequest(hooks, 'ai')
     try {

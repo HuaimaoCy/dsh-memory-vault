@@ -16,6 +16,12 @@
 
 import { springValue } from './motion.js'
 
+// Secondary surfaces and their controls stay opaque in every material tier.
+// Shared with the motion layer so moving a control into a dialog cannot turn
+// its selection highlight back into an optical lens.
+export const PLAIN_SURFACE_SELECTOR = 'dialog,[role="dialog"],[role="menu"],[role="listbox"],[popover],.command-palette,.quick-capture,.qc-panel,.curation-popover,.ws-panel,.alaya-preview,.mb-create-options,.mb-more-menu,.settings-layout,.settings-panel,.settings-embedded-layout,.drawer,.mb-detail,.mb-ai-side,[data-plain-surface]'
+export const isPlainSurface = node => Boolean(node?.closest?.(PLAIN_SURFACE_SELECTOR))
+
 /** 分级：full 有边缘色散，balanced 是默认，flat 是不透明回退。 */
 export const GLASS_TIERS = Object.freeze(['full', 'balanced', 'flat'])
 
@@ -170,7 +176,7 @@ function createInstance({ root, tier: initialTier, storageKey }) {
     const list = []
     for (const selector of OPTICAL_SELECTORS) {
       for (const node of host.querySelectorAll(selector)) {
-        if(node.closest('[data-settings-layout]') && !node.hasAttribute('data-optical-lens'))continue
+        if (isPlainSurface(node)) continue
         if (node.getAttribute(SURFACE_ATTRIBUTE) === 'float' && !node.isConnected) continue
         list.push(node)
       }
@@ -245,6 +251,17 @@ function createInstance({ root, tier: initialTier, storageKey }) {
 
   const tag = node => {
     if (!(node instanceof Element)) return
+    if (isPlainSurface(node)) {
+      if (opticalEngine?.registered(node)) opticalEngine.unregister(node)
+      known.delete(node)
+      pressed.delete(node)
+      glares.get(node)?.cancel?.()
+      resizeObserver?.unobserve(node)
+      node.removeAttribute(SURFACE_ATTRIBUTE)
+      node.removeAttribute(PRESS_ATTRIBUTE)
+      for (const name of ['--glass-glare-x', '--glass-glare-y', '--glass-glare-o', '--glass-rim-angle', '--glass-press', '--glass-w', '--glass-h']) node.style.removeProperty(name)
+      return
+    }
     if (node.hasAttribute(SURFACE_ATTRIBUTE)) { known.add(node); return }
     for (const surface of GLASS_SURFACES) {
       if (surface.selectors.some(selector => node.matches?.(selector))) {
@@ -291,7 +308,7 @@ function createInstance({ root, tier: initialTier, storageKey }) {
 
   const surfacesUnder = target => {
     const node = target instanceof Element ? target : null
-    if (!node) return []
+    if (!node || isPlainSurface(node)) return []
     const list = []
     const inner = node.closest(`[${SURFACE_ATTRIBUTE}]`)
     if (inner) list.push(inner)
@@ -350,6 +367,7 @@ function createInstance({ root, tier: initialTier, storageKey }) {
 
   const onPointerDown = event => {
     if (currentTier === 'flat' || !capabilities.pointerLight) return
+    if (isPlainSurface(event.target)) return
     const node = event.target instanceof Element ? event.target.closest(`[${SURFACE_ATTRIBUTE}]`) : null
     if (node) press(node)
   }

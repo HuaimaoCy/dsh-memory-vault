@@ -328,6 +328,7 @@ export function mountMistakebook({ beforeEnter, appearance,standalone=false }) {
       h('div', { class: 'mb-ai-head' }, h('strong', { text: 'AI 学习助手' }), h('span', { class: 'cap', text: '记录保存在本机数据库' }), h('span', { class: 'spacer' }),
         h('button', { type: 'button', class: 'btn ghost', id: 'mb-ai-clear', text: '清空记录', title: '清空全部 AI 查询记录', onClick: () => void guard(clearAIHistory) }),
         h('button', { type: 'button', class: 'icon-button', 'aria-label': '收起 AI 助手', title: '收起', onClick: closeAISide }, icon('close'))),
+      h('div', { class: 'mb-ai-tools' }, button([icon('summary'),'整理笔记'],()=>{if(state.dirty)throw new Error('请先保存笔记再整理');return openOrganize(state.selection.size?[...state.selection]:state.draft?.id?[state.draft.id]:[])},false,{id:'mb-ai-organize'})),
       h('div', { class: 'mb-ai-messages', id: 'mb-ai-messages' }),
       h('form', { class: 'mb-ai-form', onSubmit: event => { event.preventDefault(); void sendAI() } },
         h('textarea', { class: 'area', id: 'mb-ai-input', rows: 3, placeholder: '问问题、要思路、核对要点…（Enter 发送，Shift+Enter 换行）', onKeydown: event => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); void sendAI() } } }),
@@ -370,7 +371,7 @@ export function mountMistakebook({ beforeEnter, appearance,standalone=false }) {
       h('div', { class: 'toolbar-actions' },
         button([icon('settings')], openSettings, false, {id:'mb-workspace-settings',class:'icon-button',title:'设置','aria-label':'设置'}),
         button(icon('sparkles'),toggleAISide,false,{id:'mb-ai-toggle',class:'icon-button',title:'AI 助手','aria-label':'AI 助手'}),
-        button(icon('book'),openLookup,false,{id:'mb-lookup',class:'icon-button',title:'查词典','aria-label':'查词典'}),
+        button(icon('dictionary'),openLookup,false,{id:'mb-lookup',class:'icon-button',title:'查词典','aria-label':'查词典'}),
         createMenu)),
       h('div', { class: 'mb-body' }, h('main', { class: 'mb-main' }, h('div', { class: 'mb-page-heading' }, h('div', {}, heading), h('div', { class: 'mb-total', id: 'mb-total' })),
         h('div', { class: 'mb-board' }, order, h('span', { class: 'spacer' }), button('单词检测', openQuiz, false, { class: 'btn soft', id: 'mb-quiz' }), pickButton, moreMenu), searchFilter, list), detailSplitter, detail),
@@ -548,6 +549,7 @@ export function mountMistakebook({ beforeEnter, appearance,standalone=false }) {
         h('strong', { text: `已选 ${state.selection.size} 篇` }),
         button(allSelected ? '全不选' : '全选', () => { if (allSelected) state.selection.clear(); else for (const row of rows) state.selection.add(row.id); renderList() }, false, { class: 'btn ghost', id: 'mb-pick-all' }),
         h('span', { class: 'spacer' }),
+        state.view!=='trash'?button('AI 整理',()=>openOrganize([...state.selection]),false,{id:'mb-batch-organize',disabled:!state.selection.size}):null,
         state.view!=='trash'?button('编成试卷',()=>compilePaper(null,[...state.selection]),false,{id:'mb-batch-paper',disabled:!state.selection.size}):null,
         state.view!=='trash'?button('导出 PDF',()=>openPDF([...state.selection]),false,{id:'mb-batch-pdf',disabled:!state.selection.size}):null,
         state.view === 'trash' ? button('恢复所选', () => performBatch('restore'), false, { id: 'mb-batch-restore', disabled: !state.selection.size }) : null,
@@ -733,6 +735,7 @@ export function mountMistakebook({ beforeEnter, appearance,standalone=false }) {
     const head=focusToolbar(draft)
     const article = h('article', { class: 'mb-note-view', id: 'mb-note-view' },
       h('div', { class: 'mb-note-body' },h('h1',{class:'mb-reading-title',text:draft.title||draft.vocabulary?.word||'未命名笔记'}),renderRich(noteMarkdown(draft)),
+        draft.sources?.length?h('section',{class:'mb-source-list'},h('h2',{text:'来源笔记'}),draft.sources.map((source,index)=>button(state.data.records.find(row=>row.id===source.id)?.title||`来源笔记 ${index+1}`,()=>select(source.id),false,{class:'btn ghost',title:`打开来源笔记 · 整理时版本 ${source.revision}`}))):null,
         draft.annotations?.length?h('section',{class:'mb-annotations'},h('h2',{text:'批注'}),draft.annotations.map(item=>h('div',{class:'mb-annotation'},item.quote?h('blockquote',{text:item.quote}):null,h('p',{text:item.text})))):null,
         button('开始复习',()=>toggleReview(draft),false,{id:'mb-start-review',class:'btn ghost'})),
       draft.images?.length ? h('div', { class: 'mb-note-images' }, draft.images.map(image => h('figure', {},
@@ -842,6 +845,51 @@ export function mountMistakebook({ beforeEnter, appearance,standalone=false }) {
     try {state.draft=await call('solve',{id:state.draft.id});state.dirty=false;await load();notify('AI 学习草稿已生成，可核对并补充字段')}
     catch(error){throw new Error(/abort|cancel/i.test(error.message)?'AI 生成已取消，笔记内容保留':error.message)}
     finally{node.close()}
+  }
+  function openOrganize(ids=[]) {
+    if(ids.length>20)throw new Error('一次最多整理 20 篇笔记')
+    const selected=new Set(ids)
+    const candidates=[...new Map([...(state.data?.records??[]),...(state.draft?.id?[state.draft]:[])].map(row=>[row.id,row])).values()].filter(row=>!row.isSoftDeleted)
+    let result=null,running=false,generation=0
+    const instruction=h('textarea',{class:'area',id:'mb-organize-instruction',rows:3,maxlength:2000,placeholder:'例如：按主题归纳，保留例题和重要细节'})
+    const title=h('input',{class:'input',id:'mb-organize-title',maxlength:500})
+    const content=h('textarea',{class:'area',id:'mb-organize-content',rows:14,maxlength:100000})
+    const preview=h('div',{id:'mb-organize-preview',hidden:true},field('标题',title),field('整理正文（可编辑 Markdown）',content))
+    const status=h('p',{class:'cap',id:'mb-organize-status','aria-live':'polite'})
+    const sourceCount=h('span',{class:'cap',id:'mb-organize-count',text:`已选 ${selected.size} / 20 篇`})
+    const invalidate=()=>{result=null;preview.hidden=true;saveResult.disabled=true;sourceCount.textContent=`已选 ${selected.size} / 20 篇`}
+    const sources=h('div',{class:'mb-organize-sources','aria-label':'选择来源笔记'},candidates.map(row=>{
+      const checked=h('input',{type:'checkbox',checked:selected.has(row.id),'data-organize-source':row.id,onChange:event=>{
+        if(event.target.checked&&selected.size>=20){event.target.checked=false;status.textContent='一次最多选择 20 篇笔记';return}
+        if(event.target.checked)selected.add(row.id);else selected.delete(row.id)
+        invalidate()
+      }})
+      return h('label',{class:'mb-organize-source'},checked,h('span',{text:row.title||row.vocabulary?.word||row.stem?.slice(0,50)||'未命名笔记'}))
+    }))
+    instruction.addEventListener('input',()=>{if(!running)invalidate()})
+    const cancel=h('button',{type:'button',class:'btn ghost',text:'取消生成',id:'mb-organize-cancel',hidden:true,onClick:()=>{
+      cancel.disabled=true;status.textContent='正在取消…';void call('cancelAI').catch(error=>{cancel.disabled=false;status.textContent=error.message})
+    }})
+    // This request owns only its dialog state: keep cancellation and closing usable.
+    const generate=h('button',{type:'button',class:'btn primary',text:'生成预览',id:'mb-organize-generate',onClick:async()=>{
+      if(running)return
+      if(!selected.size){status.textContent='请先选择来源笔记';return}
+      const token=++generation
+      running=true;generate.disabled=true;saveResult.disabled=true;cancel.hidden=false;cancel.disabled=false;instruction.disabled=true;sources.inert=true;status.textContent='正在整理…';result=null;preview.hidden=true
+      try {
+        const next=await call('organize',{ids:[...selected],instruction:instruction.value})
+        if(token!==generation||!node.open)return
+        result=next;title.value=result.title;content.value=result.content;preview.hidden=false;saveResult.disabled=false;status.textContent='请检查并编辑结果，再保存为新笔记。'
+      }catch(error){if(token===generation&&node.open)status.textContent=/abort|cancel|取消/i.test(error.message)?'已取消整理':error.message}
+      finally{if(token===generation){running=false;generate.disabled=false;cancel.hidden=true;instruction.disabled=false;sources.inert=false}}
+    }})
+    const saveResult=button('保存为新笔记',async()=>{
+      if(!result)throw new Error('请先生成预览')
+      const saved=await call('organize.save',{title:title.value,content:content.value,sources:result.sources})
+      node.close();Object.assign(state,{view:'all',type:'',subjectID:'',nodeID:'',query:'',tag:'',picking:false,draft:saved,page:'view',review:false,dirty:false});state.selection.clear();search.value='';await load();notify('已保存为新笔记，来源保留')
+    },false,{id:'mb-organize-save',disabled:true})
+    const node=dialog('AI 整理笔记',h('div',{class:'mb-settings-form'},h('p',{class:'cap',text:'选中的笔记文字会发送给已配置的 AI 服务。图片和手写画布不参与；最多 20 篇、100000 字。原笔记保留。'}),sourceCount,sources,field('整理要求（可选）',instruction),h('div',{class:'row'},generate,cancel,saveResult),status,preview),true)
+    node.addEventListener('close',()=>{generation++;if(running)void call('cancelAI').catch(()=>{});running=false})
   }
   function wordPhotoPane() {
     const files = [], controller = { busy: () => running || extracting, cancel: () => void call(extracting ? 'cancelAI' : 'cancelOCR'), hasWork: () => files.some(item => item.status === 'done') }

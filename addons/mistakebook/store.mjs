@@ -66,6 +66,8 @@ function normalize(raw, previous = {}) {
   const questionIds=merged.paper?.questionIds??[]
   if(!Array.isArray(questionIds)||questionIds.length>100||questionIds.some(id=>typeof id!=='string'||id.length>100)||new Set(questionIds).size!==questionIds.length)throw new Error('试卷题目列表无效，最多 100 道题且不能重复')
   const annotations=merged.annotations??[]
+  const sources=merged.sources??[]
+  if(!Array.isArray(sources)||sources.length>2020||sources.some(item=>!item||typeof item.id!=='string'||item.id.length>100||!Number.isInteger(item.revision)||item.revision<1)||new Set(sources.map(item=>item.id)).size!==sources.length)throw new Error('来源笔记信息无效')
   if(!Array.isArray(annotations)||annotations.length>100)throw new Error('批注最多 100 条')
   const normalizedAnnotations=annotations.map(item=>{
     if(!item||typeof item.text!=='string'||!item.text.trim())throw new Error('批注内容不能为空')
@@ -96,7 +98,7 @@ function normalize(raw, previous = {}) {
   }
   return { id: previous.id ?? randomUUID(), type, title: bounded(merged.title ?? (type === 'vocabulary' ? vocabulary.word : ''), 500), physics, method, vocabulary, aiResult, simulationId, ...(type==='paper'?{paper:{questionIds:[...questionIds]}}:{}),
     stem: bounded(merged.stem), studentWork: bounded(merged.studentWork), referenceAnswer: bounded(merged.referenceAnswer),
-    notes: bounded(merged.notes), annotations:normalizedAnnotations, errorType: bounded(merged.errorType, 100), cause: bounded(merged.cause ?? merged.analysisResult?.conclusion, 30000),
+    notes: bounded(merged.notes), annotations:normalizedAnnotations, sources:sources.map(({id,revision})=>({id,revision})), errorType: bounded(merged.errorType, 100), cause: bounded(merged.cause ?? merged.analysisResult?.conclusion, 30000),
     subjectID, nodeID, legacyNodeID: bounded(merged.legacyNodeID, 500), legacySubjectID: bounded(merged.legacySubjectID, 500), classificationSuggested: raw.nodeID !== undefined ? false : Boolean(previous.classificationSuggested ?? classification.assignmentState === 'suggested'),
     tags: Array.isArray(merged.tags) ? merged.tags.slice(0, 30).map(tag => bounded(tag, 100)) : [], target: merged.target === 'huige' ? 'huige' : 'gaokao',
     reviewState, repeatCount, reciteCount, sortIndex, mastery, nextReviewAt: merged.nextReviewAt ?? null, reviewHistory: Array.isArray(merged.reviewHistory) ? merged.reviewHistory.slice(-200).map(item => ({ at: String(item.at), result: item.result === 'pass' ? 'pass' : 'fail' })) : [],
@@ -258,6 +260,14 @@ export class MistakebookStore {
     if (!raw || typeof raw !== 'object') throw new Error('无效的题目')
     if(raw.type==='paper'&&(!raw.id||JSON.stringify(raw.paper?.questionIds)!==JSON.stringify(this.require(raw.id).paper?.questionIds)))throw new Error('请通过试卷编成保存试卷')
     return this.transaction(() => this.saveInside(raw))
+  }
+  saveOrganized({title,content,sources}={}) {
+    return this.transaction(()=>{
+      if(typeof title!=='string'||!title.trim()||title.length>500||typeof content!=='string'||!content.trim()||content.length>100000)throw new Error('请填写有效的标题和正文')
+      if(!Array.isArray(sources)||!sources.length||sources.length>2020||new Set(sources.map(item=>item?.id)).size!==sources.length)throw new Error('来源笔记信息无效')
+      for(const source of sources){const record=this.require(source.id);if(record.revision!==source.revision||record.isSoftDeleted)throw new Error('来源笔记已变更或删除，请重新整理')}
+      return this.saveInside({type:'note',title:title.trim(),stem:content,sources})
+    })
   }
   savePaper({id,revision,title,ids}={}) {
     return this.transaction(()=>{
@@ -446,7 +456,7 @@ export class MistakebookStore {
     if (restored) this.setCanvasDocs(restored)
     return this.transaction(() => {
       const known = new Map(this.records().filter(record => record.stem.trim() || record.title.trim() || record.type === 'vocabulary').map(row=>[dedupKey(row),row.id]))
-      const importedIds=new Map(),importedPapers=[]
+      const importedIds=new Map(),importedPapers=[],importedSources=[]
       let created = 0, skipped = 0, unmapped = 0, missingImages = 0
       for (const row of rows) {
         if (!row || typeof row !== 'object') throw new Error('导入包含无效题目，尚未保存')
@@ -463,9 +473,18 @@ export class MistakebookStore {
         const saved=this.saveInside(candidate)
         if(row.id)importedIds.set(row.id,saved.id)
         if(saved.type==='paper')importedPapers.push(saved)
+        if(saved.sources?.length)importedSources.push(saved.id)
         if (hasKey) known.set(hash,saved.id); created++
       }
       for(const paper of importedPapers)this.saveInside({...paper,paper:{questionIds:paper.paper.questionIds.map(id=>importedIds.get(id)).filter(Boolean)}})
+      // Resolve after every row and dedup hit has an ID. Source revisions describe
+      // the original generation snapshot, not the restored record's new revision.
+      for(const id of importedSources){
+        const record=this.require(id)
+        const mapped=record.sources.map(source=>({...source,id:importedIds.get(source.id)??source.id}))
+        const sources=[...new Map(mapped.map(source=>[source.id,source])).values()]
+        if(sources.length!==record.sources.length||sources.some((source,index)=>source.id!==record.sources[index].id))this.saveInside({...record,sources})
+      }
       return { created, skipped, unmapped, missingImages, canvases: restored ? restored.canvases.length : 0 }
     })
   }

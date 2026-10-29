@@ -4,6 +4,8 @@ const paths = {
   layers: ['M5 5h11a2 2 0 0 1 2 2v12H7a2 2 0 0 1-2-2V5Z', 'M8 2h11a2 2 0 0 1 2 2v12', 'M8 9h7M8 13h5'],
   library: ['M3 3h5v18H3zM8 3h5v18H8zM15 4l4-1 4 17-4 1-4-17Z'],
   book: ['M12 5c-3-2-7-2-10-1v15c3-1 7-1 10 1 3-2 7-2 10-1V4c-3-1-7-1-10 1Z', 'M12 5v15'],
+  // Capital E, optically centred inside the same 20 px icon frame as its peers.
+  dictionary: ['M17 4H7v16h10M7 12h8'],
   conversation: ['M4 4h16a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H9l-6 4V5a1 1 0 0 1 1-1Z', 'M7 8h10M7 12h7'],
   hidden: ['M3 3l18 18M10.6 10.6a2 2 0 0 0 2.8 2.8', 'M9.9 5.2A11 11 0 0 1 12 5c5.5 0 9 7 9 7a19 19 0 0 1-3.3 4.1M6.3 6.4A22 22 0 0 0 3 12s3.5 7 9 7a10 10 0 0 0 4-.8'],
   folder: ['M3 6a2 2 0 0 1 2-2h5l2 3h7a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6Z'],

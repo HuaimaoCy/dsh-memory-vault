@@ -78,6 +78,8 @@
     "test:liquid-motion": "node tests/preview-liquid-motion.mjs",
     "test:workspace-ui": "node tests/preview-workspace-ui.mjs",
     "test:papers": "node --no-warnings tests/papers-smoke.mjs",
+    "test:organize": "node --no-warnings tests/organize-notes.mjs && node tests/run-desktop-organize.mjs",
+    "test:ui-refinements": "node tests/preview-motion-refinements.mjs && node tests/preview-plain-surfaces.mjs",
     "test:pdf": "node --no-warnings tests/pdf-layout-smoke.mjs && node --no-warnings tests/run-desktop-pdf.mjs"
   }
 }

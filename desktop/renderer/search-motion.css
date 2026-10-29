@@ -1,0 +1,16 @@
+/* Reveal the field without stretching its icon or glass geometry. */
+:is(.bar,.mb-bar) .search-wrap[data-glass-surface] {
+  position:relative;box-sizing:border-box;width:44px;min-width:44px;height:44px;
+  padding:0;flex:0 0 auto;gap:0;justify-content:flex-start;border-radius:22px;
+  transition:border-color 160ms var(--spring),box-shadow 160ms var(--spring);
+}
+:is(.bar,.mb-bar) .search-wrap[data-search-expanded="true"] {width:min(300px,30vw);padding:0 12px 0 44px;border-radius:22px;}
+:is(.bar,.mb-bar) .search-wrap[data-search-expanded="false"] {width:44px;padding:0;}
+.search-wrap .search-trigger {
+  display:grid;place-items:center;position:absolute;left:0;top:0;width:42px;height:42px;
+  padding:0;margin:0;border:0;border-radius:50%;background:none;color:#000;cursor:pointer;flex:none;box-shadow:none;transform:none;
+}
+.search-wrap .search-trigger :is(.icon,span:has(.icon)) {position:static;display:block;width:20px;height:20px;opacity:1;transform:none;margin:0;}
+.search-wrap .search-trigger:focus-visible {outline:2px solid var(--accent);outline-offset:2px;}
+:is(.bar,.mb-bar) .search-wrap .search {min-width:0;width:100%;opacity:1;transition:none;}
+:is(.bar,.mb-bar) .search-wrap[data-search-expanded="false"] .search {width:0;opacity:0;pointer-events:none;}
