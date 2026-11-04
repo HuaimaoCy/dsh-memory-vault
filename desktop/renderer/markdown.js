@@ -14,21 +14,71 @@ const h = (tag, props = {}, ...children) => {
   return node
 }
 // 行内：$..$ 公式、`code`、**粗**、*斜*。文本已转义由外层保证：这里接收纯文本片段。
+// 粗体/斜体内部要递归走一遍行内规则，否则 **答案：$(-\infty,6)$** 这类写法会把公式原样漏出来。
 const inline = text => {
   const nodes = []
-  const pattern = /(\$\$[^$]+\$\$)|(`[^`]+`)|(\*\*[^*]+\*\*)|(\*[^*\n]+\*)|(\$[^$\n]+\$)/g
-  let last = 0, match
-  while ((match = pattern.exec(text))) {
-    if (match.index > last) nodes.push(text.slice(last, match.index))
-    const token = match[0]
-    if (token.startsWith('$$')) nodes.push(renderTex(token.slice(2, -2), { display: true }))
-    else if (token.startsWith('$')) nodes.push(renderTex(token.slice(1, -1)))
-    else if (token.startsWith('`')) nodes.push(h('code', { class: 'mb-code-inline', text: token.slice(1, -1) }))
-    else if (token.startsWith('**')) nodes.push(h('strong', { text: token.slice(2, -2) }))
-    else nodes.push(h('em', { text: token.slice(1, -1) }))
-    last = match.index + token.length
+  let buffer = ''
+  let index = 0
+  const flush = () => { if (buffer) { nodes.push(buffer); buffer = '' } }
+  while (index < text.length) {
+    const char = text[index]
+    if (char === '\\' && '$*`\\'.includes(text[index + 1] ?? '')) {
+      buffer += text[index + 1]
+      index += 2
+      continue
+    }
+    if (char === '`') {
+      const close = text.indexOf('`', index + 1)
+      if (close > index + 1) {
+        flush()
+        nodes.push(h('code', { class: 'mb-code-inline', text: text.slice(index + 1, close) }))
+        index = close + 1
+        continue
+      }
+    }
+    if (char === '$') {
+      if (text[index + 1] === '$') {
+        const close = text.indexOf('$$', index + 2)
+        if (close > index + 2) {
+          flush()
+          nodes.push(renderTex(text.slice(index + 2, close), { display: true }))
+          index = close + 2
+          continue
+        }
+      }
+      const close = text.indexOf('$', index + 1)
+      if (close > index + 1) {
+        const body = text.slice(index + 1, close)
+        if (!body.includes('\n')) {
+          flush()
+          nodes.push(renderTex(body))
+          index = close + 1
+          continue
+        }
+      }
+    }
+    if (char === '*') {
+      if (text[index + 1] === '*') {
+        const close = text.indexOf('**', index + 2)
+        if (close > index + 2) {
+          flush()
+          nodes.push(h('strong', {}, ...inline(text.slice(index + 2, close))))
+          index = close + 2
+          continue
+        }
+      }
+      const close = text.indexOf('*', index + 1)
+      if (close > index + 1) {
+        flush()
+        nodes.push(h('em', {}, ...inline(text.slice(index + 1, close))))
+        index = close + 1
+        continue
+      }
+    }
+    buffer += char
+    index++
   }
-  if (last < text.length) nodes.push(text.slice(last))
+  flush()
   return nodes
 }
 const inlineRow = text => h('span', {}, inline(text))
@@ -36,12 +86,18 @@ export function renderRich(source) {
   const lines = String(source ?? '').replace(/\r\n?/g, '\n').split('\n')
   const root = h('div', { class: 'mb-md' })
   let list = null, table = null, paragraph = []
-  const flushParagraph = () => { if (paragraph.length) { root.append(h('p', {}, ...paragraph.flatMap(line => [...inline(line), h('br')]))) ; paragraph = [] } }
+  const flushParagraph = () => {
+    if (!paragraph.length) return
+    const children = []
+    paragraph.forEach((line, at) => { if (at) children.push(h('br')); children.push(...inline(line)) })
+    root.append(h('p', {}, ...children))
+    paragraph = []
+  }
   const flushAll = () => { flushParagraph(); if (list) { root.append(list); list = null } if (table) { root.append(table); table = null } }
   for (let index = 0; index < lines.length; index++) {
     const line = lines[index]
     const heading = line.match(/^(#{1,4})\s+(.*)$/)
-    if (heading) { flushAll(); root.append(h(`h${heading[1].length + 2}`, { class: 'mb-md-h', text: heading[2] })); continue }
+    if (heading) { flushAll(); root.append(h(`h${heading[1].length + 2}`, { class: 'mb-md-h' }, ...inline(heading[2].trim()))); continue }
     if (/^\s*```/.test(line)) {
       flushAll()
       const code = []
@@ -58,8 +114,8 @@ export function renderRich(source) {
       root.append(h('div', { class: 'mb-math-block' }, renderTex(formula.join('\n').trim(), { display: true })))
       continue
     }
-    if (/^\s*[-*+]\s+/.test(line)) { flushParagraph(); if (table) { root.append(table); table = null } if (!list || list.tagName !== 'UL') { if (list) root.append(list); list = h('ul', { class: 'mb-md-list' }) } list.append(h('li', {}, inline(line.replace(/^\s*[-*+]\s+/, '')))); continue }
-    if (/^\s*\d+[.、)]\s+/.test(line)) { flushParagraph(); if (table) { root.append(table); table = null } if (!list || list.tagName !== 'OL') { if (list) root.append(list); list = h('ol', { class: 'mb-md-list' }) } list.append(h('li', {}, inline(line.replace(/^\s*\d+[.、)]\s+/, '')))); continue }
+    if (/^\s*[-*+]\s+/.test(line)) { flushParagraph(); if (table) { root.append(table); table = null } if (!list || list.tagName !== 'UL') { if (list) root.append(list); list = h('ul', { class: 'mb-md-list' }) } list.append(h('li', {}, ...inline(line.replace(/^\s*[-*+]\s+/, '')))); continue }
+    if (/^\s*\d+[.、)]\s+/.test(line)) { flushParagraph(); if (table) { root.append(table); table = null } if (!list || list.tagName !== 'OL') { if (list) root.append(list); list = h('ol', { class: 'mb-md-list' }) } list.append(h('li', {}, ...inline(line.replace(/^\s*\d+[.、)]\s+/, '')))); continue }
     if (/^\s*>/.test(line)) { flushAll(); root.append(h('blockquote', { class: 'mb-md-quote' }, inlineRow(line.replace(/^\s*>\s?/, '')))); continue }
     if (/^\s*\|.*\|\s*$/.test(line)) {
       flushParagraph(); if (list) { root.append(list); list = null }

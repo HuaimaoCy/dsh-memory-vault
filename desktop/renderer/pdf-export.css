@@ -249,6 +249,48 @@
 .mb-pdf-block .mb-code-block { background: #f3f5f0; border: .2mm solid #e0e4d9; border-radius: 1.4mm; padding: 1.6mm; font-size: .88em; white-space: pre-wrap; }
 .mb-pdf-block .mb-md-table { border-collapse: collapse; margin: 1mm 0; }
 .mb-pdf-block .mb-md-table :is(th,td) { border: .2mm solid #dfe3d6; padding: .8mm 1.6mm; font-size: .92em; }
+.mb-pdf-block .mb-md .mb-tex { font-family: 'Cambria Math', 'Times New Roman', serif; font-style: italic; }
+.mb-pdf-block .mb-md .mb-tex-frac { display: inline-flex; flex-direction: column; vertical-align: middle; text-align: center; margin: 0 .18em; }
+.mb-pdf-block .mb-md .mb-tex-num { border-bottom: .2mm solid currentColor; padding: 0 .28em .06em; }
+.mb-pdf-block .mb-md .mb-tex-den { padding: .06em .28em 0; }
+.mb-pdf-block .mb-md .mb-tex sup, .mb-pdf-block .mb-md .mb-tex sub { font-size: .72em; line-height: 0; }
+.mb-pdf-block .mb-md .mb-tex-sqrt { display: inline-flex; align-items: flex-start; }
+.mb-pdf-block .mb-md .mb-tex-sqrt-sign { font-style: normal; line-height: 1.1; }
+.mb-pdf-block .mb-md .mb-tex-sqrt-body { border-top: .2mm solid currentColor; padding: 0 .15em; margin-top: .18em; margin-left: -.04em; }
+.mb-pdf-block .mb-md .mb-tex-root-index { font-size: .6em; }
+.mb-pdf-block .mb-md .mb-tex-text, .mb-pdf-block .mb-md .mb-tex-bold { font-style: normal; }
+.mb-pdf-block .mb-md .mb-tex-bold { font-weight: 600; }
+.mb-pdf-block .mb-md .mb-tex-delim { display: inline-flex; flex: 0 0 auto; align-self: stretch; position: relative; width: .34em; min-height: 1.2em; margin: 0 .06em; box-sizing: border-box; vertical-align: middle; }
+.mb-pdf-block .mb-md .mb-tex-delim-paren.mb-tex-delim-open { border-left: .09em solid currentColor; border-radius: 100% 0 0 100% / 50% 0 0 50%; }
+.mb-pdf-block .mb-md .mb-tex-delim-paren.mb-tex-delim-close { border-right: .09em solid currentColor; border-radius: 0 100% 100% 0 / 0 50% 50% 0; }
+.mb-pdf-block .mb-md .mb-tex-delim-bracket.mb-tex-delim-open { width: .3em; border-left: .09em solid; border-top: .09em solid; border-bottom: .09em solid; border-radius: .14em 0 0 .14em; }
+.mb-pdf-block .mb-md .mb-tex-delim-bracket.mb-tex-delim-close { width: .3em; border-right: .09em solid; border-top: .09em solid; border-bottom: .09em solid; border-radius: 0 .14em .14em 0; }
+.mb-pdf-block .mb-md .mb-tex-delim-bar { width: .12em; border-left: .09em solid currentColor; }
+.mb-pdf-block .mb-md .mb-tex-delim-doublebar { width: .3em; }
+.mb-pdf-block .mb-md .mb-tex-delim-doublebar::before, .mb-pdf-block .mb-md .mb-tex-delim-doublebar::after { content: ''; position: absolute; top: 0; bottom: 0; width: .09em; background: currentColor; }
+.mb-pdf-block .mb-md .mb-tex-delim-doublebar::before { left: 0; }
+.mb-pdf-block .mb-md .mb-tex-delim-doublebar::after { right: 0; }
+.mb-pdf-block .mb-md .mb-tex-delim-brace { width: .42em; }
+.mb-pdf-block .mb-md .mb-tex-delim-brace::before, .mb-pdf-block .mb-md .mb-tex-delim-brace::after { content: ''; position: absolute; left: 0; width: 100%; height: 50%; box-sizing: border-box; }
+.mb-pdf-block .mb-md .mb-tex-delim-open.mb-tex-delim-brace::before { top: 0; border-left: .09em solid currentColor; border-top: .09em solid currentColor; border-top-left-radius: 100% 100%; }
+.mb-pdf-block .mb-md .mb-tex-delim-open.mb-tex-delim-brace::after { bottom: 0; border-left: .09em solid currentColor; border-bottom: .09em solid currentColor; border-bottom-left-radius: 100% 100%; }
+.mb-pdf-block .mb-md .mb-tex-delim-close.mb-tex-delim-brace::before { top: 0; border-right: .09em solid currentColor; border-top: .09em solid currentColor; border-top-right-radius: 100% 100%; }
+.mb-pdf-block .mb-md .mb-tex-delim-close.mb-tex-delim-brace::after { bottom: 0; border-right: .09em solid currentColor; border-bottom: .09em solid currentColor; border-bottom-right-radius: 100% 100%; }
+.mb-pdf-block .mb-md .mb-tex-delim-group { display: inline-flex; align-items: stretch; vertical-align: middle; }
+.mb-pdf-block .mb-md .mb-tex-delim-body { display: inline-flex; align-items: center; }
+.mb-pdf-block .mb-md .mb-tex-env { display: inline-flex; align-items: stretch; vertical-align: middle; }
+.mb-pdf-block .mb-md .mb-tex-env-body { display: inline-grid; align-items: center; justify-items: start; column-gap: .55em; row-gap: .16em; }
+.mb-pdf-block .mb-md .mb-tex-env-row { display: contents; }
+.mb-pdf-block .mb-md .mb-tex-env-cell { min-height: 1.35em; white-space: nowrap; }
+.mb-pdf-block .mb-md .mb-tex-matrix { justify-items: center; column-gap: .8em; }
+.mb-pdf-block .mb-md .mb-tex-aligned { column-gap: .18em; }
+.mb-pdf-block .mb-md .mb-tex-aligned .mb-tex-env-cell:nth-child(odd) { justify-self: end; }
+.mb-pdf-block .mb-md .mb-tex-cases { column-gap: .9em; }
+.mb-pdf-block .mb-md .mb-tex-overline { display: inline-block; border-top: .2mm solid currentColor; padding-top: .05em; }
+.mb-pdf-block .mb-md .mb-tex-underline { display: inline-block; border-bottom: .2mm solid currentColor; padding-bottom: .05em; }
+.mb-pdf-block .mb-md .mb-tex-boxed { display: inline-flex; border: .2mm solid currentColor; padding: .08em .3em; border-radius: .18em; }
+.mb-pdf-block .mb-md .mb-tex-stack .mb-tex-num { border-bottom: 0; }
+.mb-pdf-block .mb-md .mb-math-block { text-align: center; font-family: 'Cambria Math', 'Times New Roman', serif; font-style: italic; padding: 1mm 0; margin: 1.2mm 0; background: #fafbf7; border-radius: 1.4mm; }
 
 /* —— 选中条 —— */
 .mb-pdf-selected {
