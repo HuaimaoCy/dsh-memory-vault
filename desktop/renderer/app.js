@@ -577,8 +577,8 @@ function settings() {
   const limits = state.data.limits
   const limitControls = ['maxEntries', 'maxChars', 'baseMaxEntries', 'baseMaxChars'].map((name, i) => field(['知识条数', '知识字符预算', '底层约定条数', '底层约定字符预算'][i], h('input', { class: 'input', type: 'number', min: 1, value: limits[name], 'data-limit': name })))
   const panels = [
-    ['appearance', '外观', 'sparkles', appearance.createPanel()],
-    ['layout', '布局', 'grid', embedLayout(layout.menu)],
+    ['appearance', '外观', 'appearance', appearance.createPanel()],
+    ['layout', '布局', 'layout', embedLayout(layout.menu)],
     ['general', '通用', 'database',
       h('section', { class: 'col' }, h('h3', { text: '当前数据库' }), h('p', { class: 'cap', text: '记忆保存在本机。打开其他数据库，或为当前内容留一份备份。' }),
         h('code', { class: 'path-box', text: info.databasePath }),

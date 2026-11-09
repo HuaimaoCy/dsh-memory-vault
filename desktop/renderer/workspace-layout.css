@@ -23,6 +23,7 @@
   order: 3;
   width: min(var(--alaya-detail-w, 410px), 46vw);
   flex: 0 0 min(var(--alaya-detail-w, 410px), 46vw);
+  padding-top: 68px;
 }
 .app-shell[data-detail-side='left'] .body > .drawer { order: 1; border-left: 0; border-right: 1px solid var(--line); }
 .app-shell[data-detail-side='left'] .body > .main { order: 3; }
@@ -31,6 +32,11 @@
 .app-shell .body:has(> .drawer:not(.hidden)) > #detail-splitter { display: block; }
 .app-shell[data-focus='on'] #detail-splitter,
 .app-shell[data-focus='on'] .body > .drawer { display: none !important; }
+
+@media (max-width: 900px) {
+  .app-shell:not([data-side='collapsed'],[data-focus='on']) .body:has(> .drawer:not(.hidden)) > :is(.main,#detail-splitter) { display: none; }
+  .app-shell:not([data-side='collapsed'],[data-focus='on']) .body > .drawer { width: auto; flex: 1; }
+}
 
 /* ---------- 分隔条 ---------- */
 .ws-splitter {

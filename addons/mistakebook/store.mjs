@@ -3,7 +3,7 @@ import { mkdirSync, readFileSync, existsSync, rmSync } from 'node:fs'
 import { dirname } from 'node:path'
 import { randomUUID, createHash, randomInt } from 'node:crypto'
 import { NOTE_TYPES, normalizeFields, contentOf, typeAlias } from './fields.mjs'
-import { CANVAS_LIMITS, emptyDocument, documentSize, mergeDocument, normalizeDocument } from './canvas.mjs'
+import { CANVAS_LIMITS, checkInkBudget, emptyDocument, mergeDocument, normalizeDocument } from './canvas.mjs'
 import { SIMULATIONS } from './simulations.mjs'
 import curriculum from './lib/curriculum.cjs'
 import { normalizeImage, IMAGE_MAX_COUNT, IMAGE_TOTAL_BYTES } from '../../src/images.js'
@@ -419,8 +419,12 @@ export class MistakebookStore {
   canvasDocs() { return this.canvasState().docs }
   setCanvasDocs(raw) {
     const document = normalizeDocument(raw)
-    const size = documentSize(document)
+    checkInkBudget(document)
+    const size = JSON.stringify(document, (key, value) => key === 'ink' || key === 'image' ? undefined : value).length
     if (size > CANVAS_LIMITS.bytes) throw new Error(`画布数据过大（约 ${Math.round(size / 1024)} KB），请拆分到多个画布`)
+    for (const { cards } of document.canvases) for (const card of cards) {
+      if (card.kind === 'image') normalizeImage(card.image)
+    }
     this.db.prepare(`INSERT INTO ${this.tables.meta} VALUES('canvas',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value`).run(JSON.stringify(document))
     return {
       saved: true, activeId: document.activeId, canvases: document.canvases.length,
@@ -448,13 +452,11 @@ export class MistakebookStore {
     const rows = Array.isArray(input) ? input : Array.isArray(input?.records) ? input.records : input?.records && typeof input.records === 'object' ? Object.values(input.records) : null
     if (!rows || rows.length > 3000) throw new Error('请选择错题本 JSON；一次最多 3000 道题')
     const sidebar = input && !Array.isArray(input) && input.sidebar && typeof input.sidebar === 'object' ? input.sidebar : null
-    if (sidebar) this.setSidebar(sidebar)
-    // 画布随导出一起走：有 canvas 段就按 id 合并恢复，没有（旧版导出）就不动本机画布。
-    const restored = input && !Array.isArray(input) && input.canvas && typeof input.canvas === 'object'
-      ? mergeDocument(this.canvasDocs(), input.canvas)
+    const incoming = input && !Array.isArray(input) && input.canvas && typeof input.canvas === 'object'
+      ? normalizeDocument(input.canvas)
       : null
-    if (restored) this.setCanvasDocs(restored)
     return this.transaction(() => {
+      if (sidebar) this.setSidebar(sidebar)
       const known = new Map(this.records().filter(record => record.stem.trim() || record.title.trim() || record.type === 'vocabulary').map(row=>[dedupKey(row),row.id]))
       const importedIds=new Map(),importedPapers=[],importedSources=[]
       let created = 0, skipped = 0, unmapped = 0, missingImages = 0
@@ -484,6 +486,15 @@ export class MistakebookStore {
         const mapped=record.sources.map(source=>({...source,id:importedIds.get(source.id)??source.id}))
         const sources=[...new Map(mapped.map(source=>[source.id,source])).values()]
         if(sources.length!==record.sources.length||sources.some((source,index)=>source.id!==record.sources[index].id))this.saveInside({...record,sources})
+      }
+      let restored = null
+      if (incoming) {
+        // The imported records have new IDs, including records matched by deduplication.
+        for (const canvas of incoming.canvases) for (const card of canvas.cards) {
+          if (card.kind === 'reference') card.noteId = importedIds.get(card.noteId) ?? card.noteId
+        }
+        restored = mergeDocument(this.canvasDocs(), incoming)
+        this.setCanvasDocs(restored)
       }
       return { created, skipped, unmapped, missingImages, canvases: restored ? restored.canvases.length : 0 }
     })

@@ -175,7 +175,7 @@ html[data-glass-tier="full"][data-glass-refraction="on"] [data-glass-surface][da
 }
 html[data-glass-tier="full"][data-glass-refraction="on"] [data-glass-surface][data-glass-refraction="on"]::after {
   mask-image:var(--glass-frost-mask);
-  background-image:linear-gradient(145deg,rgb(255 255 255 / .18),rgb(255 255 255 / .08));
+  background-image:linear-gradient(145deg,rgb(255 255 255 / .10),rgb(255 255 255 / .03));
   backdrop-filter:blur(var(--glass-frost-blur)) saturate(1.2); -webkit-backdrop-filter:blur(var(--glass-frost-blur)) saturate(1.2);
 }
 html[data-glass-tier="flat"] { --glass-tint-solid: #fcfdff; }
@@ -223,7 +223,7 @@ html[data-glass-tier="flat"] :is(.side, .mb-side, .toolbar-actions)[data-glass-s
 }
 
 /* 工作区整理：设置集中、无页脚、留白与圆形操作控件。 */
-:root { --glass-radius-control:999px; --sidebar-opacity:.18; --row-top:20px; }
+:root { --glass-radius-control:999px; --sidebar-opacity:.04; --row-top:20px; }
 .page-heading,.mb-page-heading { margin:8px 0 25px; padding:4px 4px 0; align-items:center; }
 .page-heading h1,.mb-page-heading h1 { font-size:32px; line-height:1.2; font-weight:680; letter-spacing:-.5px; }
 .app-shell .main,.mb-main { padding-bottom:40px; }
@@ -288,7 +288,7 @@ html[data-glass-tier="full"][data-glass-refraction="on"] [data-optical-lens][dat
 [data-lens-preview] { color:#007aff!important; }
 .liquid-segmented:has([data-lens-preview]) > .active:not([data-lens-preview]) { color:var(--fg-2); }
 /* 独立开关与多选保留各自的勾选语义，统一低对比玻璃凹面。 */
-:is(button.on,button.active,button[aria-selected="true"],button[aria-pressed="true"]):not(.brand-mark,.primary,.mb-card,.tile,.board-card,.liquid-navigation > *,.liquid-segmented > *,[role="switch"]) { background:rgb(96 111 132 / .12)!important;color:var(--accent);border-color:rgb(255 255 255 / .55);box-shadow:inset 0 .5px 0 rgb(255 255 255 / .65); }
+:is(button.on,button.active,button[aria-selected="true"],button[aria-pressed="true"]):not(.brand-mark,.primary,.mb-card,.tile,.board-card,.mb-hw-color,.liquid-navigation > *,.liquid-segmented > *,[role="switch"]) { background:rgb(96 111 132 / .12)!important;color:var(--accent);border-color:rgb(255 255 255 / .55);box-shadow:inset 0 .5px 0 rgb(255 255 255 / .65); }
 :is(.tile,.board-card,.mb-card).selected { background:#fff;border-color:rgb(99 120 147 / .52);box-shadow:0 0 0 2px rgb(255 255 255 / .88),0 2px 12px rgb(35 50 70 / .08); }
 .view-table tbody tr.selected { background:rgb(105 125 150 / .10);box-shadow:inset 2px 0 0 rgb(105 125 150 / .55); }
 .mb-canvas-card.selected { border-color:rgb(99 120 147 / .62);box-shadow:0 0 0 2px rgb(255 255 255 / .9),0 6px 20px rgb(35 50 70 / .1); }
@@ -310,8 +310,6 @@ html[data-glass-tier="full"][data-glass-refraction="on"] [data-optical-lens][dat
 .mb-canvas-tools .mb-canvas-bar-sep { margin:0 5px; }
 .mb-canvas-zoom { left:22px;right:auto;bottom:24px;border-radius:999px;padding:5px;gap:0;background:rgb(255 255 255 / .65);border-color:rgb(255 255 255 / .85); }
 .mb-canvas-zoom .btn { width:34px;height:34px;overflow:hidden;white-space:nowrap;font-size:0;padding:0; }
-.mb-canvas-zoom #mb-canvas-fit::before { content:'⌖';font-size:21px; }
-.mb-canvas-zoom #mb-canvas-reset::before { content:'↺';font-size:19px; }
 .mb-canvas-tool:hover,.mb-canvas-icon:hover { background:rgb(90 110 130 / .09); }
 @media(max-width:1000px){.mb-canvas-zoom{bottom:110px}.mb-canvas-bar{left:14px;right:14px}.mb-canvas-tools{bottom:18px}}
 
@@ -335,6 +333,22 @@ html[data-glass-tier="full"][data-glass-refraction="on"] [data-optical-lens][dat
 .mb-canvas-tool .icon { width:21px;height:21px; }
 .mb-canvas-tools .mb-canvas-icon { width:34px;height:34px; }
 .mb-canvas-tools .mb-canvas-bar-sep { height:20px;margin:0 6px; }
+
+/* 白板浮层保留边缘反光和光学倒角，透过中央仍可辨认细笔迹。 */
+html:not([data-glass-tier="flat"]) #mb-canvas [data-glass-surface="float"] {
+  isolation:isolate;
+  background:transparent;
+  border-color:rgb(68 87 109 / .23);
+  backdrop-filter:none;
+  -webkit-backdrop-filter:none;
+  box-shadow:inset 0 1px 1px rgb(255 255 255 / .96),inset 1px 0 0 rgb(255 255 255 / .63),
+    inset -1px -2px 1.5px rgb(66 87 111 / .17),0 5px 15px -9px rgb(35 53 75 / .38);
+}
+html:not([data-glass-tier="flat"]) #mb-canvas [data-glass-surface="float"]::after { content:none; display:none; }
+html:not([data-glass-tier="flat"]) #mb-canvas :is(.mb-canvas-tool,.mb-ink-instrument-button):is([aria-pressed="true"],[aria-expanded="true"],.active) {
+  background:rgb(86 133 194 / .09);
+  box-shadow:inset 0 0 0 1px rgb(69 112 166 / .24),inset 0 1px 1px rgb(255 255 255 / .78);
+}
 
 :is(.bar,.mb-bar) .toolbar-actions { display:flex;align-items:center;gap:4px;padding:5px;min-height:52px; }
 :is(.bar,.mb-bar) .toolbar-actions > .icon-button { display:grid;place-items:center;flex:0 0 38px;width:38px;height:38px;padding:9px; }
@@ -405,3 +419,40 @@ html,body,.app-shell,.mb-shell { background:#fff; }
 .mb-focus-toolbar .icon-button { border:0; }
 .mb-note-body { color:#1d232a; }
 .mb-shell[data-mb-side="expanded"]:not([data-mb-focus="on"]) .mb-bar .ws-expand { display:none; }
+
+/* ===== UI v4：更重的字与图标，但保留三级层级 =====
+   一级（标题/数值）700–720；二级（分组/标签/选中）650–700；
+   三级（正文/说明）460–580。图标统一 stroke 2，靠尺寸与颜色分层。 */
+.icon { stroke-width: 2; }
+.brand-name { font-weight: 720; letter-spacing: .2px; }
+.brand-caption { font-weight: 520; letter-spacing: 1px; }
+.eyebrow, .note-kicker { font-weight: 660; letter-spacing: .09em; }
+h1, .page-heading h1, .mb-page-heading h1 { font-weight: 720; letter-spacing: -.6px; }
+.page-heading p, .mb-page-heading p { font-weight: 470; }
+.sec-head { font-weight: 700; }
+.sec-head .count { font-weight: 620; }
+.sub-head { font-weight: 560; }
+.tile-title { font-weight: 650; }
+.tile-body { font-weight: 480; }
+.tile-footer { font-weight: 520; }
+.kind-label { font-weight: 560; }
+.tag, .base-mark { font-weight: 570; }
+.nav { font-weight: 560; }
+.nav.on { font-weight: 660; }
+.nav .count { font-weight: 640; }
+.side-head { font-weight: 700; }
+.btn { font-weight: 600; }
+.btn.primary { font-weight: 660; }
+.breadcrumb { font-weight: 550; }
+.search { font-weight: 500; }
+.label { font-weight: 600; }
+.cap { font-weight: 470; }
+.view-total strong { font-weight: 720; }
+.view-total span { font-weight: 560; }
+.segment, .ws-segment, .ws-preset, .mb-tab, .settings-tab, .curation-menu summary { font-weight: 580; }
+.segment.active, .ws-segment.active, .mb-tab.active, .settings-tab.active { font-weight: 660; }
+.mb-canvas-tool, .mb-canvas-icon { font-weight: 580; }
+.modal-header h2, .editor-title { font-weight: 700; }
+.modal h3, .curation-popover h3 { font-weight: 680; }
+.properties-head { font-weight: 680; }
+.record-info, .meta { font-weight: 480; }

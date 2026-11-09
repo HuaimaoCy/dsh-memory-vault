@@ -108,8 +108,8 @@ export function createPdfExport({ host, shell, h, icon, call, notify, confirm, r
     h('div', { class: 'mb-pdf-bar-actions' },
       h('label', { class: 'mb-pdf-control', title: '纸张方向' }, h('span', { class: 'cap', text: '纸张' }), paperSelect),
       h('label', { class: 'mb-pdf-control', title: '自动排列时的栏数；题目块仍可自由拖动' }, h('span', { class: 'cap', text: '栏数' }), columnSelect),
-      h('label', { class: 'mb-pdf-control', title: '正文字号' }, h('span', { class: 'cap', text: '字号' }), fontInput),
-      h('label', { class: 'mb-pdf-control', title: '页边距' }, h('span', { class: 'cap', text: '边距' }), marginInput),
+      h('label', { class: 'mb-pdf-control', title: '正文字号（磅）' }, h('span', { class: 'cap', text: '字号' }), fontInput),
+      h('label', { class: 'mb-pdf-control', title: '页边距（毫米）' }, h('span', { class: 'cap', text: '边距' }), marginInput),
       h('button', { type: 'button', class: 'btn ghost', id: 'mb-pdf-arrange', text: '重新排列', onClick: () => void run(() => rearrange(true)) }),
       h('button', { type: 'button', class: 'btn ghost', id: 'mb-pdf-undo', text: '撤销', disabled: true, onClick: () => void run(undo) }),
       exportButton))

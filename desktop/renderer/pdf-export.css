@@ -32,7 +32,7 @@
 .mb-pdf-bar-title { display: flex; align-items: center; gap: 10px; min-width: 0; }
 .mb-pdf-bar-title strong { display: block; font-size: 14px; letter-spacing: .01em; }
 .mb-pdf-bar-title .cap { display: block; font-size: 11.5px; color: #5b6570; }
-.mb-pdf-close { transform: rotate(0); }
+.mb-pdf-close .icon { transform: rotate(180deg); }
 .mb-pdf-bar .spacer { flex: 1; }
 .mb-pdf-bar-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
 .mb-pdf-control { display: flex; align-items: center; gap: 6px; }
@@ -129,7 +129,7 @@
   overflow: auto;
   display: flex;
   flex-direction: column;
-  align-items: center;
+  align-items: safe center;
   gap: calc(18px * var(--mb-pdf-zoom));
   padding: 24px 16px 48px;
   background:
@@ -311,6 +311,6 @@
 .mb-pdf.busy .mb-pdf-pages { pointer-events: none; opacity: .92; }
 
 @media (max-width: 1200px) {
-  .mb-pdf-control .cap { display: none; }
+  .mb-pdf-control:has(select) .cap { display: none; }
   .mb-pdf-side { width: 220px; min-width: 200px; }
 }

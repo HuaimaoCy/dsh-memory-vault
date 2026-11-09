@@ -9,8 +9,10 @@
  */
 
 .qc-dialog {
+  --qc-inline-space: 20px;
+  --qc-scrollbar: 6px;
   width: min(560px, calc(100vw - 32px));
-  max-height: calc(100vh - 48px);
+  max-height: calc(100dvh - 48px);
   margin: auto;
   padding: 0;
   border: 1px solid var(--line, #e4e6eb);
@@ -19,8 +21,12 @@
   color: var(--fg, #20232a);
   box-shadow: 0 24px 60px #0b132026, 0 2px 6px #0b13200f;
   font: 13px/1.6 -apple-system, BlinkMacSystemFont, "Microsoft YaHei UI", "Microsoft YaHei", "Segoe UI", system-ui, sans-serif;
-  overflow: auto;
-  overscroll-behavior: contain;
+  overflow: hidden;
+}
+
+.qc-dialog[open] {
+  display: flex;
+  flex-direction: column;
 }
 
 .qc-dialog::backdrop {
@@ -33,9 +39,10 @@
 
 .qc-head {
   display: flex;
+  flex: none;
   align-items: flex-start;
   gap: 12px;
-  padding: 18px 20px 0;
+  padding: 18px var(--qc-inline-space) 0;
 }
 
 .qc-head-text {
@@ -64,12 +71,21 @@
 .qc-body {
   display: flex;
   flex-direction: column;
+  min-height: 0;
   gap: 14px;
-  padding: 16px 20px 4px;
+  padding: 16px calc(var(--qc-inline-space) - var(--qc-scrollbar)) 4px var(--qc-inline-space);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+
+.qc-body::-webkit-scrollbar {
+  width: var(--qc-scrollbar);
 }
 
 .qc-field {
   display: flex;
+  flex: none;
   flex-direction: column;
   gap: 7px;
   min-width: 0;
@@ -109,7 +125,7 @@
 }
 
 .qc-mode:hover {
-  background: #e9ecf2;
+  background: var(--alaya-hover, #e9ecf2);
   color: var(--fg, #20232a);
 }
 
@@ -144,14 +160,19 @@
 
 .qc-foot {
   display: flex;
+  flex: none;
   flex-direction: column;
   gap: 10px;
-  padding: 12px 20px 18px;
+  padding: 12px var(--qc-inline-space) 18px;
   border-top: 1px solid transparent;
 }
 
 .qc-feedback {
   min-height: 20px;
+}
+
+.qc-feedback:not(:has(.qc-status:not(:empty), .qc-error:not([hidden]), .qc-hint:not([hidden]))) {
+  display: none;
 }
 
 .qc-status,
@@ -205,6 +226,13 @@
 .qc-save {
   flex: 0 0 auto;
   min-width: 84px;
+}
+
+@media (max-height: 600px) {
+  .qc-head { padding-top: 14px; }
+  .qc-body { gap: 9px; padding-top: 12px; }
+  .qc-field { gap: 5px; }
+  .qc-foot { padding-top: 8px; padding-bottom: 14px; }
 }
 
 @media (max-width: 460px) {

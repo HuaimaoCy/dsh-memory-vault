@@ -1,7 +1,7 @@
-import { app, BrowserWindow, dialog, ipcMain, Notification, safeStorage, shell } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, nativeTheme, Notification, safeStorage, shell } from 'electron'
 import { DatabaseSync } from 'node:sqlite'
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
-import { dirname, join, resolve } from 'node:path'
+import { dirname, extname, join, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { randomUUID } from 'node:crypto'
 import { openVault } from './lib/bridge.mjs'
@@ -10,6 +10,8 @@ import { createModelAdapter, validateModelSettings } from '../src/model.js'
 import { validateVaultFile } from './lib/databases.mjs'
 import { createDesktopUpdater } from './lib/updates.mjs'
 import { MistakebookStore } from '../addons/mistakebook/store.mjs'
+import { A4_IMAGE_SIZE, activePaperSheet, checkInkBudget, normalizeDocument } from '../addons/mistakebook/canvas.mjs'
+import { canvasPrintHTML, cardOnPaper } from '../addons/mistakebook/canvas-print.mjs'
 import { NOTEBOOK_DISPLAY_VERSION, NOTEBOOK_RELEASE_NAME } from '../src/version.js'
 import {PRODUCTS} from './products.mjs'
 
@@ -73,10 +75,8 @@ function register(channel, action) {
  * 三件无法在渲染层做的事：隐藏窗口、等字体就绪、printToPDF。窗口不加载 preload、
  * 不开 node、不允许弹窗与权限请求，也不复用主窗口会话——打印页只是一份静态文档。
  *
- * @param {string} html - 完整 HTML 文档。
- * @returns {Promise<Buffer>} PDF 字节。
  */
-async function printPDF(html) {
+async function renderPrintDocument(html, render, offscreen = false) {
   // 放在 userData 下的 print 目录，而不是系统 Temp：本机（以及这台机器的
   // DSH 沙箱上下文）对 %TEMP% 的写入会被 ACL 拒成 EPERM，userData 是应用本来
   // 就能写的位置（settings.json、updates 都在这里）。
@@ -87,7 +87,7 @@ async function printPDF(html) {
   const printer = new BrowserWindow({
     show: false, width: 900, height: 1200, autoHideMenuBar: true, title: 'Alaya 打印',
     webPreferences: {
-      sandbox: true, contextIsolation: true, nodeIntegration: false, spellcheck: false,
+      sandbox: true, contextIsolation: true, nodeIntegration: false, spellcheck: false, offscreen, backgroundThrottling: !offscreen,
       partition: `notebook-print-${randomUUID()}`,
     },
   })
@@ -98,11 +98,93 @@ async function printPDF(html) {
     await printer.loadFile(source)
     // 字体（含中文回退）没就绪就打印会出现整页缺字；等 document.fonts 再出 PDF。
     await printer.webContents.executeJavaScript('document.fonts && document.fonts.ready ? document.fonts.ready.then(() => true) : true')
-    return await printer.webContents.printToPDF({ printBackground: true, preferCSSPageSize: true, margins: { marginType: 'none' } })
+    return await render(printer.webContents)
   } finally {
     if (!printer.isDestroyed()) printer.destroy()
     rmSync(source, { force: true })
   }
+}
+const printPDF = html => renderPrintDocument(html, contents =>
+  contents.printToPDF({ printBackground: true, preferCSSPageSize: true, margins: { marginType: 'none' } }))
+
+function paperQuestions(store, canvas, sheets) {
+  const references = new Map()
+  for (const card of canvas.cards) {
+    if (card.kind !== 'reference' || card.noteType !== 'mistake' || !card.noteId || !sheets.some(sheet => cardOnPaper(card, sheet))) continue
+    const includesImages = !card.question?.sections || card.question.sections.includes('images')
+    references.set(card.noteId, references.get(card.noteId) || includesImages)
+  }
+  const questions = new Map()
+  for (const [id, includesImages] of references) {
+    let record
+    try { record = store.require(id) }
+    catch (error) {
+      if (error.message === '题目不存在') continue
+      throw error
+    }
+    const images = includesImages ? store.listImages(id, true) : []
+    questions.set(id, { ...record, images })
+  }
+  return questions
+}
+
+async function exportCanvasPaper({ format, canvas: raw, sheetId }) {
+  if (!['pdf', 'png', 'jpg'].includes(format)) throw new Error('请选择 PDF、PNG 或 JPG')
+  const document = normalizeDocument({ canvases: [raw] })
+  checkInkBudget(document)
+  const [canvas] = document.canvases
+  if (!canvas.paper?.enabled) throw new Error('请先切换到 A4 纸模式')
+  const paper = canvas.paper
+  const isImage = format !== 'pdf'
+  const sheet = isImage ? (sheetId === undefined ? activePaperSheet(paper) : paper.sheets.find(row => row.id === sheetId)) : null
+  if (isImage && !sheet) throw new Error('A4 纸张不存在')
+  const title = canvas.title.replace(/[<>:"/\\|?*\u0000-\u001f]/g, '_').replace(/[. ]+$/, '') || '白板'
+  const pageSuffix = sheet && paper.sheets.length > 1 ? `-第 ${paper.sheets.indexOf(sheet) + 1} 页` : ''
+  const store = mistakebook
+  const selected = await dialog.showSaveDialog(window, {
+    title: '导出 A4', defaultPath: `${title}${pageSuffix}.${format}`,
+    filters: [{ name: format.toUpperCase(), extensions: [format] }],
+  })
+  if (selected.canceled || !selected.filePath) return { canceled: true }
+  const target = extname(selected.filePath).toLowerCase() === `.${format}` ? selected.filePath : `${selected.filePath}.${format}`
+  checkDataTarget(target)
+  if (mistakebook !== store) throw new Error('笔记本已切换，请重新导出')
+  const questions = paperQuestions(store, canvas, sheet ? [sheet] : paper.sheets)
+  const rich = canvas.cards.some(card => card.kind === 'reference' && card.noteType === 'mistake') ? {
+    nonce: randomUUID(),
+    markdown: pathToFileURL(join(here, 'renderer', 'markdown.js')).href,
+    styles: ['markdown.css', 'canvas-question.css'].map(name => pathToFileURL(join(here, 'renderer', name)).href),
+  } : undefined
+  let bytes
+  if (!isImage) {
+    bytes = await printPDF(canvasPrintHTML(canvas, { questions, rich }))
+  } else {
+    const size = A4_IMAGE_SIZE
+    bytes = await renderPrintDocument(canvasPrintHTML(canvas, { sheetId: sheet.id, imageSize: size, questions, rich }), async contents => {
+      // 用固定像素的渲染视口，避免桌面分辨率截短纸张后把内容拉伸。
+      const debug = contents.debugger
+      debug.attach('1.3')
+      try {
+        await debug.sendCommand('Emulation.setDeviceMetricsOverride', {
+          width: size.w, height: size.h, deviceScaleFactor: 1, mobile: false,
+        })
+        const result = await debug.sendCommand('Page.captureScreenshot', {
+          format: format === 'jpg' ? 'jpeg' : 'png', ...(format === 'jpg' ? { quality: 95 } : {}),
+          clip: { x: 0, y: 0, width: size.w, height: size.h, scale: 1 },
+          captureBeyondViewport: true,
+        })
+        return Buffer.from(result.data, 'base64')
+      } finally { debug.detach() }
+    }, true)
+  }
+  const temporary = `${target}.${randomUUID()}.tmp`
+  try {
+    writeFileSync(temporary, bytes, { flag: 'wx' })
+    renameSync(temporary, target)
+  } finally {
+    rmSync(temporary, { force: true })
+  }
+  return { canceled: false, path: target }
 }
 // Notebook handlers live in the shared op table (src/core/notebook_ops.mjs);
 // this hooks object is the only place the main process meets them. The old
@@ -138,6 +220,10 @@ const notebookHooks = {
   getOCR: () => ocrRequest, setOCR: request => { ocrRequest = request },
 }
 function registerDesktop() {
+  register('appearance:mode', mode => {
+    if (!['system', 'light', 'dark'].includes(mode)) throw new Error('无效的外观模式')
+    nativeTheme.themeSource = mode
+  })
   register('mistakebook:invoke', (action, body = {}) => bridge.invoke(`notebook.${action}`, body))
   // 自由画布：画布文档是笔记本域的数据（notebook_meta 的 canvas 键），与笔记同库
   // 但不进入数据库（记忆）域；读写都经过同一个 MistakebookStore 的校验与限流。
@@ -150,6 +236,7 @@ function registerDesktop() {
       return { ...state.docs, docs: state.docs, corrupted: state.corrupted }
     }
     if (action === 'save') return mistakebook.setCanvasDocs(body?.docs ?? body)
+    if (action === 'export') return exportCanvasPaper(body)
     throw new Error('未知的画布操作')
   })
   register('vault:updates', async (action, body) => {
@@ -222,10 +309,11 @@ function registerDesktop() {
 async function openWindow() {
   window = new BrowserWindow({
     width: 1440, height: 940, minWidth: 1040, minHeight: 650, backgroundColor: '#fbfaf7', title: 'Alaya · 记忆与笔记',
-    autoHideMenuBar: true, show: false,
+    show: false,
     icon: join(here, 'assets', 'memory-vault.png'),
     webPreferences: { preload: join(here, 'preload.cjs'), contextIsolation: true, nodeIntegration: false, sandbox: true, spellcheck: false, offscreen: selftest, backgroundThrottling: !selftest },
   })
+  if (process.platform !== 'darwin') window.removeMenu()
   if (!selftest) window.once('ready-to-show', () => window.show())
   window.webContents.setWindowOpenHandler(({ url }) => { if (/^https?:\/\//.test(url)) void shell.openExternal(url); return { action: 'deny' } })
   window.webContents.on('will-navigate', event => event.preventDefault())

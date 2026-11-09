@@ -1,0 +1,23 @@
+.mb-canvas-quick-palette { position:absolute; inset:0; z-index:8; pointer-events:none; }
+.mb-canvas-quick-palette[hidden], .mb-quick-width-panel[hidden] { display:none; }
+.mb-quick-arc { position:absolute; inset:0; width:100%; height:100%; fill:none; stroke-linecap:round;
+  filter:drop-shadow(0 5px 10px rgb(20 31 48 / .18)); }
+.mb-quick-arc-border { stroke:var(--alaya-line, #d9dfe8); stroke-width:54; }
+.mb-quick-arc-fill { stroke:color-mix(in srgb, var(--alaya-panel, #fff) 94%, transparent); stroke-width:52; }
+.mb-quick-control { position:absolute; width:40px; height:40px; margin:0; padding:0; display:grid; place-items:center;
+  transform:translate(-50%,-50%); border:0; border-radius:50%; background:transparent; color:var(--fg, #1a2431);
+  pointer-events:auto; cursor:pointer; }
+.mb-quick-control .icon { display:block; width:22px; height:22px; }
+.mb-quick-control:disabled { opacity:.38; cursor:default; }
+.mb-quick-control:not(:disabled):hover { background-color:var(--alaya-hover, #e9eef5); }
+#mb-canvas-quick-palette .mb-quick-control:is([aria-pressed="true"],[aria-expanded="true"]) {
+  background:var(--accent-soft, #1267ed24) !important; color:var(--alaya-accent-ink, #1857a4); box-shadow:none; }
+.mb-quick-control:focus-visible { outline:2px solid var(--alaya-accent-ink, #1267ed); outline-offset:-1px; }
+.mb-quick-color { appearance:none; border:5px solid transparent; background:conic-gradient(#ff3652,#ffbd00,#22c65d,#1267ed,#9b4df7,#ff3652) padding-box; }
+.mb-quick-color::-webkit-color-swatch-wrapper { padding:3px; }
+.mb-quick-color::-webkit-color-swatch { border:2px solid var(--alaya-panel, #fff); border-radius:50%; }
+.mb-quick-width-panel { position:absolute; display:flex; align-items:center; gap:10px; padding:8px 12px;
+  border:1px solid var(--alaya-line, #d9dfe8); border-radius:22px; background:var(--alaya-panel, #fff);
+  color:var(--fg, #1a2431); box-shadow:0 5px 14px rgb(20 31 48 / .14); pointer-events:auto; }
+.mb-quick-width-panel input { width:112px; margin:0; accent-color:var(--accent, #1267ed); }
+.mb-quick-width-value { min-width:4ch; font-size:12px; text-align:right; font-variant-numeric:tabular-nums; }

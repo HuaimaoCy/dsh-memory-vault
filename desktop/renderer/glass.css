@@ -59,9 +59,12 @@
 /* 分级：写在 <html> 上（运行时），也可以写在任意祖先上——lab 页就是靠这一点
    在一页里并排展示三档，而不需要复制样式。 */
 [data-glass-tier="full"] {
-  --glass-blur: 26px;
-  --glass-saturate: 185%;
-  --glass-tint: rgb(255 255 255 / .56);
+  /* full = 折射档，同时按视频结论取消高斯模糊、颜色层压到近乎全透 */
+  --glass-blur: 0px;
+  --glass-saturate: 165%;
+  --glass-tint: rgb(255 255 255 / .10);
+  --glass-tint-strong: rgb(255 255 255 / .16);
+  --glass-tint-soft: rgb(255 255 255 / .06);
   --glass-rim: var(--glass-rim-strong);
 }
 

@@ -64,6 +64,22 @@ export function buildDistanceField({ width, height, radius = 0, shape = 'rounded
   return { width: w, height: h, data }
 }
 
+/**
+ * 法线场的「过渡带」半径。
+ *
+ * 直接用真实圆角求梯度，圆角与直边的交界、以及 sharp corner 的中轴线上，
+ * 梯度方向会在相邻像素间跳变（视频里那条「分割线」）。把求梯度用的圆角放大
+ * 1.5 倍（上限是半短边），法线绕角点的过渡带就被拉宽，跳变被摊成连续旋转。
+ * 这是参考实现（Kyant0/AndroidLiquidGlass）的 `gradRadius = min(radius*1.5, min(halfSize))`
+ * 做法；直边上的法线不受影响，只有角部被平滑。
+ */
+export function gradientRadius({ shape = 'roundedRect', width, height, radius = 0, gradientScale = 1.5, smoothing = 0 }) {
+  const half = Math.min(Math.max(Number(width) || 1, 1), Math.max(Number(height) || 1, 1)) / 2
+  if (shape === 'circle' || shape === 'pill') return half
+  const base = Math.max(Math.max(Number(radius) || 0, 0) * Math.max(Number(gradientScale) || 1, 1), Math.max(Number(smoothing) || 0, 0))
+  return Math.min(base, half)
+}
+
 /** 形状的包围盒里「有效玻璃区域」的采样范围（外扩 bezel 用于取到边缘外侧的法线）。 */
 export function sampleBounds({ width, height, bezelWidth = 0 }) {
   const pad = Math.max(0, Number(bezelWidth) || 0) + 2

@@ -42,6 +42,10 @@ export function createSvgBackend({ document: doc = globalThis.document, maxFilte
     Math.round(params.width), Math.round(params.height), Math.round(params.radius || 0),
     Math.round(params.bezelWidth || 0), (Number(params.thickness) || 0).toFixed(2),
     (Number(params.ior) || 1.5).toFixed(2), Number(params.displacementScale ?? 30).toFixed(2), params.profile || 'smooth', Number(params.blur ?? .6).toFixed(2), Number(params.lensStrength||0).toFixed(2),
+    params.mode || 'refract', Number(params.curveStrength ?? 12.65).toFixed(2), Number(params.curveDistance ?? 22).toFixed(2),
+    Number(params.curvePower ?? 1.65).toFixed(2), Number(params.gradientScale ?? 1).toFixed(2), Number(params.depth || 0).toFixed(2),
+    Number(params.cornerSmoothing ?? 0).toFixed(2),
+    Number(params.dispersion || 0).toFixed(3),
   ].join(':')
 
   const mapFor = (key, params) => {
@@ -121,8 +125,48 @@ export function createSvgBackend({ document: doc = globalThis.document, maxFilte
     displacement.setAttribute('xChannelSelector', 'R')
     displacement.setAttribute('yChannelSelector', 'G')
     displacement.setAttribute('result', 'refracted')
-    // SVG 只处理倒角位移。中心磨砂由原生 backdrop 合成，Fresnel 贴图走普通图层。
-    filter.append(image, neutral, mapOver, channels, displacement)
+    // 色散：三个通道各用略微不同的位移幅值，再按通道取回、screen 合成。
+    // 真实光谱至少 7 个采样；SVG 这条链每多一次位移就多一次背景采样，
+    // 所以只做 R/G/B 三通道（参考 liquid-glass-react 的三滤镜做法）。
+    const dispersion = Math.min(Math.max(Number(params.dispersion) || 0, 0), .2)
+    if (dispersion <= 0) {
+      filter.append(image, neutral, mapOver, channels, displacement)
+    } else {
+      const matrixFor = {
+        R: '1 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 1 0',
+        G: '0 0 0 0 0  0 1 0 0 0  0 0 0 0 0  0 0 0 1 0',
+        B: '0 0 0 0 0  0 0 0 0 0  0 0 1 0 0  0 0 0 1 0',
+      }
+      const passes = []
+      for (const [channel, delta] of [['R', 1], ['G', 0], ['B', -1]]) {
+        const pass = doc.createElementNS(SVG_NS, 'feDisplacementMap')
+        pass.setAttribute('in', 'SourceGraphic')
+        pass.setAttribute('in2', 'centered-map')
+        pass.setAttribute('scale', String(entry.filterScale * (1 + dispersion * delta)))
+        pass.setAttribute('xChannelSelector', 'R')
+        pass.setAttribute('yChannelSelector', 'G')
+        pass.setAttribute('result', `disp-${channel}`)
+        const keep = doc.createElementNS(SVG_NS, 'feColorMatrix')
+        keep.setAttribute('in', `disp-${channel}`)
+        keep.setAttribute('type', 'matrix')
+        keep.setAttribute('values', matrixFor[channel])
+        keep.setAttribute('result', `chan-${channel}`)
+        passes.push(pass, keep)
+      }
+      const greenBlue = doc.createElementNS(SVG_NS, 'feBlend')
+      greenBlue.setAttribute('in', 'chan-G')
+      greenBlue.setAttribute('in2', 'chan-B')
+      greenBlue.setAttribute('mode', 'screen')
+      greenBlue.setAttribute('result', 'gb')
+      const rgb = doc.createElementNS(SVG_NS, 'feBlend')
+      rgb.setAttribute('in', 'chan-R')
+      rgb.setAttribute('in2', 'gb')
+      rgb.setAttribute('mode', 'screen')
+      rgb.setAttribute('result', 'refracted')
+      // 滤镜图按文档顺序求值：centered-map 必须先于引用它的 feDisplacementMap 出现，
+      // 否则 in2 指向未求值的结果，整条链会被判为无效滤镜（表现为完全没有折射）。
+      filter.append(image, neutral, mapOver, channels, ...passes, greenBlue, rgb)
+    }
     defs.append(filter)
     filterCache.set(key, id)
     return id

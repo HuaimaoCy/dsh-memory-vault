@@ -2,6 +2,7 @@ import { icon } from './icons.js'
 import { createLoadingStatus } from './loading.js'
 import { NOTE_TYPES, NEW_NOTE_TYPES, STRUCTURED_FIELDS, normalizeFields } from '../../addons/mistakebook/fields.mjs'
 import { SIMULATIONS } from '../../addons/mistakebook/simulations.mjs'
+import { inkSVGAttributes, stabilizeInkPoint } from '../../addons/mistakebook/canvas-ink.mjs'
 import { extractWords, normalizeWord } from '../../addons/mistakebook/words.mjs'
 import { renderRelationTree, vocabularyGraph } from './relations.js'
 import { createNotebookLayoutAdapter, NOTEBOOK_LAYOUT_DEFAULTS } from './workspace-layout.js'
@@ -9,6 +10,7 @@ import { renderTagEditor, renderTagCloud } from './tags.js'
 import { createSidebarController, renderSidebarConfig, migrateLegacySidebar } from './sidebar.js'
 import { renderRich } from './markdown.js'
 import { createCanvasView } from './freeform-canvas.js'
+import { createDrawingCursor } from './drawing-cursor.js'
 import { createPdfExport } from './pdf-export.js'
 import { embedLayout, settingsTabs } from './glass-appearance.js'
 import { createPapers } from './papers.js'
@@ -55,6 +57,8 @@ async function filePayload(file, allowPDF = false) {
   if (file.type.startsWith('image/')) {
     const decoded = new Image(); decoded.src = dataURL(image); await decoded.decode()
     if (decoded.naturalWidth > 16384 || decoded.naturalHeight > 16384 || decoded.naturalWidth * decoded.naturalHeight > 40000000) throw new Error('图片尺寸过大')
+    image.width = decoded.naturalWidth
+    image.height = decoded.naturalHeight
   }
   return image
 }
@@ -69,6 +73,7 @@ export function mountMistakebook({ beforeEnter, appearance,standalone=false }) {
   let pdfView = null
   let paperParent=null
   const handwritingDrafts = new WeakMap()
+  let handwritingCursorObserver
   let messageTimer
   const notify = (message, error = false) => {
     const output = document.getElementById('mb-status'); output.textContent = message; output.className = `mb-status visible${error ? ' error' : ''}`
@@ -395,8 +400,20 @@ export function mountMistakebook({ beforeEnter, appearance,standalone=false }) {
   }
   canvasView = createCanvasView({
     host: shell.querySelector('.mb-workspace'), shell, h, icon, dialog,
-    call: callCanvas, notify, confirm,
+    call: callCanvas, notify, confirm, renderRich,
     notes: async () => (await call('list', { view: 'all', order: 'updated' })).records,
+    readQuestion: id => call('read', { id }),
+    readImage: file => filePayload(file),
+    previewNote: async id => {
+      const note = await call('read', { id })
+      if (!canvasView.isOpen() || document.querySelector('.mb-canvas-note-preview')) return
+      dialog(note.title || note.vocabulary?.word || '笔记预览',
+        h('article', { class: 'mb-canvas-note-preview' },
+          renderRich(noteMarkdown(note)),
+          note.images?.length ? h('div', { class: 'mb-note-images' }, note.images.map(image =>
+            h('figure', {}, h('img', { src: dataURL(image), alt: image.name || '笔记图片', loading: 'lazy' }),
+              image.name ? h('figcaption', { text: image.name }) : null))) : null), true)
+    },
     openNote: async id => {
       await canvasView.close()
       if (!state.data?.records?.some(row => row.id === id)) await load()
@@ -744,6 +761,8 @@ export function mountMistakebook({ beforeEnter, appearance,standalone=false }) {
     detail.replaceChildren(head, meta, article)
   }
   function renderDetail() {
+    handwritingCursorObserver?.disconnect()
+    handwritingCursorObserver = null
     const draft = state.draft; detail.hidden = !draft; detailSplitter.hidden = !draft; shell.classList.toggle('with-question', Boolean(draft))
     if (!draft) {
       // 关闭详情时必须把全屏状态一起复位，否则主列表仍被 display:none 挡住，只剩白底。
@@ -1098,66 +1117,183 @@ export function mountMistakebook({ beforeEnter, appearance,standalone=false }) {
   }
   function addHandwritingPage(draft) {
     const page = handwritingDrafts.get(draft)
+    page?.finishDrawing()
     if (!page?.strokes.length) return false
     const data = page.canvas.toDataURL('image/png').split(',')[1]
     if (draft.images.length + 1 > 16) throw new Error('每篇笔记最多 16 张图片')
     if (draft.images.reduce((sum, image) => sum + (image.size || 0), 0) + data.length * 3 / 4 > 20 * 1024 * 1024) throw new Error('图片总量不能超过 20 MB')
     const stamp = new Date().toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
     draft.images.push({ name: `手写 ${stamp}.png`, mimeType: 'image/png', data, size: Math.floor(data.length * 3 / 4) })
-    page.strokes.length = 0
+    page.reset()
     dirty()
     return true
   }
   function handwritingPanel(draft) {
     const W = 1400, H = 900
     const panel = h('div', { class: 'mb-handwrite', id: 'mb-handwrite' })
-    const canvas = h('canvas', { class: 'mb-handwrite-canvas', id: 'mb-handwrite-canvas', width: W, height: H, 'aria-label': '手写区域，按住拖动书写' })
+    const canvas = h('canvas', { class: 'mb-handwrite-canvas', id: 'mb-handwrite-canvas', width: W, height: H, tabindex: '0', 'aria-label': '手写区域，按住拖动书写' })
+    const canvasFrame = h('div', { class: 'mb-handwrite-frame' }, canvas)
+    const cursor = createDrawingCursor(canvasFrame)
     const ctx = canvas.getContext('2d')
-    const paintBackground = () => { ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, W, H) }
-    paintBackground(); ctx.lineCap = 'round'; ctx.lineJoin = 'round'
+    // 已完成的笔画只绘制一次。拖动时每帧只合成底图和当前笔画。
+    const committed = h('canvas', { width: W, height: H })
+    const ink = committed.getContext('2d')
+    ctx.lineCap = ink.lineCap = 'round'
+    ctx.lineJoin = ink.lineJoin = 'round'
     let page = handwritingDrafts.get(draft)
-    if (!page) { page = { strokes: [], tool: { color: '#2b3138', width: 4, eraser: false } }; handwritingDrafts.set(draft, page) }
-    page.canvas = canvas
-    const strokes = page.strokes, tool = page.tool
-    let drawing = null, pointerID = null
-    const drawStroke = stroke => {
-      if (!stroke.points.length) return
-      ctx.globalCompositeOperation = 'source-over'
-      ctx.strokeStyle = stroke.eraser ? '#ffffff' : stroke.color; ctx.lineWidth = stroke.eraser ? stroke.width * 4 : stroke.width
-      ctx.beginPath()
-      ctx.moveTo(stroke.points[0].x, stroke.points[0].y)
-      for (const point of stroke.points.slice(1)) ctx.lineTo(point.x, point.y)
-      if (stroke.points.length === 1) ctx.lineTo(stroke.points[0].x + .1, stroke.points[0].y)
-      ctx.stroke()
-      ctx.globalCompositeOperation = 'source-over'
+    if (!page) {
+      page = { strokes: [], cleared: [], tool: { color: '#2b3138', width: 4, eraser: false } }
+      handwritingDrafts.set(draft, page)
+    } else page.finishDrawing()
+    page.canvas = committed
+    const { strokes, cleared, tool } = page
+    let drawing = null, frame = 0
+    const brushWidth = () => tool.width * (tool.eraser ? 4 : 1)
+    const syncCursor = () => cursor.setStyle({
+      color: tool.eraser ? '#717a88' : tool.color,
+      diameter: brushWidth() * (canvas.clientWidth || W) / W,
+    })
+    const moveCursor = event => {
+      if (!drawing || drawing.pointerId === event.pointerId) cursor.move(event)
     }
-    const redraw = () => { paintBackground(); for (const stroke of strokes) drawStroke(stroke); if (drawing) drawStroke(drawing) }
-    const point = event => { const rect = canvas.getBoundingClientRect(); return { x: (event.clientX - rect.left) * W / rect.width, y: (event.clientY - rect.top) * H / rect.height } }
-    canvas.addEventListener('pointerdown', event => { if (drawing || event.button > 0) return; event.preventDefault(); pointerID = event.pointerId; try { canvas.setPointerCapture(event.pointerId) } catch { /* synthetic events in tests carry no active pointer */ } drawing = { color: tool.color, width: tool.width, eraser: tool.eraser, points: [point(event)] }; drawStroke(drawing) })
-    canvas.addEventListener('pointermove', event => { if (!drawing || event.pointerId !== pointerID) return; event.preventDefault(); drawing.points.push(point(event)); redraw() })
-    const finish = event => { if (!drawing || event.pointerId !== pointerID) return; strokes.push(drawing); drawing = null; pointerID = null; redraw(); dirty(); updatePageControls() }
+    syncCursor()
+    handwritingCursorObserver = new ResizeObserver(syncCursor)
+    handwritingCursorObserver.observe(canvas)
+    const drawStroke = (target, { color, width, points }) => {
+      if (points.length === 1) {
+        const [[x, y]] = points
+        target.fillStyle = color
+        target.beginPath()
+        target.arc(x, y, width / 2, 0, 2 * Math.PI)
+        target.fill()
+        return
+      }
+      const path = inkSVGAttributes({ tool: 'pen', color, width, points })
+      target.strokeStyle = color
+      target.lineWidth = width
+      target.stroke(new Path2D(path.d))
+    }
+    const paint = () => {
+      frame = 0
+      ctx.drawImage(committed, 0, 0)
+      if (drawing) drawStroke(ctx, drawing.stroke)
+    }
+    const paintNow = () => {
+      if (frame) cancelAnimationFrame(frame)
+      paint()
+    }
+    const rebuild = () => {
+      ink.fillStyle = '#ffffff'
+      ink.fillRect(0, 0, W, H)
+      for (const stroke of strokes) drawStroke(ink, stroke)
+      paintNow()
+    }
+    const appendSample = event => {
+      const { rect, stroke } = drawing
+      const x = (event.clientX - rect.left) * W / rect.width
+      const y = (event.clientY - rect.top) * H / rect.height
+      const { points } = stroke
+      const last = points.at(-1), sample = [x, y, 50], scale = rect.width / W
+      const distance = last ? Math.hypot(x - last[0], y - last[1]) * scale : Infinity
+      if (distance === 0 || (event.type !== 'pointerup' && distance < 0.6)) return
+      if (drawing.previousSample) points[points.length - 1] = stabilizeInkPoint(drawing.previousSample, last, sample, scale)
+      drawing.previousSample = last
+      points.push(sample)
+    }
+    canvas.addEventListener('pointerenter', moveCursor)
+    canvas.addEventListener('pointerdown', event => {
+      if (drawing || event.button !== 0) return
+      const { left, top, width, height } = canvas.getBoundingClientRect()
+      const xInset = canvas.clientLeft, yInset = canvas.clientTop
+      if (width <= 2 * xInset || height <= 2 * yInset) return
+      event.preventDefault()
+      canvas.focus({ preventScroll: true })
+      drawing = {
+        pointerId: event.pointerId,
+        rect: { left: left + xInset, top: top + yInset, width: width - 2 * xInset, height: height - 2 * yInset },
+        stroke: { color: tool.eraser ? '#ffffff' : tool.color, width: brushWidth(), points: [] },
+      }
+      try { canvas.setPointerCapture(event.pointerId) } catch { /* 合成事件没有活动指针 */ }
+      moveCursor(event)
+      appendSample(event)
+      paintNow()
+    })
+    canvas.addEventListener('pointermove', event => {
+      moveCursor(event)
+      if (drawing?.pointerId !== event.pointerId) return
+      event.preventDefault()
+      const samples = event.getCoalescedEvents?.()
+      for (const sample of samples?.length ? samples : [event]) appendSample(sample)
+      if (!frame) frame = requestAnimationFrame(paint)
+    })
+    const finish = event => {
+      if (!drawing || (event && drawing.pointerId !== event.pointerId)) return
+      const { pointerId, stroke, rect } = drawing
+      if (event?.type === 'pointerup') {
+        moveCursor(event)
+        if (event.clientX >= rect.left && event.clientX <= rect.left + rect.width &&
+          event.clientY >= rect.top && event.clientY <= rect.top + rect.height) appendSample(event)
+      }
+      drawing = null
+      if (canvas.hasPointerCapture(pointerId)) canvas.releasePointerCapture(pointerId)
+      strokes.push(stroke)
+      drawStroke(ink, stroke)
+      paintNow()
+      dirty()
+      updatePageControls()
+    }
     canvas.addEventListener('pointerup', finish)
     canvas.addEventListener('pointercancel', finish)
+    canvas.addEventListener('lostpointercapture', finish)
+    page.finishDrawing = finish
     const markTool = (nodes, active) => { for (const node of nodes) { const on = node === active; node.classList.toggle('on', on); node.setAttribute('aria-pressed', String(on)) } }
     const colors = ['#2b3138', '#1f5fa8', '#b23b32']
-    const refreshColors = () => { colorButtons.forEach((node, index) => { const on = !tool.eraser && colors[index] === tool.color; node.classList.toggle('on', on); node.setAttribute('aria-pressed', String(on)) }) }
-    const colorButtons = colors.map(color => h('button', { type: 'button', class: `mb-hw-color${!tool.eraser && tool.color === color ? ' on' : ''}`, style: `background:${color}`, title: `笔色 ${color}`, 'aria-label': `笔色 ${color}`, 'aria-pressed': String(!tool.eraser && tool.color === color), onClick: event => { tool.eraser = false; tool.color = color; markTool(colorButtons, event.currentTarget); eraserButton.classList.remove('on'); eraserButton.setAttribute('aria-pressed', 'false') } }))
+    const refreshColors = () => {
+      colorButtons.forEach((node, index) => { const on = !tool.eraser && colors[index] === tool.color; node.classList.toggle('on', on); node.setAttribute('aria-pressed', String(on)) })
+      syncCursor()
+    }
+    const colorButtons = colors.map(color => h('button', { type: 'button', class: `mb-hw-color${!tool.eraser && tool.color === color ? ' on' : ''}`, style: `--mb-hw-color:${color}`, title: `笔色 ${color}`, 'aria-label': `笔色 ${color}`, 'aria-pressed': String(!tool.eraser && tool.color === color), onClick: event => { tool.eraser = false; tool.color = color; markTool(colorButtons, event.currentTarget); eraserButton.classList.remove('on'); eraserButton.setAttribute('aria-pressed', 'false'); syncCursor() } }))
     const widthButtons = [2.5, 4, 8].map(width => button(String(width), event => { tool.width = width; tool.eraser = false; markTool(widthButtons, event.currentTarget); eraserButton.classList.remove('on'); eraserButton.setAttribute('aria-pressed', 'false'); refreshColors() }, false, { class: `btn ghost mb-hw-width${tool.width === width ? ' on' : ''}`, 'data-hw-width': String(width), 'aria-pressed': String(tool.width === width) }))
     const eraserButton = button('橡皮', () => { tool.eraser = !tool.eraser; eraserButton.classList.toggle('on', tool.eraser); eraserButton.setAttribute('aria-pressed', String(tool.eraser)); refreshColors() }, false, { class: `btn ghost${tool.eraser ? ' on' : ''}`, id: 'mb-hw-eraser', 'aria-pressed': String(tool.eraser) })
     const savePage = button('加入当前页', () => {
       if (!addHandwritingPage(draft)) return
-      redraw(); renderDetail(); notify(`已加入手写页，共 ${draft.images.length} 页；保存笔记后入库`)
+      renderDetail(); notify(`已加入手写页，共 ${draft.images.length} 页；保存笔记后入库`)
     }, true, { id: 'mb-hw-save' })
-    const undo = button('撤销', () => { strokes.pop(); redraw(); dirty(); updatePageControls() }, false, { class: 'btn ghost', id: 'mb-hw-undo' })
-    const clear = button('清空', async () => { if (!strokes.length || !await confirm('清空当前手写页？已经加入的图片会保留。')) return; strokes.length = 0; redraw(); dirty(); updatePageControls() }, false, { class: 'btn ghost', id: 'mb-hw-clear' })
-    const updatePageControls = () => { undo.disabled = clear.disabled = savePage.disabled = !strokes.length }
+    const undoStroke = () => {
+      if (drawing) return
+      if (strokes.length) strokes.pop()
+      else if (cleared.length) for (const stroke of cleared.pop()) strokes.push(stroke)
+      else return
+      rebuild(); dirty(); updatePageControls()
+    }
+    const undo = button('撤销', undoStroke, false, { class: 'btn ghost', id: 'mb-hw-undo' })
+    const clear = button('清空', () => {
+      if (!strokes.length || drawing) return
+      cleared.push(strokes.splice(0))
+      rebuild(); dirty(); updatePageControls()
+    }, false, { class: 'btn ghost', id: 'mb-hw-clear' })
+    const updatePageControls = () => {
+      undo.disabled = !strokes.length && !cleared.length
+      clear.disabled = savePage.disabled = !strokes.length
+    }
+    page.reset = () => {
+      strokes.length = 0
+      cleared.length = 0
+      rebuild(); updatePageControls()
+    }
+    panel.addEventListener('keydown', event => {
+      if (!(event.ctrlKey || event.metaKey) || event.shiftKey || event.altKey || event.key.toLowerCase() !== 'z') return
+      event.preventDefault()
+      event.stopPropagation()
+      undoStroke()
+    })
     append(panel, h('div', { class: 'mb-handwrite-tools' },
       ...colorButtons, ...widthButtons, eraserButton,
       undo, clear,
       h('span', { class: 'spacer' }), savePage),
-      canvas,
+      canvasFrame,
       h('p', { class: 'cap', text: '保存笔记会一并保存当前手写页。需要多页时，点击「加入当前页」继续书写。' }))
-    redraw(); updatePageControls()
+    rebuild(); updatePageControls()
     return panel
   }
   function imagePanel(draft) {
@@ -1201,8 +1337,8 @@ export function mountMistakebook({ beforeEnter, appearance,standalone=false }) {
         await call('configure', { endpoint: endpoint.value, apiKey: key.value, clearKey: clear.checked }); key.value = ''; modelKey.value = ''; node.close(); notify('设置已安全保存')
       }, true, { id: 'mb-config-save' }), h('h3', { text: '本地数据' }), h('p', { class: 'mb-data-path', text: config.path }), button('备份笔记本', async () => { if (await call('backup')) notify('笔记本已备份，包含原图') }), h('p', { class: 'cap', text: '笔记本使用独立数据库，不进入 Codex / DSH 的记忆上下文。' }))
     const tabs=settingsTabs([
-      {id:'appearance',label:'外观',icon:'sparkles',content:appearance.createPanel()},
-      {id:'layout',label:'布局',icon:'grid',content:embedLayout(notebookLayout.menu)},
+      {id:'appearance',label:'外观',icon:'appearance',content:appearance.createPanel()},
+      {id:'layout',label:'布局',icon:'layout',content:embedLayout(notebookLayout.menu)},
       {id:'connectors',label:'Codex 与 DSH',icon:'code',content:h('div',{class:'mb-paper-form'},h('h3',{text:'Codex / MCP'}),h('textarea',{class:'area config',readonly:true,value:info.connectors?.codex??'','aria-label':'Notebook Codex 接口配置'}),h('h3',{text:'DSH'}),h('textarea',{class:'area config',readonly:true,value:info.connectors?.dsh??'','aria-label':'Notebook DSH 接口配置'}))},
       {id:'services',label:'服务与数据',icon:'settings',content:serviceForm},
     ],{idPrefix:'mb-preferences'})

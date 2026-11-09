@@ -34,6 +34,12 @@ Alaya 桌面壳的材质层规范：玻璃用在哪、令牌怎么改、三档�
 
 全部令牌定义在 `desktop/renderer/glass.css` 的 `:root`，分级覆写在 `html[data-glass-tier="full|balanced|flat"]` 下。改一个令牌会影响什么，比它的具体取值更重要。
 
+> **0.8.x 全透更新（2026-11）**：full 档按视频结论取消高斯模糊（`--glass-blur: 0px`），
+> 颜色层压到 `--glass-tint: rgb(255 255 255 / .10)`、`--glass-tint-strong: .16`、
+> `--glass-tint-soft: .06`，侧栏 coating `--sidebar-opacity: .04`。全透后的文字用
+> 局部黑/白自适应（测试台验证最差 5.94:1），不再靠白色底或描边光。
+> 下文表格里的 full 取值（26px / .56 / 185%）是历史口径，以本节为准。
+
 | 令牌 | 语义 | balanced 默认 | 分级覆写 | 改它会影响什么 |
 | --- | --- | --- | --- | --- |
 | `--glass-blur` | 背景模糊半径 | `20px` | full `26px`、flat `0`、control `8px`、hud `14px` | 面的「厚度」。越大越看不清底下内容，也越贵；面积大的面先到收益饱和点 |

@@ -1,9 +1,12 @@
 import { icon } from './icons.js'
+import { mountAppearance } from './appearance.js'
+import { createAppearanceControls } from './appearance-controls.js'
 
 const clamp = value => Math.max(0,Math.min(100,Number(value)||0))
 const OPACITY_KEY='alaya.sidebar.transparency'
 
 export function mountGlassAppearance({glass,document:doc=document}={}) {
+  const appearance = mountAppearance(doc)
   const panels=new Set()
   let transparency=82
   try { const value=localStorage.getItem(OPACITY_KEY);if(value!==null)transparency=clamp(value) } catch {}
@@ -13,7 +16,7 @@ export function mountGlassAppearance({glass,document:doc=document}={}) {
     for(const input of panel.querySelectorAll('[name^="glass-material"]'))input.checked=input.value===glass.tier()
     const range=panel.querySelector('[data-sidebar-transparency]')
     range.value=String(transparency)
-    panel.querySelector('output').textContent=transparency+'%'
+    range.closest('.appearance-opacity').querySelector('output').textContent=transparency+'%'
   }
   const sync=()=>{for(const panel of panels){if(!panel.isConnected){panels.delete(panel);continue}syncPanel(panel)}}
   doc.documentElement.addEventListener('glass:tier',sync)
@@ -22,7 +25,7 @@ export function mountGlassAppearance({glass,document:doc=document}={}) {
     for(const panel of panels)if(!panel.isConnected)panels.delete(panel)
     const panel=doc.createElement('section')
     panel.className='appearance-settings'
-    const title=doc.createElement('h3');title.textContent='界面材质';panel.append(title)
+    const title=doc.createElement('h3');title.textContent='界面材质';panel.append(createAppearanceControls(doc, appearance),title)
     const group=doc.createElement('fieldset');group.className='appearance-materials'
     const legend=doc.createElement('legend');legend.className='glass-appearance-legend';legend.textContent='界面材质';group.append(legend)
     const name='glass-material-'+(++count)

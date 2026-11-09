@@ -195,7 +195,26 @@ function createInstance({ root, tier: initialTier, storageKey }) {
       const material = getComputedStyle(node, panel ? '::after' : null)
       const radius = Number.parseFloat(material.borderTopLeftRadius) || 0
       const inset = panel ? Number.parseFloat(material.left) || 0 : 0
-      opticalEngine.register(node, { radius, autoRadius:true, pseudo:panel?'::after':null, inset, bezelWidth:lens?3:panel?12:Math.min(12,Math.max(7,rect.height*.23)), thickness:lens?2:panel?7:5.5, displacementScale:lens?1.3:2.6, ior:1.46, profile:'arc', lensStrength:lens ? .025 : 0, blur:lens?0:panel?10:node.matches('[data-glass-surface="float"]')?8:3.5 })
+      // 曲线模式：边缘最强、向内单调衰减。小控件按高度收强度，避免 34px 圆
+      // 被 12.65px 的位移整个翻起来；大面板固定用视频参考值。
+      const curveStrength = Math.min(12.65, Math.max(4, rect.height * 0.22))
+      const small = !panel && rect.height < 90
+      opticalEngine.register(node, {
+        radius, autoRadius:true, pseudo:panel?'::after':null, inset,
+        bezelWidth:lens?3:panel?12:Math.min(12,Math.max(7,rect.height*.23)),
+        thickness:lens?2:panel?7:5.5,
+        displacementScale:lens?1.3:2.6,
+        ior:1.46, profile:'arc',
+        // 视频结论：小控件不加模糊；full 档统一取消模糊，靠颜色层与折射表达材质。
+        blur:0,
+        mode:lens ? 'refract' : 'curve',
+        curveStrength:lens ? 0 : curveStrength,
+        curveDistance:panel ? 18 : 22,
+        curvePower:1.65,
+        cornerSmoothing:2.5,
+        // 色散要三倍背景采样：只给工具条、搜索这类小面开。
+        dispersion:(small && !lens) ? 0.035 : 0,
+      })
     }
   }
 
@@ -217,8 +236,10 @@ function createInstance({ root, tier: initialTier, storageKey }) {
     opticalEngine = null
     delete doc.documentElement.dataset.glassRefraction
   }
-  const onLensPress=event=>{
-    if(opticalEngine?.registered(event.target))opticalEngine.update(event.target,{lensStrength:event.detail.pressed?.12:.025})
+  const onLensPress = event => {
+    if (opticalEngine?.registered(event.target)) {
+      opticalEngine.update(event.target, { displacementScale: event.detail.pressed ? 2.1 : 1.3 })
+    }
   }
 
   const applyTier = (value, { persist = true } = {}) => {

@@ -13,11 +13,16 @@ import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { DatabaseSync } from 'node:sqlite'
 import { MistakebookStore } from '../addons/mistakebook/store.mjs'
+import { inkBounds, inkIntersects, inkSVGAttributes, stabilizeInkPoint } from '../addons/mistakebook/canvas-ink.mjs'
+import { canvasPrintHTML } from '../addons/mistakebook/canvas-print.mjs'
+import { boxDelta, boxSelection, moveBoxSelection, offsetBoxSelection } from '../addons/mistakebook/canvas-selection.mjs'
+import { shapeParts } from '../addons/mistakebook/canvas-shapes.mjs'
 import { NOTEBOOK_LAYOUT_DEFAULTS, normalizeLayout } from '../desktop/renderer/workspace-layout.js'
 import {
-  CANVAS_LIMITS, activeCanvas, addCard, contentBounds, contentFits, createCanvas, defaultView, deleteCanvas,
-  documentSize, edgeGeometry, emptyDocument, fitView, linkCards, mergeDocument, normalizeDocument,
-  panBy, placement, removeCards, removeEdge, renameCanvas, screenToWorld, updateCard,
+  A4_IMAGE_SIZE, CANVAS_LIMITS, activeCanvas, activePaperSheet, addCard, addPaperSheet, contentBounds, contentFits,
+  createCanvas, defaultView, deleteCanvas, documentSize, edgeGeometry, emptyDocument, fitView, linkCards,
+  mergeDocument, normalizeDocument, normalizePaper, panBy, placement, removeCards, removeEdge, removePaperSheet,
+  renameCanvas, screenToWorld, selectPaperSheet, updateCard,
   worldToScreen, zoomAt,
 } from '../addons/mistakebook/canvas.mjs'
 
@@ -45,11 +50,103 @@ const fixture = () => ({
 
 try {
   // —— 1. 模型 ——
-  assert.deepEqual(emptyDocument(), { version: 1, activeId: null, canvases: [] })
+  assert.deepEqual(emptyDocument(), { version: 3, activeId: null, canvases: [] })
   assert.equal(activeCanvas(emptyDocument()), null)
 
   const doc = normalizeDocument(fixture())
   assert.deepEqual(normalizeDocument(doc), doc, '归一化必须幂等')
+  assert.deepEqual(doc.canvases[0].ink, [], '旧版白板自动获得空笔迹层')
+  const stroke = { id: 'stroke-a', tool: 'pen', color: '#263445', width: 4, points: [[-30, 400, 15], [240, 400, 85]] }
+  const strokeBounds = inkBounds(stroke)
+  assert.ok(inkIntersects(stroke, strokeBounds, [30, 370], [30, 430], 3), '橡皮快速穿过笔迹时命中')
+  assert.ok(!inkIntersects(stroke, strokeBounds, [300, 400], [370, 400], 3), '共线但相隔的笔迹不会被擦除')
+  const staircase = { ...stroke, points: [[0, 0, 50], [1, 0, 50], [1, 1, 50], [2, 1, 50], [2, 2, 50], [10, 10, 50]] }
+  const smooth = inkSVGAttributes(staircase)
+  assert.match(smooth.d, /^M0 0.*Q.*L10 10$/, '平滑触控板的细碎台阶，保留落笔与收笔位置')
+  assert.equal(smooth['stroke-width'], 4, '非压感笔迹使用工具设置的粗细')
+  assert.equal(smooth['stroke-linecap'], 'round')
+  assert.equal(inkSVGAttributes({ ...staircase, points: [[0, 0, 50], [24, 0, 50], [24, 24, 50]] }).d,
+    'M0 0L24 0L24 24', '保留明确的直角')
+  assert.equal(inkSVGAttributes({ ...staircase, points: [[0, 0, 50]] }).d, 'M0 0l0 0', '点按仍能落墨')
+  assert.equal(inkSVGAttributes(stroke).fill, stroke.color, '真实压感仍使用可变宽轮廓')
+  const noisy = [[0, 0, 20], [3, 1, 42], [6, -1, 71], [9, 1, 60], [12, 0, 25]]
+  const stabilized = noisy.map((point, index) => index > 0 && index < noisy.length - 1
+    ? stabilizeInkPoint(noisy[index - 1], point, noisy[index + 1], 1) : point)
+  assert.ok(stabilized.slice(1, -1).every(point => Math.abs(point[1]) < 0.6), '削弱触控板连续细小的横向抖动')
+  assert.deepEqual(stabilized.map(point => point[2]), noisy.map(point => point[2]), '防抖保留真实压感')
+  assert.deepEqual(stabilized[0], noisy[0])
+  assert.deepEqual(stabilized.at(-1), noisy.at(-1))
+  const zoomedStroke = noisy.map(([x, y, pressure]) => [x / 4, y / 4, pressure])
+  const sameJitter = stabilizeInkPoint(zoomedStroke[0], zoomedStroke[1], zoomedStroke[2], 4)
+  assert.ok(Math.abs(sameJitter[1] * 4 - stabilized[1][1]) < 0.003, '防抖以屏幕像素为单位，缩放前后效果一致')
+  assert.deepEqual(stabilizeInkPoint([0, 0, 50], [8, 0, 50], [8, 8, 50], 1), [8, 0, 50], '保留明显转角')
+  const fine = { ...stroke, width: 0.25, points: [[0.123, 0.456, 50], [0.786, 0.823, 50]] }
+  assert.deepEqual(normalizeDocument({ canvases: [{ ink: [fine] }] }).canvases[0].ink[0], fine, '细笔和亚像素坐标可保存')
+  assert.throws(() => normalizeDocument({ canvases: [{ ink: [{ ...stroke, color: 'url(unsafe)' }] }] }), /笔迹数据无效/)
+  doc.canvases[0].ink.push(stroke)
+  const square = { id: 'square-a', kind: 'square', color: '#1267ed', width: 4, x1: 80, y1: 80, x2: 30, y2: 60 }
+  assert.deepEqual(shapeParts(square), [['rect', { x: 30, y: 30, width: 50, height: 50 }]], '反方向拖动仍生成正方形')
+  assert.equal(shapeParts({ ...square, kind: 'arrow' }).length, 2, '箭头包含线段和箭头端点')
+  const arrow = { ...square, id: 'arrow-a', kind: 'arrow', width: 2, x1: 0.375, y1: 0, x2: 100.375, y2: 0 }
+  const savedArrow = normalizeDocument({ canvases: [{ shapes: [arrow] }] }).canvases[0].shapes[0]
+  assert.equal(savedArrow.x1, 0.375, '缩放后绘制的图形保留亚像素坐标')
+  const wings = shapeParts(savedArrow)[1][1].points.split(' ').map(pair => Number(pair.split(',')[1]))
+  assert.ok(Math.max(...wings) - Math.min(...wings) < 6, '收窄细线箭头的两翼')
+  const arrowCanvas = { cards: [], shapes: [savedArrow], ink: [] }
+  assert.deepEqual([...boxSelection(arrowCanvas, { x: -1, y: -4, w: 103, h: 8 }).shapes], ['arrow-a'], '紧贴箭头可框选')
+  assert.equal(boxSelection(arrowCanvas, { x: -1, y: -2, w: 103, h: 4 }).bounds, null, '切过箭头两翼时不算完全框住')
+  doc.canvases[0].shapes.push(square)
+  const boxCanvas = { ...doc.canvases[0], cards: [
+    { id: 'image-underlay', kind: 'image', x: 0, y: 0, w: 400, h: 400 },
+    { id: 'small-note', kind: 'text', x: 100, y: 100, w: 120, h: 120 },
+  ], edges: [{ id: 'attached-edge', from: 'small-note', to: 'image-underlay' }],
+  ink: [{ ...stroke, points: [[35.125, 50, 15], [70.5, 68.25, 85]] }] }
+  const group = boxSelection(boxCanvas, { x: 20, y: 20, w: 210, h: 210 })
+  assert.deepEqual([...group.cards], ['small-note'], '框选覆盖图片一部分时不移动整张图片')
+  assert.deepEqual([...group.shapes], ['square-a'])
+  assert.deepEqual([...group.ink], ['stroke-a'])
+  const moved = moveBoxSelection(boxCanvas, group, 25.4, -17.8)
+  assert.equal(moved.cards[0], boxCanvas.cards[0])
+  assert.equal(moved.edges, boxCanvas.edges, '连线按卡片 ID 跟随，不需要改写')
+  const movedEdge = edgeGeometry(moved, moved.edges[0])
+  assert.deepEqual([movedEdge.x1, movedEdge.y1, movedEdge.x2, movedEdge.y2], [185, 142, 200, 200])
+  assert.deepEqual([moved.cards[1].x, moved.cards[1].y], [125, 82])
+  assert.deepEqual([moved.shapes[0].x1, moved.shapes[0].y1], [105, 62])
+  assert.deepEqual(moved.ink[0].points, [[60.125, 32, 15], [95.5, 50.25, 85]], '整组平移保留亚像素笔迹和笔压')
+  const movedGroup = offsetBoxSelection(group, 25.4, -17.8)
+  assert.equal(movedGroup.cards, group.cards)
+  assert.equal(movedGroup.bounds.x, group.bounds.x + 25)
+  assert.equal(moveBoxSelection(moved, movedGroup, -25, 18).ink[0].points[0][0], 35.125, '同一选区可连续拖动')
+  const limit = CANVAS_LIMITS.coordinate
+  const limitStroke = { ...stroke, points: [[limit - 0.375, 10, 15], [limit - 3.5, 12, 85]] }
+  const limitCanvas = { cards: [], shapes: [], ink: [limitStroke] }
+  const limitGroup = boxSelection(limitCanvas, { x: limit - 10, y: 0, w: 20, h: 20 })
+  assert.deepEqual(boxDelta(limitGroup, 30, 0), { dx: 0.375, dy: 0 })
+  assert.deepEqual(moveBoxSelection(limitCanvas, limitGroup, 30, 0).ink[0].points,
+    [[limit, 10, 15], [limit - 3.125, 12, 85]], '触及坐标上限时保持全组形状')
+  const clipped = { ...limitCanvas, paper: { enabled: true, sheets: [{ x: 0, y: 0 }] } }
+  assert.equal(boxSelection(clipped, { x: limit - 10, y: 0, w: 20, h: 20 }).bounds, null, 'A4 模式略过完全不可见的笔迹')
+  const legacyPaper = normalizeDocument({ version: 2, canvases: [{ paper: { enabled: true, x: -120, y: -60 } }] }).canvases[0].paper
+  assert.deepEqual(legacyPaper, { enabled: true, sheets: [{ id: 'paper-1', x: -120, y: -60 }], activeId: 'paper-1' }, '旧版单张 A4 纸保留世界坐标')
+  assert.equal(normalizePaper({ enabled: false, x: 10, y: 20 }).enabled, false, '旧版保留已关闭的纸张')
+  const paper = addPaperSheet(legacyPaper, { x: -120, y: 1140 })
+  assert.deepEqual(normalizePaper(paper), paper, '多张 A4 纸的顺序与选中状态可往返')
+  assert.equal(activePaperSheet(paper).y, 1140)
+  assert.equal(selectPaperSheet(paper, legacyPaper.activeId).activeId, legacyPaper.activeId)
+  assert.deepEqual(removePaperSheet(paper, paper.activeId), legacyPaper)
+  assert.equal(removePaperSheet(legacyPaper, legacyPaper.activeId), null)
+  assert.throws(() => normalizePaper({ enabled: true, sheets: Array(CANVAS_LIMITS.sheets + 1).fill(legacyPaper.sheets[0]) }), /最多.*张 A4 纸/)
+  doc.canvases[0].paper = paper
+  const printable = addCard(doc.canvases[0], { kind: 'text', x: 0, y: 1180, text: '第二张纸的内容' })
+  const pdfHTML = canvasPrintHTML(printable)
+  assert.equal((pdfHTML.match(/data-sheet-id=/g) ?? []).length, 2)
+  assert.match(pdfHTML, /viewBox="-120 -60 794 1123"/)
+  assert.match(pdfHTML, /viewBox="-120 1140 794 1123"/)
+  const rasterHTML = canvasPrintHTML(printable, { sheetId: paper.activeId, imageSize: A4_IMAGE_SIZE })
+  assert.equal((rasterHTML.match(/data-sheet-id=/g) ?? []).length, 1)
+  assert.match(rasterHTML, /第二张纸的内容/)
+  assert.doesNotMatch(rasterHTML, /第一张卡片/)
+  assert.throws(() => canvasPrintHTML(printable, { sheetId: 'missing' }), /纸张不存在/)
 
   // 指针中心缩放：屏幕上这个点下面的世界坐标不能漂移。
   const view = { x: 37, y: -12, scale: 0.8 }
@@ -59,6 +156,11 @@ try {
   near(screenToWorld(zoomed, pointer).x, anchored.x, '缩放后指针处的世界 x 保持不动')
   near(screenToWorld(zoomed, pointer).y, anchored.y, '缩放后指针处的世界 y 保持不动')
   near(zoomed.scale, 2.1, '缩放比例按请求生效')
+  const far = { x: -890000, y: 900000, scale: 1 }
+  const highZoom = zoomAt(far, pointer, 16)
+  const restoredHighZoom = normalizeDocument({ canvases: [{ view: highZoom }] }).canvases[0].view
+  assert.deepEqual(restoredHighZoom, highZoom, '远离原点的高倍率视口可完整保存')
+  near(screenToWorld(highZoom, pointer).x, screenToWorld(far, pointer).x, '1600% 缩放仍以指针为锚点')
   assert.equal(zoomAt(view, pointer, 99).scale, CANVAS_LIMITS.maxScale, '缩放上限收敛')
   assert.equal(zoomAt(view, pointer, 0.001).scale, CANVAS_LIMITS.minScale, '缩放下限收敛')
   const roundTrip = screenToWorld(view, worldToScreen(view, { x: -132.5, y: 88.25 }))
@@ -168,6 +270,18 @@ try {
   assert.deepEqual(restored.canvasDocs(), normalizeDocument(doc), '导出 → 导入可原样恢复画布')
   assert.equal(restored.import({ records: [] }).canvases, 0, '旧版导出没有画布段时不改动本机画布')
   assert.deepEqual(restored.canvasDocs(), normalizeDocument(doc))
+  const image = { name: 'diagram.png', mimeType: 'image/png', width: 1, height: 1,
+    data: 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==' }
+  const incoming = { records: [{ id: 'original-question', type: 'mistake', title: '导入测试', stem: '跨库后可读到完整题干' }],
+    canvas: { canvases: [{ id: 'photo-board', cards: [{ id: 'photo', kind: 'image', image },
+      { id: 'question', kind: 'reference', noteId: 'original-question', noteType: 'mistake', question: { fields: { title: '画布内标题' } } }] }] } }
+  restored.import(incoming)
+  const [photo, question] = restored.canvasDocs().canvases.find(canvas => canvas.id === 'photo-board').cards
+  assert.deepEqual(photo.image, image, '导入保留原图')
+  assert.notEqual(question.noteId, 'original-question', '跨库时映射画布引用')
+  assert.equal(restored.read(question.noteId).stem, '跨库后可读到完整题干')
+  assert.equal(question.question.fields.title, '画布内标题')
+  assert.throws(() => restored.setCanvasDocs({ canvases: [{ cards: [{ kind: 'image', image: { ...image, data: 'bm90IGEgcmFzdGVy' } }] }] }), /图片格式或尺寸无效/)
   restored.close()
 
   const backupPath = join(folder, 'backup.sqlite')

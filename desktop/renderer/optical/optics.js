@@ -6,7 +6,28 @@
  * 少任何一步都退化成「磨砂白玻璃」。
  */
 import { normalAt } from './surface.js'
-import { signedDistance } from './geometry.js'
+import { gradientRadius, sdfGradient, signedDistance } from './geometry.js'
+
+/**
+ * Apple 风格边缘放大曲线（来自 B 站 iOS27 深度解析视频的建模）：
+ *
+ *   r(d) = S · max(1 − d/D, 0)^p
+ *
+ * d 是到玻璃边缘的**内侧**距离（px）。边缘处 d=0 位移最大（S），向内 D px
+ * 衰减到 0，p 控制衰减形状（p=1 线性，p>1 更集中在边缘）。
+ * 视频给的 iOS26 参考值：S=12.65px、D=22px、p=1.65。
+ *
+ * 与高度场 + Snell 的区别：那条链路在边缘处高度与法线坡度都为 0，
+ * 位移峰值落在倒角中部；而 Apple 的模型是「边缘最强、向内单调衰减」。
+ * 两种形状在 40px 高的胶囊上肉眼可见地不同：前者把背景压成一条中线亮带，
+ * 后者让边缘一整圈都参与折射。
+ */
+export function edgeCurve({ distance, strength = 12.65, distanceMax = 22, power = 1.65 }) {
+  const inside = Math.max(0, -Number(distance || 0))
+  const span = Math.max(Number(distanceMax) || 0, 0.001)
+  const t = Math.max(0, 1 - inside / span)
+  return Math.max(0, Number(strength) || 0) * Math.pow(t, Math.max(Number(power) || 0, 0.05))
+}
 
 /**
  * 单界面 Snell 折射。入射光 I 从空气进入玻璃（IOR = ior），法线 N 指向玻璃外部；
@@ -83,19 +104,127 @@ export function buildDisplacementMap({
   displacementScale = 30,
   profile = 'smooth',
   lensStrength = 0,
+  /** 'refract' = 高度场 + Snell（旧路径）；'curve' = 边缘放大曲线（新路径） */
+  mode = 'refract',
+  curveStrength = 12.65,
+  curveDistance = 22,
+  curvePower = 1.65,
+  /** 求法线时把圆角放大多少倍；1 = 不放大（旧行为），1.5 = 参考实现的过渡带 */
+  gradientScale = 1,
+  /** 0..1：把边缘法向与「指向中心」的径向混合，做出透镜纵深 */
+  depth = 0,
+  /** 曲线模式下位移场的平滑宽度（px）。>0 时方向由高度场的中心差分求出，
+   *  在角部与中轴线附近形成过渡带，消除法向「分割线」跳变。 */
+  cornerSmoothing = 2.5,
 }) {
   const w = Math.max(Math.round(width) || 1, 1)
   const h = Math.max(Math.round(height) || 1, 1)
   const shifts = new Float32Array(w * h * 2)
+  const curve = mode === 'curve'
+  const gradRadius = gradientRadius({ width: w, height: h, radius, gradientScale })
+  const halfMin = Math.min(w, h) / 2
+  // 薄控件上两条边缘带会在中线相遇：把跨度收到半短边，让中线处的位移正好归零，
+  // 否则上下两带方向相反、在中线叠出一条折痕。（视频里 iOS27「调小过渡距离」同理）
+  const span = Math.max(0.5, Math.min(Number(curveDistance) || 0, halfMin))
+  const smoothing = Math.max(0, Number(cornerSmoothing) || 0)
+  const strength = Math.max(0, Number(curveStrength) || 0)
+  const power = Math.max(Number(curvePower) || 0, 0.05)
+
+  // 曲线模式先把标量场算成一张表：每个像素只做一次 SDF，方向用邻域差分。
+  // 这样贴图生成从「每像素 5 次 SDF」降到 1 次，面板级表面的首帧成本降一个量级。
+  let field = null
+  let signed = null
+  if (curve) {
+    field = new Float32Array(w * h)
+    signed = new Float32Array(w * h)
+    // 把 SDF 内联掉：贴图生成是首帧最贵的一步，函数调用 + 对象分配会把
+    // 一块 330×220 的面拖到 30ms 以上。这里只保留算术。
+    const cx = w / 2
+    const cy = h / 2
+    const rr = Math.min(Math.max(Number(radius) || 0, 0), halfMin)
+    const ax = w / 2 - rr
+    const ay = h / 2 - rr
+    // 离四边都超过 max(r, D) 的像素不可能落在位移带里：直接跳过 SDF。
+    const margin = Math.max(rr, span)
+    for (let y = 0; y < h; y++) {
+      const py = y + 0.5
+      const interiorY = py >= margin && py <= h - margin
+      for (let x = 0; x < w; x++) {
+        const index = y * w + x
+        const px = x + 0.5
+        if (interiorY && px >= margin && px <= w - margin) { signed[index] = 1; continue }
+        const qx = Math.abs(px - cx) - ax
+        const qy = Math.abs(py - cy) - ay
+        const mx = qx > 0 ? qx : 0
+        const my = qy > 0 ? qy : 0
+        const outside = Math.sqrt(mx * mx + my * my)
+        const inside = Math.min(Math.max(qx, qy), 0)
+        const distance = outside + inside - rr
+        signed[index] = distance
+        // 外侧延续为 S（不是 0），否则中心差分会跨过边界产生反向假梯度。
+        const insideDistance = -distance
+        field[index] = insideDistance > span
+          ? 0
+          : strength * Math.pow(Math.min(1, Math.max(0, 1 - insideDistance / span)), power)
+      }
+    }
+  }
+  const fieldAt = (x, y) => {
+    const sx = x < 0 ? 0 : x >= w ? w - 1 : x
+    const sy = y < 0 ? 0 : y >= h ? h - 1 : y
+    return field[sy * w + sx]
+  }
   let maxAbs = 0
   for (let y = 0; y < h; y++) {
     for (let x = 0; x < w; x++) {
-      const distance = signedDistance({x:x+.5,y:y+.5,width:w,height:h,radius})
-      if(distance>=0 || (distance<=-bezelWidth && !lensStrength))continue
+      const pixel = y * w + x
+      const index = pixel * 2
+      if (curve) {
+        // 边界外保留一圈位移：贴图在轮廓处若从「满位移」直接跳回中性，
+        // feDisplacementMap 的双线性取样会在边上产生一圈锯齿。
+        const outsideBand = Math.max(2, Math.ceil(smoothing))
+        if (signed[pixel] > outsideBand) continue
+        const magnitude = field[pixel]
+        if (magnitude <= 0) continue
+        let dx = 0
+        let dy = 0
+        if (smoothing >= 1) {
+          // 中心差分 = 把方向场按 2·smoothing 的带宽摊平；这就是「过渡带」。
+          const step = Math.max(1, Math.round(smoothing))
+          const gx = fieldAt(x + step, y) - fieldAt(x - step, y)
+          const gy = fieldAt(x, y + step) - fieldAt(x, y - step)
+          const length = Math.hypot(gx, gy)
+          if (length < 1e-6) continue
+          dx = -(gx / length) * magnitude
+          dy = -(gy / length) * magnitude
+        } else {
+          const gradient = sdfGradient({ x: x + 0.5, y: y + 0.5, width: w, height: h, radius: gradRadius })
+          dx = -gradient.x * magnitude
+          dy = -gradient.y * magnitude
+        }
+        if (depth > 0) {
+          const rx = x + 0.5 - w / 2
+          const ry = y + 0.5 - h / 2
+          const length = Math.hypot(rx, ry) || 1
+          const tx = -rx / length
+          const ty = -ry / length
+          dx = dx * (1 - depth) + tx * magnitude * depth
+          dy = dy * (1 - depth) + ty * magnitude * depth
+        }
+        shifts[index] = dx
+        shifts[index + 1] = dy
+        maxAbs = Math.max(maxAbs, Math.abs(dx), Math.abs(dy))
+        continue
+      }
+      const distance = signedDistance({ x: x + 0.5, y: y + 0.5, width: w, height: h, radius })
+      if (distance >= 0 || (distance <= -bezelWidth && !lensStrength)) continue
       const normal = normalAt({ x: x + 0.5, y: y + 0.5, width: w, height: h, radius, bezelWidth, thickness, profile })
       const shift = displacement({ height: normal.height, normal, ior, scale: displacementScale })
-      if(lensStrength){const weight=Math.min(1,-distance/2);shift.x-=(x+.5-w/2)*lensStrength*weight;shift.y-=(y+.5-h/2)*lensStrength*weight}
-      const index = (y * w + x) * 2
+      if (lensStrength) {
+        const weight = Math.min(1, -distance / 2)
+        shift.x -= (x + 0.5 - w / 2) * lensStrength * weight
+        shift.y -= (y + 0.5 - h / 2) * lensStrength * weight
+      }
       shifts[index] = shift.x
       shifts[index + 1] = shift.y
       maxAbs = Math.max(maxAbs, Math.abs(shift.x), Math.abs(shift.y))

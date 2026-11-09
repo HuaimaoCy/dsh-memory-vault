@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict'
+import { once } from 'node:events'
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { resolve, join } from 'node:path'
+import { nativeTheme } from 'electron'
 
 /** file:// + 真实 preload + 独立数据库的桌面验证。与浏览器预览互补。 */
 export async function run(window, bridge) {
@@ -8,9 +10,46 @@ export async function run(window, bridge) {
   const js = source => window.webContents.executeJavaScript(source)
   const pause = ms => new Promise(done => setTimeout(done, ms))
   const until = async expression => {
-    for (let n = 0; n < 200; n++) { if (await js(`Boolean(${expression})`)) return; await pause(40) }
+    for (let n = 0; n < 200; n++) {
+      const ready = typeof expression === 'function' ? expression() : await js(`Boolean(${expression})`)
+      if (ready) return
+      await pause(40)
+    }
     throw new Error(`Liquid Glass timeout: ${expression}`)
   }
+  const changeAppearance = (dialog, control, value) => js(`(() => {
+    const input = document.querySelector(${JSON.stringify(`${dialog}[open] [data-appearance="${control}"]`)})
+    input.value = ${JSON.stringify(value)}
+    input.dispatchEvent(new Event('change', { bubbles: true }))
+  })()`)
+  const openAppearanceTab = async dialog => {
+    await until(`document.querySelector('${dialog}[open] [data-tab="appearance"]')`)
+    await js(`document.querySelector('${dialog}[open] [data-tab="appearance"]').click()`)
+    await until(`document.querySelector('${dialog}[open] [data-appearance="mode"]')?.getClientRects().length`)
+  }
+  const appearance = () => js(`(() => {
+    const root = document.documentElement
+    const style = getComputedStyle(root)
+    return {
+      mode: root.dataset.colorMode,
+      colorScheme: style.colorScheme,
+      accent: style.getPropertyValue('--alaya-accent').trim(),
+      onAccent: style.getPropertyValue('--alaya-on-accent').trim(),
+      background: root.dataset.customBackground || '',
+      image: style.getPropertyValue('--alaya-backdrop').trim(),
+    }
+  })()`)
+  const blurredControls = scope => js(`(() => {
+    const root = document.querySelector(${JSON.stringify(scope)})
+    const nodes = root.querySelectorAll('button, summary, [role="button"], .search-wrap, .toolbar-actions, .liquid-selection')
+    return [...nodes].filter(node => node.getClientRects().length).flatMap(node =>
+      [null, '::before', '::after'].flatMap(pseudo => {
+        const style = getComputedStyle(node, pseudo)
+        if (pseudo && (style.content === 'none' || style.display === 'none')) return []
+        if (!/blur\\(/.test(style.filter + ' ' + style.backdropFilter)) return []
+        return [(node.id || String(node.className)) + (pseudo || '')]
+      }))
+  })()`)
   const outIndex = process.argv.indexOf('--shots')
   const out = outIndex >= 0 ? resolve(process.argv[outIndex + 1]) : null
   if (out) mkdirSync(out, { recursive: true })
@@ -28,9 +67,11 @@ export async function run(window, bridge) {
       const bar = mode === 'memory' ? '.bar' : '.mb-bar'
       const trigger = mode === 'memory' ? '#workspace-settings' : '#mb-workspace-settings'
       const dialog = mode === 'memory' ? '#modal' : '.mb-dialog'
+      const shell = mode === 'memory' ? '.app-shell' : '.mb-shell'
       await until(`document.querySelector('${bar} .toolbar-actions[data-glass-refraction="on"]')`)
       assert.equal(await js('alayaGlass.tier()'), 'full')
       assert.match(await js(`getComputedStyle(document.querySelector('${bar} .toolbar-actions'),'::before').backdropFilter`), /url\(/)
+      assert.deepEqual(await blurredControls(shell), [], `${mode} 全档中小型控件没有高斯模糊`)
       for (const [width, height] of [[1440, 940], [1040, 650]]) {
         window.setContentSize(width, height)
         await until(`innerWidth === ${width} && innerHeight === ${height}`)
@@ -47,14 +88,64 @@ export async function run(window, bridge) {
         }
         if (out) writeFileSync(join(out, `${mode}-desktop-${width}.png`), (await window.webContents.capturePage()).toPNG())
       }
+      await js(`alayaGlass.setTier('balanced'); document.querySelector('${bar} .search-wrap input').focus()`)
+      assert.deepEqual(await blurredControls(shell), [], `${mode} 均衡档的展开搜索和按钮没有高斯模糊`)
+      await js(`document.querySelector('${bar} .search-wrap input').blur(); alayaGlass.setTier('full')`)
+      await until(`document.querySelector('${bar} .toolbar-actions[data-glass-refraction="on"]')`)
       await js(`document.querySelector('${trigger}').focus();document.querySelector('${trigger}').click()`)
-      await until(`document.querySelector('${dialog}[open] input[name^="glass-material"]')`)
+      await openAppearanceTab(dialog)
+      assert.deepEqual(await blurredControls(`${dialog}[open]`), [], '设置中的中小型按钮没有磨砂')
       await js(`document.querySelector('${dialog} input[value="flat"]').click()`)
       assert.equal(await js('alayaGlass.opticalMetrics()'), null)
       assert.equal(await js(`getComputedStyle(document.querySelector('${bar} .toolbar-actions')).backdropFilter`), 'none')
-      assert.equal(await js(`getComputedStyle(document.querySelector('${bar} .toolbar-actions')).backgroundColor`), 'rgb(252, 253, 255)')
+      const flat = await js(`(() => {
+        const toolbar = document.querySelector('${bar} .toolbar-actions')
+        const probe = document.createElement('span')
+        probe.style.color = 'var(--alaya-panel)'
+        toolbar.append(probe)
+        const expected = getComputedStyle(probe).color
+        probe.remove()
+        return { expected, actual: getComputedStyle(toolbar).backgroundColor }
+      })()`)
+      assert.equal(flat.actual, flat.expected)
+      assert.match(flat.actual, /^rgb\(/, '实心档工具栏使用当前主题的不透明表面')
       await js(`document.querySelector('${dialog} input[value="full"]').click()`)
       await until(`document.querySelector('${bar} .toolbar-actions[data-glass-refraction="on"]')`)
+      if (mode === 'memory') {
+        await changeAppearance(dialog, 'mode', 'dark')
+        await until(() => nativeTheme.themeSource === 'dark')
+        await until("matchMedia('(prefers-color-scheme: dark)').matches")
+        const dark = await appearance()
+        assert.equal(dark.mode, 'dark')
+        assert.equal(dark.colorScheme, 'dark')
+        await js(`document.querySelector('${dialog}[open] [data-accent="#8b5cf6"]').click()`)
+        assert.equal((await appearance()).accent, '#8b5cf6')
+        await changeAppearance(dialog, 'accent', '#ffff00')
+        assert.equal((await appearance()).onAccent, '#000000', '浅主题色使用深色按钮文字')
+        await changeAppearance(dialog, 'background-color', '#32495e')
+        assert.equal((await appearance()).background, 'color')
+        await js(`(async () => {
+          const canvas = document.createElement('canvas')
+          canvas.width = canvas.height = 32
+          const context = canvas.getContext('2d')
+          context.fillStyle = '#436b9e'
+          context.fillRect(0, 0, 32, 32)
+          const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/png'))
+          const input = document.querySelector('${dialog}[open] [data-appearance="image"]')
+          const files = new DataTransfer()
+          files.items.add(new File([blob], 'test-background.png', { type: blob.type }))
+          input.files = files.files
+          input.dispatchEvent(new Event('change', { bubbles: true }))
+        })()`)
+        await until("document.documentElement.dataset.customBackground === 'image'")
+        assert.match((await appearance()).image, /^url\("data:image\/(?:webp|png);base64,/)
+      } else {
+        assert.equal(await js(`document.querySelector('${dialog}[open] [data-appearance="mode"]').value`), 'dark')
+        assert.equal(await js(`document.querySelector('${dialog}[open] [data-appearance="accent"]').value`), '#ffff00')
+        assert.equal((await appearance()).background, 'image', '两种模式使用同一份背景')
+      }
+      assert.match(await js(`getComputedStyle(document.querySelector('${shell}'), '::before').backgroundImage`), /data:image\//)
+      if (out) writeFileSync(join(out, `${mode}-desktop-dark-appearance.png`), (await window.webContents.capturePage()).toPNG())
       window.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'ESCAPE' })
       window.webContents.sendInputEvent({ type: 'keyUp', keyCode: 'ESCAPE' })
       await until(`!document.querySelector('${dialog}[open]') && document.activeElement.matches('${trigger}')`)
@@ -70,5 +161,31 @@ export async function run(window, bridge) {
         console.log(`Native Electron frame intervals: ${JSON.stringify({balanced,full})}`)
       }
     }
+    const reloaded = once(window.webContents, 'did-finish-load')
+    window.webContents.reload()
+    await reloaded
+    await until(`!document.getElementById('alaya-startup') && document.body.dataset.mode === 'mistakebook'`)
+    const restored = await appearance()
+    assert.equal(restored.mode, 'dark')
+    assert.equal(restored.accent, '#ffff00')
+    assert.equal(restored.background, 'image')
+    assert.match(restored.image, /^url\("data:image\/(?:webp|png);base64,/)
+    await js("document.querySelector('#mb-workspace-settings').click()")
+    await openAppearanceTab('.mb-dialog')
+    await js(`[...document.querySelectorAll('.mb-dialog[open] .alaya-appearance-controls button')]
+      .find(button => button.textContent === '移除图片').click()`)
+    await until("document.documentElement.dataset.customBackground !== 'image'")
+    assert.equal((await appearance()).image, 'none')
+    await changeAppearance('.mb-dialog', 'mode', 'light')
+    await until(() => nativeTheme.themeSource === 'light')
+    await until("!matchMedia('(prefers-color-scheme: dark)').matches")
+    assert.equal((await appearance()).colorScheme, 'light')
+    await changeAppearance('.mb-dialog', 'mode', 'system')
+    await until(() => nativeTheme.themeSource === 'system')
+    await until("document.documentElement.dataset.colorMode === (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')")
+    await js(`document.querySelector('.mb-dialog[open] [data-appearance="reset"]').click()`)
+    await until("!document.documentElement.hasAttribute('data-custom-background')")
+    assert.equal((await appearance()).accent, '#007aff')
+    console.log('Appearance: dark, light and system modes, custom accents, local image, reload, removal and reset passed')
   } finally { for(const id of ids)await bridge.invoke('entry.delete', { id }) }
 }

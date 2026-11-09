@@ -87,6 +87,13 @@ try{
   assert.ok(canvas.x<1&&canvas.y<1&&Math.abs(canvas.w-1440)<1&&Math.abs(canvas.h-940)<1)
   assert.ok(canvas.undoGrouped&&Math.abs(canvas.paletteX+canvas.paletteWidth/2-720)<1&&canvas.paletteBottom<940&&canvas.paletteY>800)
   await click('#mb-canvas-text')
+  await js(`(() => {
+    const surface = document.getElementById('mb-canvas-surface')
+    const rect = surface.getBoundingClientRect()
+    surface.dispatchEvent(new PointerEvent('pointerdown', {
+      bubbles:true, cancelable:true, button:0, buttons:1, clientX:rect.left + 200, clientY:rect.top + 200,
+    }))
+  })()`)
   await wait(`document.querySelectorAll('.mb-canvas-card').length===1`)
   await click('#mb-canvas-undo')
   await wait(`document.querySelectorAll('.mb-canvas-card').length===0`)

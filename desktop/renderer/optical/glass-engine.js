@@ -23,10 +23,19 @@ const DEFAULTS = {
   ior: 1.5,
   displacementScale: 30,
   profile: 'smooth',
+  // 新光学路径：'refract' 保留旧的高度场 + Snell；'curve' 走 Apple 边缘放大曲线。
+  mode: 'refract',
+  curveStrength: 12.65,
+  curveDistance: 22,
+  curvePower: 1.65,
+  gradientScale: 1,
+  depth: 0,
+  dispersion: 0,
+  cornerSmoothing: 2.5,
 }
 
 /** 几何不变时，这些参数变了也只更新属性，不重建贴图。 */
-const GEOMETRY_KEYS = ['shape', 'radius', 'bezelWidth', 'thickness', 'ior', 'displacementScale', 'profile', 'blur', 'lensStrength']
+const GEOMETRY_KEYS = ['shape', 'radius', 'bezelWidth', 'thickness', 'ior', 'displacementScale', 'profile', 'blur', 'lensStrength', 'mode', 'curveStrength', 'curveDistance', 'curvePower', 'gradientScale', 'depth', 'dispersion', 'cornerSmoothing']
 
 export function createGlassEngine({
   document: doc = globalThis.document,

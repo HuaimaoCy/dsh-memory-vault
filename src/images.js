@@ -4,6 +4,16 @@ export const IMAGE_MAX_BYTES = 10 * 1024 * 1024
 export const IMAGE_MAX_COUNT = 16
 export const IMAGE_TOTAL_BYTES = 20 * 1024 * 1024
 export const IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/webp', 'image/gif']
+
+const WECHAT_JPEG_TRAILER = Buffer.from('55fbf40900000000', 'hex')
+function hasJpegEnd(bytes) {
+  if (bytes.readUInt16BE(bytes.length - 2) === 0xffd9) return true
+  // WeChat can append a 24-byte trailer after the JPEG end marker.
+  const trailer = bytes.length - 24
+  return trailer >= 4 && bytes.readUInt16BE(trailer - 2) === 0xffd9
+    && bytes.subarray(trailer, trailer + WECHAT_JPEG_TRAILER.length).equals(WECHAT_JPEG_TRAILER)
+}
+
 export function normalizeImage(input) {
   if (!input || typeof input !== 'object' || typeof input.data !== 'string' || input.data.length > Math.ceil(IMAGE_MAX_BYTES / 3) * 4) throw new Error('每张图片不能超过 10 MB')
   const bytes = Buffer.from(input.data, 'base64')
@@ -14,7 +24,7 @@ export function normalizeImage(input) {
     mimeType = 'image/png'; width = bytes.readUInt32BE(16); height = bytes.readUInt32BE(20)
   } else if (['GIF87a', 'GIF89a'].includes(bytes.toString('ascii', 0, 6)) && bytes[bytes.length - 1] === 59) {
     mimeType = 'image/gif'; width = bytes.readUInt16LE(6); height = bytes.readUInt16LE(8)
-  } else if (bytes[0] === 255 && bytes[1] === 216 && bytes[bytes.length - 2] === 255 && bytes[bytes.length - 1] === 217) {
+  } else if (bytes[0] === 255 && bytes[1] === 216 && hasJpegEnd(bytes)) {
     mimeType = 'image/jpeg'
     let offset = 2
     while (offset + 8 < bytes.length) {

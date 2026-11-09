@@ -13,31 +13,40 @@
  * @module dsh-memory-vault/addons/mistakebook/canvas
  */
 
+import { INK_LIMITS, normalizeInk } from './canvas-ink.mjs'
+import { canvasQuestionImageURI, normalizeCanvasQuestion } from './canvas-question.mjs'
+import { normalizeShapes } from './canvas-shapes.mjs'
+
 /** 文档版本：结构变化时递增，读取端按版本兼容。 */
-export const CANVAS_VERSION = 1
+export const CANVAS_VERSION = 3
 
 /** 硬上限：越界即拒绝，避免一条坏数据拖垮整份笔记本。 */
 export const CANVAS_LIMITS = {
   canvases: 40,
   cards: 300,
   edges: 600,
+  sheets: 24,
   text: 4000,
   title: 120,
   noteTitle: 200,
   minSize: 120,
   maxSize: 2000,
   minScale: 0.2,
-  maxScale: 2.5,
+  maxScale: 16,
   coordinate: 1000000,
   bytes: 512000,
 }
 
-export const CARD_KINDS = ['text', 'sticky', 'reference']
+export const CARD_KINDS = ['text', 'sticky', 'reference', 'image']
+export const CANVAS_IMAGE_LIMITS = { perFile: 10 * 1024 * 1024, total: 20 * 1024 * 1024, batch: 16 }
+export const A4_SIZE = { w: 794, h: 1123 }
+export const A4_IMAGE_SIZE = { w: 2480, h: 3508 }
 export const STICKY_TONES = ['sand', 'mint', 'sky', 'rose']
 export const DEFAULT_SIZES = {
   text: { w: 320, h: 200 },
   sticky: { w: 240, h: 200 },
   reference: { w: 280, h: 170 },
+  image: { w: 480, h: 360 },
 }
 
 const uuid = () => (typeof globalThis.crypto?.randomUUID === 'function'
@@ -140,13 +149,87 @@ export function contentFits(cards, view, size, padding = 0) {
   })
 }
 
-function normalizeView(raw) {
+export function normalizeView(raw) {
   const view = raw && typeof raw === 'object' ? raw : {}
+  const limit = CANVAS_LIMITS.coordinate * CANVAS_LIMITS.maxScale + 16384
+  const offset = value => clamp(round(finite(value, 0) * 1000) / 1000, -limit, limit)
   return {
-    x: clamp(round(finite(view.x, 0)), -CANVAS_LIMITS.coordinate, CANVAS_LIMITS.coordinate),
-    y: clamp(round(finite(view.y, 0)), -CANVAS_LIMITS.coordinate, CANVAS_LIMITS.coordinate),
+    x: offset(view.x),
+    y: offset(view.y),
     scale: clamp(finite(view.scale, 1), CANVAS_LIMITS.minScale, CANVAS_LIMITS.maxScale),
   }
+}
+
+function paperPosition(raw) {
+  return {
+    x: clamp(round(finite(raw.x, 0)), -CANVAS_LIMITS.coordinate, CANVAS_LIMITS.coordinate),
+    y: clamp(round(finite(raw.y, 0)), -CANVAS_LIMITS.coordinate, CANVAS_LIMITS.coordinate),
+  }
+}
+
+/** Upgrade a single-page board without changing its paper position or display mode. */
+export function normalizePaper(raw) {
+  if (!raw || typeof raw !== 'object') return null
+  if (raw.sheets === undefined) {
+    const sheet = { id: 'paper-1', ...paperPosition(raw) }
+    return { enabled: raw.enabled === true, sheets: [sheet], activeId: sheet.id }
+  }
+  if (!Array.isArray(raw.sheets)) throw new Error('A4 纸张数据无效')
+  if (raw.sheets.length > CANVAS_LIMITS.sheets) throw new Error(`每个画布最多 ${CANVAS_LIMITS.sheets} 张 A4 纸`)
+  if (!raw.sheets.length) return null
+  const ids = new Set()
+  const sheets = raw.sheets.map(sheet => {
+    if (!sheet || typeof sheet !== 'object' || Array.isArray(sheet)) throw new Error('A4 纸张数据无效')
+    let id = identifier(sheet.id, 'paper')
+    if (ids.has(id)) id = `paper-${uuid()}`
+    ids.add(id)
+    return { id, ...paperPosition(sheet) }
+  })
+  return { enabled: raw.enabled === true, sheets, activeId: ids.has(raw.activeId) ? raw.activeId : sheets[0].id }
+}
+
+export function activePaperSheet(paper) {
+  return paper?.sheets?.find(sheet => sheet.id === paper.activeId) ?? paper?.sheets?.[0] ?? null
+}
+
+export function addPaperSheet(paper, point = { x: 0, y: 0 }) {
+  const sheets = paper?.sheets ?? []
+  if (sheets.length >= CANVAS_LIMITS.sheets) throw new Error(`每个画布最多 ${CANVAS_LIMITS.sheets} 张 A4 纸`)
+  const sheet = { id: `paper-${uuid()}`, ...paperPosition(point) }
+  return { enabled: true, sheets: [...sheets, sheet], activeId: sheet.id }
+}
+
+export function removePaperSheet(paper, id) {
+  const index = paper?.sheets?.findIndex(sheet => sheet.id === id) ?? -1
+  if (index < 0) return paper
+  const sheets = paper.sheets.filter(sheet => sheet.id !== id)
+  if (!sheets.length) return null
+  const activeId = paper.activeId === id ? sheets[Math.min(index, sheets.length - 1)].id : paper.activeId
+  return { ...paper, sheets, activeId }
+}
+
+export function selectPaperSheet(paper, id) {
+  if (paper?.activeId === id || !paper?.sheets?.some(sheet => sheet.id === id)) return paper
+  return { ...paper, activeId: id }
+}
+
+const imageBytes = data => data.length / 4 * 3 - (data.endsWith('==') ? 2 : data.endsWith('=') ? 1 : 0)
+
+function normalizeCanvasImage(image) {
+  if (!canvasQuestionImageURI(image) || imageBytes(image.data) > CANVAS_IMAGE_LIMITS.perFile) throw new Error('画布图片格式无效或超过 10 MB')
+  const { mimeType, data, width, height } = image
+  if (![width, height].every(value => Number.isInteger(value) && value > 0 && value <= 16384) || width * height > 40000000) {
+    throw new Error('画布图片尺寸无效')
+  }
+  return { name: string(image.name).slice(0, 180) || '图片', mimeType, data, width, height }
+}
+
+export function checkCanvasImageBudget(canvases) {
+  let total = 0
+  for (const { cards } of canvases) for (const card of cards) {
+    if (card.kind === 'image') total += imageBytes(card.image.data)
+  }
+  if (total > CANVAS_IMAGE_LIMITS.total) throw new Error('画布图片已达到笔记本的 20 MB 上限，请移除部分图片后再导入')
 }
 
 function normalizeCard(raw, seen) {
@@ -159,6 +242,7 @@ function normalizeCard(raw, seen) {
   const text = string(raw.text)
   if (text.length > CANVAS_LIMITS.text) throw new Error(`卡片文字不能超过 ${CANVAS_LIMITS.text} 字`)
   const noteTitle = string(raw.noteTitle)
+  const noteType = string(raw.noteType).slice(0, 20)
   return {
     id,
     kind,
@@ -170,8 +254,10 @@ function normalizeCard(raw, seen) {
     text,
     tone: STICKY_TONES.includes(raw.tone) ? raw.tone : STICKY_TONES[0],
     noteId: string(raw.noteId).slice(0, 64),
-    noteType: string(raw.noteType).slice(0, 20),
+    noteType,
     noteTitle: noteTitle.slice(0, CANVAS_LIMITS.noteTitle),
+    ...(kind === 'reference' && noteType === 'mistake' && raw.question && { question: normalizeCanvasQuestion(raw.question) }),
+    ...(kind === 'image' && { image: normalizeCanvasImage(raw.image) }),
   }
 }
 
@@ -205,7 +291,10 @@ function normalizeCanvas(raw, seen) {
     edges.push(edge)
   }
   const title = string(raw.title).trim().slice(0, CANVAS_LIMITS.title) || '未命名画布'
-  return { id, title, createdAt: timestamp(raw.createdAt), updatedAt: timestamp(raw.updatedAt), view: normalizeView(raw.view), cards, edges }
+  const ink = normalizeInk(raw.ink, CANVAS_LIMITS.coordinate)
+  const shapes = normalizeShapes(raw.shapes, CANVAS_LIMITS.coordinate)
+  const paper = normalizePaper(raw.paper)
+  return { id, title, createdAt: timestamp(raw.createdAt), updatedAt: timestamp(raw.updatedAt), view: normalizeView(raw.view), cards, edges, ink, shapes, paper }
 }
 
 /**
@@ -215,17 +304,28 @@ function normalizeCanvas(raw, seen) {
 export function normalizeDocument(raw) {
   if (raw === undefined || raw === null) return emptyDocument()
   if (typeof raw !== 'object' || Array.isArray(raw)) throw new Error('画布数据无效')
+  if (raw.version > CANVAS_VERSION) throw new Error('请使用更新版本的 Alaya 打开这份画布')
   if (raw.canvases !== undefined && !Array.isArray(raw.canvases)) throw new Error('画布数据无效')
   const rawCanvases = list(raw.canvases)
   if (rawCanvases.length > CANVAS_LIMITS.canvases) throw new Error(`最多 ${CANVAS_LIMITS.canvases} 个画布`)
   const seen = new Set()
   const canvases = rawCanvases.map(canvas => normalizeCanvas(canvas, seen))
+  checkCanvasImageBudget(canvases)
   const requested = string(raw.activeId)
   return { version: CANVAS_VERSION, activeId: canvases.some(canvas => canvas.id === requested) ? requested : canvases[0]?.id ?? null, canvases }
 }
 
 /** 序列化后的大小（UTF-16 字符数），写库前的字节闸门。 */
 export const documentSize = document => JSON.stringify(document).length
+
+export function checkInkBudget(document) {
+  let size = 0
+  for (const canvas of document.canvases) {
+    if (canvas.ink.length > INK_LIMITS.strokes) throw new Error(`每张画布最多 ${INK_LIMITS.strokes} 笔`)
+    size += documentSize(canvas.ink)
+  }
+  if (size > INK_LIMITS.bytes) throw new Error('手写已达到本笔记本的存储上限，请擦除部分笔迹后再书写')
+}
 
 /** 取一份画布的副本；不存在返回 null。 */
 export const canvasById = (document, id) => document.canvases.find(canvas => canvas.id === id) ?? null
@@ -238,7 +338,7 @@ export function activeCanvas(document) {
 /** 新建一个空画布并设为激活；返回 { document, canvas }。 */
 export function createCanvas(document, title = '') {
   if (document.canvases.length >= CANVAS_LIMITS.canvases) throw new Error(`最多 ${CANVAS_LIMITS.canvases} 个画布`)
-  const canvas = { id: `canvas-${uuid()}`, title: string(title).trim().slice(0, CANVAS_LIMITS.title) || `画布 ${document.canvases.length + 1}`, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), view: defaultView(), cards: [], edges: [] }
+  const canvas = { id: `canvas-${uuid()}`, title: string(title).trim().slice(0, CANVAS_LIMITS.title) || `画布 ${document.canvases.length + 1}`, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), view: defaultView(), cards: [], edges: [], ink: [], shapes: [], paper: null }
   return { document: { ...document, activeId: canvas.id, canvases: [...document.canvases, canvas] }, canvas }
 }
 
