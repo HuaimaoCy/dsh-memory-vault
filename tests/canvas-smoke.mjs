@@ -20,7 +20,7 @@ import { shapeParts } from '../addons/mistakebook/canvas-shapes.mjs'
 import { NOTEBOOK_LAYOUT_DEFAULTS, normalizeLayout } from '../desktop/renderer/workspace-layout.js'
 import {
   A4_IMAGE_SIZE, CANVAS_LIMITS, activeCanvas, activePaperSheet, addCard, addPaperSheet, contentBounds, contentFits,
-  createCanvas, defaultView, deleteCanvas, documentSize, edgeGeometry, emptyDocument, fitView, linkCards,
+  createCanvas, defaultView, deleteCanvas, documentSize, edgeGeometry, emptyDocument, fitView,
   mergeDocument, normalizeDocument, normalizePaper, panBy, placement, removeCards, removeEdge, removePaperSheet,
   renameCanvas, screenToWorld, selectPaperSheet, updateCard,
   worldToScreen, zoomAt,
@@ -69,6 +69,15 @@ try {
     'M0 0L24 0L24 24', '保留明确的直角')
   assert.equal(inkSVGAttributes({ ...staircase, points: [[0, 0, 50]] }).d, 'M0 0l0 0', '点按仍能落墨')
   assert.equal(inkSVGAttributes(stroke).fill, stroke.color, '真实压感仍使用可变宽轮廓')
+  const longLine = { ...staircase, points: Array.from({ length: 140 }, (_, index) => [index, Math.sin(index / 3), 50]) }
+  const firstPart = inkSVGAttributes(longLine, { variableWidth: false, start: 1, end: 97 }).d
+  const lastPart = inkSVGAttributes(longLine, { variableWidth: false, start: 97 }).d
+  const startOfLast = lastPart.indexOf('L')
+  assert.ok(firstPart.endsWith(lastPart.slice(1, startOfLast)), '实时预览分段首尾相接')
+  assert.equal(firstPart + lastPart.slice(startOfLast), inkSVGAttributes(longLine).d, '分段笔迹沿用保存的曲线')
+  const longPressure = { ...longLine, points: longLine.points.map(([x, y], index) => [x, y, 20 + index % 60]) }
+  const outlineParts = [[0, 96], [96, 140]].map(([start, end]) => inkSVGAttributes(longPressure, { variableWidth: true, start, end }).d)
+  assert.equal(outlineParts.join(''), inkSVGAttributes(longPressure).d, '分段笔迹保留压感轮廓')
   const noisy = [[0, 0, 20], [3, 1, 42], [6, -1, 71], [9, 1, 60], [12, 0, 25]]
   const stabilized = noisy.map((point, index) => index > 0 && index < noisy.length - 1
     ? stabilizeInkPoint(noisy[index - 1], point, noisy[index + 1], 1) : point)
@@ -214,8 +223,7 @@ try {
   assert.equal(canvas.cards[0].w, CANVAS_LIMITS.maxSize, '尺寸上限收敛')
   assert.equal(canvas.cards[0].h, CANVAS_LIMITS.minSize, '尺寸下限收敛')
   const [first, second] = canvas.cards
-  canvas = linkCards(canvas, first.id, second.id)
-  assert.throws(() => linkCards(canvas, first.id, second.id), /已经连在一起/, '同一对卡片只连一次')
+  canvas = normalizeDocument({ canvases: [{ ...canvas, edges: [{ id: 'legacy-edge', from: first.id, to: second.id }] }] }).canvases[0]
   const geometry = edgeGeometry(canvas, canvas.edges[0])
   assert.ok(geometry.length > 0 && Number.isFinite(geometry.angle), '连线几何可画')
   const pruned = removeCards(canvas, [second.id])

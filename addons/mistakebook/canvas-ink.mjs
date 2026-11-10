@@ -50,7 +50,7 @@ export function inkRadius(stroke, point) {
   return stroke.width / 2 * (stroke.tool === 'marker' ? 1 : 0.35 + 1.3 * point[2] / 100)
 }
 
-function outlineRadius(stroke, index) {
+export function outlineRadius(stroke, index) {
   const { points } = stroke
   const radius = inkRadius(stroke, points[index])
   if (stroke.tool === 'marker' || index === 0 || index === points.length - 1) return radius
@@ -100,40 +100,50 @@ export function inkIntersects(stroke, bounds, start, end, radius) {
 
 const pair = (x, y) => `${inkCoordinate(x)} ${inkCoordinate(y)}`
 
-function smoothCenterline(points, width) {
-  const [firstX, firstY] = points[0]
-  let path = `M${pair(firstX, firstY)}`
-  if (points.length === 1) return path + 'l0 0'
+function roundedCorner(points, index, span) {
+  const [previousX, previousY] = points[index - 1]
+  const [x, y] = points[index]
+  const [nextX, nextY] = points[index + 1]
+  const inX = x - previousX, inY = y - previousY
+  const outX = nextX - x, outY = nextY - y
+  const incoming = Math.hypot(inX, inY), outgoing = Math.hypot(outX, outY)
+  const cosine = incoming && outgoing ? (inX * outX + inY * outY) / (incoming * outgoing) : 1
+  // A tiny staircase step may be perpendicular, but a longer corner is intentional.
+  if (cosine > 0.9998 || cosine < -0.65 || (cosine < 0.35 && Math.min(incoming, outgoing) > span)) return null
+  const before = Math.min(0.5, span / incoming), after = Math.min(0.5, span / outgoing)
+  return [pair(x - inX * before, y - inY * before), pair(x + outX * after, y + outY * after)]
+}
+
+function smoothCenterline(points, width, start = 1, end = points.length - 1) {
   const span = Math.max(1.5, Math.min(4, width))
-  for (let index = 1; index < points.length - 1; index += 1) {
-    const [previousX, previousY] = points[index - 1]
+  // Begin a preview chunk exactly where the previous corner ended.
+  const previous = start > 1 ? roundedCorner(points, start - 1, span) : null
+  const [startX, startY] = points[start - 1]
+  let path = `M${previous?.[1] ?? pair(startX, startY)}`
+  if (points.length === 1) return path + 'l0 0'
+  for (let index = start; index < end; index += 1) {
     const [x, y] = points[index]
-    const [nextX, nextY] = points[index + 1]
-    const inX = x - previousX, inY = y - previousY
-    const outX = nextX - x, outY = nextY - y
-    const incoming = Math.hypot(inX, inY), outgoing = Math.hypot(outX, outY)
-    const cosine = incoming && outgoing ? (inX * outX + inY * outY) / (incoming * outgoing) : 1
-    // A tiny staircase step may be perpendicular, but a longer corner is intentional.
-    if (cosine > 0.9998 || cosine < -0.65 || (cosine < 0.35 && Math.min(incoming, outgoing) > span)) {
-      path += `L${pair(x, y)}`
-      continue
-    }
-    const before = Math.min(0.5, span / incoming), after = Math.min(0.5, span / outgoing)
-    path += `L${pair(x - inX * before, y - inY * before)}Q${pair(x, y)} ${pair(x + outX * after, y + outY * after)}`
+    const point = pair(x, y)
+    const corner = roundedCorner(points, index, span)
+    path += corner ? `L${corner[0]}Q${point} ${corner[1]}` : `L${point}`
   }
-  const [lastX, lastY] = points.at(-1)
-  return path + `L${pair(lastX, lastY)}`
+  if (end === points.length - 1) {
+    const [lastX, lastY] = points.at(-1)
+    path += `L${pair(lastX, lastY)}`
+  }
+  return path
 }
 
 /** Shared SVG styling for live strokes, reopened boards and exported paper. */
-export function inkSVGAttributes(stroke, pressureOutline) {
+export function inkSVGAttributes(stroke, { variableWidth, start, end } = {}) {
   const opacity = stroke.tool === 'marker' ? '.35' : '1'
   const first = stroke.points[0]
-  if (pressureOutline !== undefined || (stroke.tool === 'pen' && stroke.points.some(point => point[2] !== first[2]))) {
-    return { d: pressureOutline ?? inkOutline(stroke), fill: stroke.color, stroke: 'none', opacity }
+  const outline = variableWidth ?? (stroke.tool === 'pen' && stroke.points.some(point => point[2] !== first[2]))
+  if (outline) {
+    return { d: inkOutline(stroke, start, end), fill: stroke.color, stroke: 'none', opacity }
   }
   const width = inkRadius(stroke, first) * 2
-  return { d: smoothCenterline(stroke.points, width), fill: 'none', stroke: stroke.color,
+  return { d: smoothCenterline(stroke.points, width, start, end), fill: 'none', stroke: stroke.color,
     'stroke-width': inkCoordinate(width), 'stroke-linecap': 'round', 'stroke-linejoin': 'round', opacity }
 }
 

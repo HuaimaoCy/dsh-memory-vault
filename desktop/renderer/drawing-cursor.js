@@ -8,14 +8,24 @@ export function createDrawingCursor(host) {
 
   let active = false
   let point = null
+  let pending = null
+  let frame = 0
+  function paintPosition() {
+    frame = 0
+    const next = pending
+    pending = null
+    if (!next) return
+    const { left, top, width, height } = host.getBoundingClientRect()
+    const x = next.x - left, y = next.y - top
+    if (x < 0 || x >= width || y < 0 || y >= height) return
+    point = { x, y }
+    dot.style.transform = `translate3d(${x}px,${y}px,0) translate(-50%,-50%)`
+    if (active && dot.hidden) dot.hidden = false
+  }
   return {
     move(event) {
-      const { left, top, width, height } = host.getBoundingClientRect()
-      const x = event.clientX - left, y = event.clientY - top
-      if (x < 0 || x >= width || y < 0 || y >= height) return
-      point = { x, y }
-      dot.style.transform = `translate3d(${x}px,${y}px,0) translate(-50%,-50%)`
-      if (active && dot.hidden) dot.hidden = false
+      pending = { x: event.clientX, y: event.clientY }
+      if (!frame) frame = requestAnimationFrame(paintPosition)
     },
     setStyle(style) {
       active = Boolean(style)
@@ -27,8 +37,14 @@ export function createDrawingCursor(host) {
       const hidden = !active || !point
       if (dot.hidden !== hidden) dot.hidden = hidden
     },
-    position: () => point,
+    position() {
+      if (frame) { cancelAnimationFrame(frame); paintPosition() }
+      return point
+    },
     reset() {
+      cancelAnimationFrame(frame)
+      frame = 0
+      pending = null
       point = null
       dot.hidden = true
     },

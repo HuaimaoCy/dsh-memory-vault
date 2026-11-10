@@ -1,12 +1,15 @@
-import { INK_COLORS, INK_LIMITS, inkBounds, inkCoordinate, inkIntersects, inkOutline, inkPressure, inkSVGAttributes, stabilizeInkPoint } from '../../addons/mistakebook/canvas-ink.mjs'
+import { INK_COLORS, INK_LIMITS, inkBounds, inkCoordinate, inkIntersects, inkPressure, inkSVGAttributes, stabilizeInkPoint } from '../../addons/mistakebook/canvas-ink.mjs'
 import { CANVAS_LIMITS, screenToWorld, zoomAt } from '../../addons/mistakebook/canvas.mjs'
+import { createGpuInkPreview } from './freeform-ink-gpu.js'
 
 const SVG = 'http://www.w3.org/2000/svg'
 const ERASER_RADIUS = 9
 
-export function createCanvasInk({ surface, layer, h, icon, current, setView, commit, notify, onToolChange, onCursorChange, allowsPoint }) {
+export function createCanvasInk({ surface, layer, h, icon, current, setView, commit, notify, onToolChange, onCursorChange, openColors, allowsPoint }) {
   const nodes = new Map()
-  const styles = { pen: { color: '#1267ed', width: 2 }, marker: { color: '#ffbd00', width: 16 } }
+  const gpuPreview = createGpuInkPreview(surface)
+  const styles = { pen: { width: 2 }, marker: { width: 16 } }
+  let color = '#1267ed'
   const touches = new Map()
   let touchView = null
   let tool = 'select'
@@ -31,9 +34,9 @@ export function createCanvasInk({ surface, layer, h, icon, current, setView, com
     'aria-label': label, title: label, 'data-ink-color': value,
     onClick: () => { setBrushStyle({ color: value }); surface.focus({ preventScroll: true }) },
   }))
-  const customColor = h('input', {
-    type: 'color', class: 'mb-canvas-ink-custom', id: 'mb-canvas-ink-color', title: '自定义笔色', 'aria-label': '自定义笔色',
-    onInput: event => setBrushStyle({ color: event.target.value }),
+  const customColor = h('button', {
+    type: 'button', class: 'mb-canvas-ink-custom', id: 'mb-canvas-ink-color', title: '更多颜色', 'aria-label': '更多颜色',
+    onClick: event => openColors(event.currentTarget),
   })
   const palette = h('div', { class: 'mb-canvas-ink-colors', role: 'group', 'aria-label': '笔色' }, presets, customColor)
   const widthLabel = h('output', { class: 'mb-ink-width-label', for: 'mb-canvas-ink-width' })
@@ -52,6 +55,7 @@ export function createCanvasInk({ surface, layer, h, icon, current, setView, com
     cancel()
     tool = next
     const enabled = tool !== 'select'
+    if (styles[tool]) gpuPreview.prepare()
     panel.hidden = !enabled
     toggle.setAttribute('aria-expanded', String(enabled))
     surface.dataset.inkTool = tool
@@ -70,12 +74,12 @@ export function createCanvasInk({ surface, layer, h, icon, current, setView, com
 
   function brushSettings() {
     const step = tool === 'marker' ? 1 : INK_LIMITS.minWidth
-    return { tool, ...(styles[tool] ?? styles.pen), minWidth: step, maxWidth: INK_LIMITS.maxWidth, step }
+    return { tool, color, ...(styles[tool] ?? styles.pen), minWidth: step, maxWidth: INK_LIMITS.maxWidth, step }
   }
 
   function setBrushStyle(style) {
-    if (!styles[tool] && !setTool('pen')) return
-    Object.assign(styles[tool], style)
+    if (style.color) color = style.color
+    if (Number.isFinite(style.width)) (styles[tool] ?? styles.pen).width = style.width
     paintSettings()
   }
 
@@ -84,13 +88,13 @@ export function createCanvasInk({ surface, layer, h, icon, current, setView, com
     palette.hidden = widths.hidden = !style
     onCursorChange?.()
     if (!style) return
-    for (const button of presets) button.setAttribute('aria-pressed', String(button.dataset.inkColor === style.color))
-    if (customColor.value !== style.color) customColor.value = style.color
+    for (const button of presets) button.setAttribute('aria-pressed', String(button.dataset.inkColor === color))
+    customColor.value = color
     range.min = range.step = String(brushSettings().step)
     range.value = String(style.width)
     widthLabel.value = String(style.width)
     range.setAttribute('aria-valuetext', `${style.width} 像素（100% 缩放）`)
-    panel.style.setProperty('--ink-active-color', style.color)
+    panel.style.setProperty('--ink-active-color', color)
   }
 
   function strokeNode(stroke) {
@@ -99,13 +103,27 @@ export function createCanvasInk({ surface, layer, h, icon, current, setView, com
     return node
   }
 
-  function paintStroke(node, stroke, outline) {
-    for (const [name, value] of Object.entries(inkSVGAttributes(stroke, outline))) node.setAttribute(name, String(value))
+  function paintStroke(node, stroke, range) {
+    const { d, ...attributes } = inkSVGAttributes(stroke, range)
+    // Composite the marker once even when its preview has multiple paths.
+    const style = range ? node.parentElement : node
+    for (const [name, value] of Object.entries(attributes)) {
+      if (style.getAttribute(name) !== String(value)) style.setAttribute(name, String(value))
+    }
+    node.setAttribute('d', d)
   }
 
   function paint() {
     const ink = current()?.ink
     if (ink === paintedInk) return
+    if (paintedInk && ink?.length === paintedInk.length + 1 && paintedInk.every((stroke, index) => stroke === ink[index])) {
+      const stroke = ink.at(-1), node = strokeNode(stroke)
+      paintStroke(node, stroke)
+      nodes.set(stroke.id, { stroke, node })
+      layer.insertBefore(node, gesture?.node ?? null)
+      paintedInk = ink
+      return
+    }
     paintedInk = ink
     const previous = new Map(nodes)
     nodes.clear()
@@ -116,6 +134,7 @@ export function createCanvasInk({ surface, layer, h, icon, current, setView, com
       nodes.set(stroke.id, { stroke, node })
       return node
     })
+    if (gesture?.node) paths.push(gesture.node)
     layer.replaceChildren(...paths)
   }
 
@@ -189,10 +208,14 @@ export function createCanvasInk({ surface, layer, h, icon, current, setView, com
       gesture = { ...base, candidates, erased: new Set(), previous: inkPoint(event, rect, base.view) }
       onCursorChange?.()
     } else {
-      const stroke = { id: globalThis.crypto.randomUUID(), tool: type, ...styles[type], points: [] }
-      const node = strokeNode(stroke)
+      const stroke = { id: globalThis.crypto.randomUUID(), tool: type, color, ...styles[type], points: [] }
+      const node = document.createElementNS(SVG, 'g')
+      const tail = document.createElementNS(SVG, 'path')
+      node.setAttribute('data-stroke-preview', stroke.id)
+      node.append(tail)
       layer.append(node)
-      gesture = { ...base, stroke, node, rendered: 0, path: '', previousSample: null }
+      const gpu = gpuPreview.begin(rect, base.view, canvas.paper)
+      gesture = { ...base, stroke, node, tail, gpu, previewStart: 1, previewOutline: false, previousSample: null }
     }
     surface.classList.add('ink-stroking')
     record(event)
@@ -229,15 +252,30 @@ export function createCanvasInk({ surface, layer, h, icon, current, setView, com
   function paintGesture() {
     frame = 0
     if (!gesture?.stroke) return
-    let outline
-    if (gesture.variableWidth) {
-      // Only the tip stays provisional. Both its position and radius settle on the next sample.
-      const tail = gesture.stroke.points.length - 1
-      gesture.path += inkOutline(gesture.stroke, gesture.rendered, tail)
-      gesture.rendered = tail
-      outline = gesture.path + inkOutline(gesture.stroke, tail)
+    const { stroke, node, tail } = gesture
+    if (gesture.gpu) {
+      if (gpuPreview.paint(stroke)) return
+      gesture.gpu = false
+      gpuPreview.clear()
     }
-    paintStroke(gesture.node, gesture.stroke, outline)
+    const variableWidth = Boolean(gesture.variableWidth)
+    if (gesture.previewOutline !== variableWidth) {
+      // The first pressure change can turn a formerly uniform line into an outline.
+      node.replaceChildren(tail)
+      gesture.previewStart = 0
+      gesture.previewOutline = variableWidth
+    }
+    const chunk = 96
+    // The newest sample is provisional. A centerline corner also uses its next point.
+    const stableEnd = stroke.points.length - (variableWidth ? 1 : 2)
+    while (gesture.previewStart + chunk <= stableEnd) {
+      const part = document.createElementNS(SVG, 'path')
+      node.insertBefore(part, tail)
+      const start = gesture.previewStart, end = start + chunk
+      paintStroke(part, stroke, { variableWidth, start, end })
+      gesture.previewStart = end
+    }
+    paintStroke(tail, stroke, { variableWidth, start: gesture.previewStart })
   }
 
   function pointerMove(event) {
@@ -252,8 +290,8 @@ export function createCanvasInk({ surface, layer, h, icon, current, setView, com
     if (!gesture) return false
     if (event.pointerId !== gesture.id) return true
     if (event.pointerType === 'mouse' && event.buttons === 0) return finish(event, true)
-    const samples = event.getCoalescedEvents?.()
-    for (const sample of samples?.length ? samples : [event]) record(sample)
+    for (const sample of event.getCoalescedEvents?.() ?? []) record(sample)
+    record(event)
     return true
   }
 
@@ -265,6 +303,7 @@ export function createCanvasInk({ surface, layer, h, icon, current, setView, com
     gesture = null
     surface.classList.remove('ink-stroking')
     if (finished.type === 'erase') onCursorChange?.()
+    if (finished.gpu) gpuPreview.clear()
     finished.node?.remove()
     for (const id of finished.erased ?? []) nodes.get(id)?.node.removeAttribute('visibility')
     release(finished.id)
@@ -283,7 +322,7 @@ export function createCanvasInk({ surface, layer, h, icon, current, setView, com
     const canvas = current()
     if (!accept || canvas?.id !== finished.canvasId) return true
     if (finished.stroke) {
-      if (commit([...canvas.ink, finished.stroke]) && finished.full) notify('已保存本笔。单笔已达长度上限，可以继续写下一笔。')
+      if (commit([...canvas.ink, finished.stroke], finished.stroke) && finished.full) notify('已保存本笔。单笔已达长度上限，可以继续写下一笔。')
     } else if (finished.erased.size) {
       commit(canvas.ink.filter(stroke => !finished.erased.has(stroke.id)))
     }
@@ -301,11 +340,11 @@ export function createCanvasInk({ surface, layer, h, icon, current, setView, com
   function cursorStyle(scale) {
     if (tool === 'erase' || gesture?.type === 'erase') return { color: '#697588', diameter: ERASER_RADIUS * 2 }
     const style = styles[tool]
-    return style ? { color: style.color, diameter: style.width * scale } : null
+    return style ? { color, diameter: style.width * scale } : null
   }
 
   return {
-    panel, toggle, paint, pointerDown, pointerMove, finish, cancel, setTool, toggleTouch, penStyle: () => ({ ...styles.pen }),
+    panel, toggle, paint, pointerDown, pointerMove, finish, cancel, setTool, toggleTouch, penStyle: () => ({ color, ...styles.pen }),
     cursorStyle, brushSettings, setBrushStyle,
     active: () => tool !== 'select',
     busy: () => Boolean(gesture) || touches.size > 0,

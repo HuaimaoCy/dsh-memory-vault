@@ -13,7 +13,7 @@
  */
 
 import { NOTE_TYPES } from '../../addons/mistakebook/fields.mjs'
-import { inkBounds, inkCoordinate } from '../../addons/mistakebook/canvas-ink.mjs'
+import { INK_COLORS, inkBounds, inkCoordinate } from '../../addons/mistakebook/canvas-ink.mjs'
 import { canvasQuestionImageURI as imageURI } from '../../addons/mistakebook/canvas-question.mjs'
 import { boxDelta, boxSelection as findBoxSelection, moveBoxSelection, offsetBoxSelection } from '../../addons/mistakebook/canvas-selection.mjs'
 import { SHAPE_KINDS, SHAPE_LIMIT, shapeBounds, shapeParts } from '../../addons/mistakebook/canvas-shapes.mjs'
@@ -23,7 +23,7 @@ import { createDrawingCursor } from './drawing-cursor.js'
 import { createCanvasInk } from './freeform-ink.js'
 import {
   A4_SIZE, CANVAS_IMAGE_LIMITS, CANVAS_LIMITS, DEFAULT_SIZES, STICKY_TONES, activeCanvas, activePaperSheet, addCard, addPaperSheet, canvasById, contentBounds,
-  checkCanvasImageBudget, checkInkBudget, createCanvas, defaultView, deleteCanvas, edgeGeometry, emptyDocument, fitView, linkCards,
+  checkCanvasImageBudget, checkInkBudget, createCanvas, defaultView, deleteCanvas, documentSize, edgeGeometry, emptyDocument, fitView,
   normalizeDocument, normalizeView, panBy, placement, removeCards, removeEdge, removePaperSheet, renameCanvas, screenToWorld,
   selectPaperSheet, updateCard, zoomAt,
 } from '../../addons/mistakebook/canvas.mjs'
@@ -36,6 +36,16 @@ const clamp = (value, min, max) => Math.min(max, Math.max(min, value))
 const round = value => Math.round(value)
 const coord = value => clamp(round(value), -CANVAS_LIMITS.coordinate, CANVAS_LIMITS.coordinate)
 const shapeCoord = value => inkCoordinate(clamp(value, -CANVAS_LIMITS.coordinate, CANVAS_LIMITS.coordinate))
+const favoriteColorsKey = 'alaya.canvas.favorite-colors.v1'
+const maxFavorites = 8
+const presetColors = new Set(INK_COLORS.map(({ value }) => value))
+const normalizeColor = value => typeof value === 'string' && /^#[0-9a-f]{6}$/i.test(value) ? value.toLowerCase() : null
+function readFavoriteColors() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(favoriteColorsKey))
+    return Array.isArray(saved) ? [...new Set(saved.map(normalizeColor).filter(color => color && !presetColors.has(color)))].slice(0, maxFavorites) : []
+  } catch { return [] }
+}
 const svg = (tag, attributes) => {
   const node = document.createElementNS('http://www.w3.org/2000/svg', tag)
   for (const [name, value] of Object.entries(attributes)) node.setAttribute(name, String(value))
@@ -88,7 +98,8 @@ export function createCanvasView(options) {
   surface.append(paperLayer, world, vectorLayer, hint, marquee)
   const cursor = createDrawingCursor(surface)
   const ink = createCanvasInk({ surface, layer: inkLayer, h, icon, current: () => current(), setView: view => setView(view), commit: commitInk, notify,
-    onCursorChange: () => { paintDrawingCursor(); paintQuickPalette() },
+    onCursorChange: () => { paintDrawingCursor(); paintShapeTools(); paintQuickPalette() },
+    openColors: button => openColorPicker(button),
     onToolChange: enabled => {
       shell.classList.toggle('canvas-inking', enabled)
       if (enabled) { setTextPlacement(false); setShapeTool(null); setBoxTool(false) }
@@ -106,11 +117,13 @@ export function createCanvasView(options) {
     type: 'button', class: 'mb-canvas-icon', title: label, 'aria-label': label, 'aria-pressed': 'false', 'data-shape-tool': kind,
     onClick: () => setShapeTool(kind),
   }, icon(`shape-${kind}`)))
-  const shapeColorInput = h('input', { type: 'color', class: 'mb-canvas-shape-color', id: 'mb-canvas-shape-color',
-    'aria-label': '图形颜色', onChange: event => changeShapeColor(event.target.value) })
+  const shapeColorButton = h('button', { type: 'button', class: 'mb-canvas-shape-color', id: 'mb-canvas-shape-color',
+    'aria-label': '图形颜色', onClick: event => openColorPicker(event.currentTarget, shapeTool ? null : selection.shape) })
   const shapePicker = h('div', { class: 'mb-canvas-shape-picker', id: 'mb-canvas-shape-picker', hidden: true,
     role: 'toolbar', 'aria-label': '图形工具', 'data-glass-surface': 'float',
-  }, shapeTools, shapeColorInput)
+  }, shapeTools, shapeColorButton)
+  const boxButton = h('button', { type: 'button', class: 'mb-canvas-tool', id: 'mb-canvas-box-select',
+    title: '框选挪动 · M', 'aria-label': '框选挪动', 'aria-pressed': 'false', onClick: () => setBoxTool(!boxTool) }, icon('board-box-select'))
   const exportButton = h('button', { type: 'button', class: 'mb-canvas-icon', id: 'mb-canvas-export',
     title: '导出 A4（PDF、PNG、JPG）', 'aria-label': '导出 A4', disabled: true, onClick: chooseExport }, icon('board-share'))
 
@@ -139,7 +152,7 @@ export function createCanvasView(options) {
     ink.toggle, textButton, shapeButton,
     h('button', { type: 'button', class: 'mb-canvas-tool', id: 'mb-canvas-reference', title: '引用现有笔记', 'aria-label': '引用笔记', onClick: () => void pickReference() }, icon('board-note')),
     imageButton,
-    h('button', { type: 'button', class: 'mb-canvas-tool', id: 'mb-canvas-link', title: '连接选中的两个对象', 'aria-label': '连接对象', onClick: () => linkSelected() }, icon('board-connect')),
+    boxButton,
     paperButton)
   bar.insertBefore(tools, bar.lastElementChild)
 
@@ -158,8 +171,8 @@ export function createCanvasView(options) {
 
   const quickPalette = createCanvasQuickPalette({ h, icon,
     selectTool: tool => tool === 'box-select' ? setBoxTool(true) : ink.setTool(tool),
-    setColor: color => ink.setBrushStyle({ color }), setWidth: width => ink.setBrushStyle({ width }),
-    undo, redo })
+    selectShape: setShapeTool, setColor: changeWheelColor, toggleFavorite,
+    setWidth: width => ink.setBrushStyle({ width }), undo, redo })
   const section = h('section', { class: 'mb-canvas', id: 'mb-canvas', hidden: true, 'aria-label': '自由画布' },
     bar, surface, shapePicker, ink.panel, zoomControls, paperControls, imagePicker, quickPalette.element)
   const footer = host.querySelector('.mb-foot')
@@ -171,7 +184,8 @@ export function createCanvasView(options) {
   let boxTool = false
   let selectedBox = null
   let preferredShape = 'arrow'
-  let shapeColor = ink.penStyle().color
+  let favorites = readFavoriteColors()
+  let colorTarget = null
   let exporting = false
   let loaded = false
   let pendingChanges = false
@@ -186,6 +200,7 @@ export function createCanvasView(options) {
   const selection = { cards: new Set(), edges: new Set(), shape: null }
   const cardNodes = new Map(), edgeNodes = new Map()
   const shapeNodes = new Map()
+  const inkBytes = new WeakMap()
   let renderedSheets, sheetNodes = [], paperClipPath = ''
 
   const current = () => activeCanvas(doc)
@@ -214,7 +229,10 @@ export function createCanvasView(options) {
   // —— 持久化：整份文档写回笔记本域；失败可见、内存修改保留、下次改动重试 ——
   const saveSoon = () => {
     clearTimeout(saveTimer)
-    saveTimer = setTimeout(() => void flush(), 420)
+    saveTimer = setTimeout(() => {
+      if (ink.busy() || drag) { saveSoon(); return }
+      void flush()
+    }, 420)
   }
   async function flush() {
     clearTimeout(saveTimer)
@@ -586,12 +604,21 @@ export function createCanvasView(options) {
     images: new Map(doc.canvases.flatMap(canvas => canvas.cards.filter(card => card.image).map(card => [assetKey(canvas, card), card.image]))),
   })
   const replaceCanvas = next => { doc = { ...doc, canvases: doc.canvases.map(canvas => canvas.id === next.id ? next : canvas) } }
-  function commitInk(strokes) {
+  function measureInk(strokes) {
+    let bytes = inkBytes.get(strokes)
+    if (bytes === undefined) {
+      bytes = documentSize(strokes)
+      inkBytes.set(strokes, bytes)
+    }
+    return bytes
+  }
+  function commitInk(strokes, appended) {
     const canvas = current()
     if (!canvas || loadError) return false
     const next = { ...canvas, ink: strokes, updatedAt: new Date().toISOString() }
     try {
-      if (strokes.length > canvas.ink.length) checkInkBudget({ canvases: doc.canvases.map(row => row.id === next.id ? next : row) })
+      if (appended) inkBytes.set(strokes, measureInk(canvas.ink) + documentSize(appended) + (canvas.ink.length ? 1 : 0))
+      if (strokes.length > canvas.ink.length) checkInkBudget({ canvases: doc.canvases.map(row => row.id === next.id ? next : row) }, measureInk)
     } catch (error) {
       notify(error.message, true)
       return false
@@ -693,32 +720,54 @@ export function createCanvasView(options) {
     shapePicker.hidden = ink.active() || placingText || (!shapeTool && !selected)
     shapeButton.setAttribute('aria-pressed', String(Boolean(shapeTool)))
     for (const tool of shapeTools) tool.setAttribute('aria-pressed', String(tool.dataset.shapeTool === shapeTool))
-    shapeColorInput.value = shapeTool ? shapeColor : selected?.color ?? shapeColor
-    shapeColorInput.title = shapeTool ? '新图形的颜色' : '修改选中图形的颜色'
-    shapeColorInput.setAttribute('aria-label', shapeColorInput.title)
+    const color = (shapeTool ? null : selected?.color) ?? ink.penStyle().color
+    shapeColorButton.style.setProperty('--shape-color', color)
+    shapeColorButton.title = shapeTool ? '笔迹和图形共用的颜色' : '修改选中图形的颜色'
+    shapeColorButton.setAttribute('aria-label', shapeColorButton.title)
   }
   function paintDrawingCursor() {
     const scale = current()?.view.scale
+    const pen = ink.penStyle()
     const style = scale && (ink.cursorStyle(scale) ?? (shapeTool
-      ? { color: shapeColor, diameter: Math.max(1, ink.penStyle().width) * scale } : null))
+      ? { color: pen.color, diameter: Math.max(1, pen.width) * scale } : null))
     cursor.setStyle(style)
   }
   function paintQuickPalette() {
     const brush = ink.brushSettings()
-    quickPalette.update({ ...brush, tool: boxTool ? 'box-select' : brush.tool, canUndo: !undoButton.disabled, canRedo: !redoButton.disabled })
+    const selected = colorTarget ? current()?.shapes.find(shape => shape.id === colorTarget) : null
+    quickPalette.update({ ...brush, tool: boxTool ? 'box-select' : brush.tool, shapeTool,
+      color: selected?.color ?? brush.color, presets: INK_COLORS, favorites, maxFavorites,
+      canUndo: !undoButton.disabled, canRedo: !redoButton.disabled })
   }
-  function openQuickPalette(point) {
+  function openQuickPalette(point, panel, shapeId = null) {
     if (!current() || loadError || drag || ink.busy()) return
+    colorTarget = shapeId
     paintQuickPalette()
-    quickPalette.open(point ?? cursor.position() ?? viewportCenter())
+    quickPalette.open(point ?? cursor.position() ?? viewportCenter(), panel)
   }
-  function changeShapeColor(color) {
-    if (shapeTool) { shapeColor = color; paintDrawingCursor(); return }
+  function openColorPicker(button, shapeId = null) {
+    const { left, top, width, height } = button.getBoundingClientRect()
+    openQuickPalette(localPoint({ clientX: left + width / 2, clientY: top + height / 2 }), 'colors', shapeId)
+  }
+  function changeWheelColor(value) {
+    const color = normalizeColor(value)
+    if (!color) return
+    if (!colorTarget) { ink.setBrushStyle({ color }); return }
     mutate(canvas => {
-      const selected = canvas.shapes.find(shape => shape.id === selection.shape)
+      const selected = canvas.shapes.find(shape => shape.id === colorTarget)
       if (!selected || selected.color === color) return canvas
       return { ...canvas, shapes: canvas.shapes.map(shape => shape === selected ? { ...shape, color } : shape), updatedAt: new Date().toISOString() }
     })
+  }
+  function toggleFavorite(value) {
+    const color = normalizeColor(value)
+    if (!color || presetColors.has(color)) return
+    const next = favorites.includes(color) ? favorites.filter(saved => saved !== color) : [...favorites, color]
+    if (next.length > maxFavorites) return
+    try { localStorage.setItem(favoriteColorsKey, JSON.stringify(next)) }
+    catch { notify('常用色保存失败', true); return }
+    favorites = next
+    paintQuickPalette()
   }
   function setShapeTool(kind) {
     cancelShapeDrag()
@@ -734,6 +783,7 @@ export function createCanvasView(options) {
     surface.classList.toggle('drawing-shape', Boolean(kind))
     paintShapeTools()
     paintDrawingCursor()
+    paintQuickPalette()
   }
   function setBoxTool(enabled) {
     if (boxTool === enabled || (enabled && (!current() || loadError || drag))) return
@@ -747,6 +797,7 @@ export function createCanvasView(options) {
     }
     clearSelection()
     surface.classList.toggle('box-tool', enabled)
+    boxButton.setAttribute('aria-pressed', String(enabled))
     paintQuickPalette()
   }
   function addText(point) {
@@ -873,18 +924,6 @@ export function createCanvasView(options) {
         ink: box ? next.ink.filter(stroke => !box.ink.has(stroke.id)) : next.ink, updatedAt: new Date().toISOString() }
       return next
     })) clearSelection()
-  }
-  function linkSelected() {
-    const ids = [...selection.cards]
-    if (ids.length !== 2) { notify('先选中两张卡片（Shift 点选），再连接', true); return }
-    const canvas = current()
-    if (!canvas) return
-    try {
-      mutate(row => linkCards(row, ids[0], ids[1]))
-      selection.edges.clear()
-      paintSelection()
-      notify('两张卡片已连线')
-    } catch (error) { notify(error?.message || String(error), true) }
   }
   function undo() { travelHistory(history.past, history.future) }
   function redo() { travelHistory(history.future, history.past) }
@@ -1093,8 +1132,8 @@ export function createCanvasView(options) {
       if (!allowsPoint(point)) { notify('请在 A4 纸内绘制图形'); return }
       if (canvas.shapes.length >= SHAPE_LIMIT) { notify(`每张画布最多 ${SHAPE_LIMIT} 个图形`, true); return }
       const { x, y } = point
-      const { width } = ink.penStyle()
-      const shape = { id: globalThis.crypto.randomUUID(), kind: shapeTool, color: shapeColor, width: Math.max(1, width),
+      const { color, width } = ink.penStyle()
+      const shape = { id: globalThis.crypto.randomUUID(), kind: shapeTool, color, width: Math.max(1, width),
         x1: shapeCoord(x), y1: shapeCoord(y), x2: shapeCoord(x), y2: shapeCoord(y) }
       const node = shapeNode(shape, true)
       shapeLayer.append(node)
@@ -1276,7 +1315,7 @@ export function createCanvasView(options) {
         const box = finished.box
         const next = moveBoxSelection(canvas, box, dx, dy)
         try {
-          if (box.ink.size) checkInkBudget({ canvases: doc.canvases.map(row => row.id === next.id ? next : row) })
+          if (box.ink.size) checkInkBudget({ canvases: doc.canvases.map(row => row.id === next.id ? next : row) }, measureInk)
         } catch (error) {
           notify(error.message, true)
           paintMarquee()
@@ -1347,7 +1386,7 @@ export function createCanvasView(options) {
     const key = event.key.toLowerCase()
     const isEditing = event.target.closest?.('textarea, input, select, [contenteditable="true"]')
     const togglePalette = key === 'q' && !event.ctrlKey && !event.metaKey && !event.altKey
-      && (!isEditing || quickPalette.element.contains(event.target))
+      && (!isEditing || (isEditing.matches('input[type="range"]') && quickPalette.element.contains(isEditing)))
     if (togglePalette || (key === 'escape' && quickPalette.isOpen())) {
       event.preventDefault(); event.stopPropagation()
       if (event.repeat) return
@@ -1355,7 +1394,7 @@ export function createCanvasView(options) {
       else openQuickPalette()
       return
     }
-    if (event.altKey || !(event.ctrlKey || event.metaKey) || (key !== 'z' && key !== 'y')) return
+    if (event.altKey || isEditing?.matches('[data-quick-hex]') || !(event.ctrlKey || event.metaKey) || (key !== 'z' && key !== 'y')) return
     event.preventDefault()
     event.stopPropagation()
     if (key === 'y' || event.shiftKey) redo(); else undo()

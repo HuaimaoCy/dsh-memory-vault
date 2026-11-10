@@ -61,6 +61,16 @@ export async function run(window, bridge) {
   const cards = "document.querySelectorAll('[data-card-id]').length"
   const cardBox = selector => js(`(()=>{const n=document.querySelector(${JSON.stringify(selector)});const r=n.getBoundingClientRect();return { x:r.left, y:r.top, w:r.width, h:r.height, cx:r.left+r.width/2, cy:r.top+r.height/2 }})()`)
   const keydown = (key, extra = {}) => js(`document.getElementById('mb-canvas-surface').dispatchEvent(new KeyboardEvent('keydown', { key:${JSON.stringify(key)}, bubbles:true, cancelable:true, ${Object.entries(extra).map(([name, value]) => `${name}:${JSON.stringify(value)}`).join(', ')} }))`)
+  const setPickerColor = async (color, control = '#mb-canvas-ink-color', keepOpen = false) => {
+    await click(control)
+    await until("document.querySelector('#mb-quick-color-panel').hidden === false", '打开应用内取色器')
+    await js(`(() => {
+      const hex = document.querySelector('[data-quick-hex]')
+      hex.value = ${JSON.stringify(color)}
+      hex.dispatchEvent(new Event('input', { bubbles:true }))
+    })()`)
+    if (!keepOpen) await keydown('Escape')
+  }
 
   // 破坏性操作确认：本测试一律选择「确认」；跑完恢复原生确认，避免影响同进程里的其它检查。
   const originalConfirm = dialog.showMessageBox
@@ -171,6 +181,7 @@ export async function run(window, bridge) {
     legacy.version = 1
     delete legacy.canvases[0].ink
     legacy.canvases[0].cards.push({ id: 'old-sticky', kind: 'sticky', text: '旧版便签', x: 280, y: 250 })
+    legacy.canvases[0].edges = [{ id: 'legacy-edge', from: legacy.canvases[0].cards[0].id, to: 'old-sticky' }]
     writeCanvasValue(JSON.stringify(legacy))
     await click('#mb-canvas-button')
     await until(`${cards}===2`, '旧版便签仍可加载')
@@ -193,14 +204,17 @@ export async function run(window, bridge) {
     assert.equal(await js("document.querySelector('#mb-canvas').hidden"), false)
     await closeLayout()
 
-    // —— 连接两张卡片，再删掉这条连线 ——
+    // —— 顶部框选入口与旧画布连线兼容 ——
+    assert.equal(await js("document.getElementById('mb-canvas-link')"), null)
+    await click('#mb-canvas-box-select')
+    assert.equal(await js("document.querySelector('#mb-canvas-box-select').getAttribute('aria-pressed')"), 'true')
+    await keydown('Escape')
     await js(`(()=>{
       const pick=(kind, extra)=>{const head=document.querySelector('[data-card-id][data-kind='+JSON.stringify(kind)+'] .mb-canvas-card-head');const r=head.getBoundingClientRect();for(const type of ['pointerdown','pointerup'])head.dispatchEvent(new PointerEvent(type,{bubbles:true,cancelable:true,clientX:r.left+6,clientY:r.top+6,pointerId:15,pointerType:'mouse',button:0,buttons:1,isPrimary:true,...extra}))};
       pick('text'); pick('sticky', { shiftKey:true });
     })()`)
     await until("document.querySelectorAll('[data-card-id].selected').length===2", '选中两张卡片')
-    await click('#mb-canvas-link')
-    await until("document.querySelectorAll('[data-edge-id]').length===1", '连线已生成')
+    await until("document.querySelectorAll('[data-edge-id]').length===1", '旧版连线正常显示')
     await shot('画布-卡片与连线')
     await click('[data-edge-id]')
     await keydown('Delete')
@@ -289,13 +303,17 @@ export async function run(window, bridge) {
         await js("document.getElementById('canvas-glass-probe').remove(); document.getElementById('canvas-glass-probe-style').remove()")
       }
     }
-    await js(`(() => {
-      for (const [selector, value] of [['#mb-canvas-ink-color', '#8a23ff'], ['#mb-canvas-ink-width', '7']]) {
-        const input = document.querySelector(selector)
-        input.value = value
-        input.dispatchEvent(new Event('input', { bubbles:true }))
-      }
+    await setPickerColor('#8a23ff', '#mb-canvas-ink-color', true)
+    assert.equal(await js("document.querySelector('#mb-canvas input[type=color]')"), null, '白板取色不调用系统色窗')
+    await click('[data-quick-favorite]')
+    await until("Boolean(document.querySelector('[data-quick-color=\"#8a23ff\"]'))", '保存常用色')
+    await keydown('Escape')
+    const setInkWidth = width => js(`(() => {
+      const input = document.querySelector('#mb-canvas-ink-width')
+      input.value = ${JSON.stringify(width)}
+      input.dispatchEvent(new Event('input', { bubbles:true }))
     })()`)
+    await setInkWidth('7')
     const strokeNodes = "document.querySelectorAll('.mb-canvas-ink [data-stroke-id]').length"
     const inkGesture = (points, { pointerType = 'pen', end = 'pointerup', id = 81 } = {}) => js(`(() => {
       const surface = document.getElementById('mb-canvas-surface')
@@ -312,6 +330,7 @@ export async function run(window, bridge) {
       return [downCursor, getComputedStyle(surface).cursor]
     })()`)
     assert.deepEqual(await inkGesture([[150, 140, 0.2], [200, 140, 0.85], [300, 140, 0.65]]), ['none', 'none'], '落笔和抬笔都只显示笔尖圆点')
+    await painted()
     const drawingDot = () => js(`(() => {
       const dot = document.querySelector('#mb-canvas-surface .mb-drawing-cursor')
       const style = getComputedStyle(dot)
@@ -320,23 +339,17 @@ export async function run(window, bridge) {
     })()`)
     const liftedDot = await drawingDot()
     assert.equal(liftedDot.hidden, false, '抬笔后圆点保留')
-    await js(`(() => {
-      const input = document.querySelector('#mb-canvas-ink-width')
-      input.value = '12'; input.dispatchEvent(new Event('input', { bubbles:true }))
-      const color = document.querySelector('#mb-canvas-ink-color')
-      color.value = '#ff3652'; color.dispatchEvent(new Event('input', { bubbles:true }))
-    })()`)
+    await setInkWidth('12')
+    await click('[data-ink-color="#ff3652"]')
     const changedDot = await drawingDot()
     assert.equal(changedDot.hidden, false)
     assert.ok(changedDot.size > liftedDot.size)
     assert.equal(changedDot.color, 'rgb(255, 54, 82)')
     assert.ok(changedDot.center.every((value, index) => Math.abs(value - liftedDot.center[index]) < .1), '调色和粗细时圆点中心保持原位')
-    await js(`(() => {
-      const input = document.querySelector('#mb-canvas-ink-width')
-      input.value = '7'; input.dispatchEvent(new Event('input', { bubbles:true }))
-      const color = document.querySelector('#mb-canvas-ink-color')
-      color.value = '#8a23ff'; color.dispatchEvent(new Event('input', { bubbles:true }))
-    })()`)
+    await setInkWidth('7')
+    await click('#mb-canvas-ink-color')
+    await click('[data-quick-color="#8a23ff"]')
+    await keydown('Escape')
     await until(`${strokeNodes}===1`, '笔迹已显示')
     assert.match(await js("document.querySelector('.mb-canvas-ink path').getAttribute('d')"), /^M/)
     assert.ok(await js("document.querySelector('.mb-canvas-ink path').getBoundingClientRect().width > 100"), '笔迹可见并随视口缩放')
@@ -370,7 +383,8 @@ export async function run(window, bridge) {
     assert.equal(await js(strokeNodes), 0, '重做再次擦除')
     await click('#mb-canvas-undo')
     await click('#mb-canvas-ink-marker')
-    assert.equal(await js("document.querySelector('#mb-canvas-ink-color').value"), '#ffbd00')
+    assert.equal(await js("document.querySelector('#mb-canvas-ink-color').value"), '#8a23ff', '荧光笔和普通笔共用颜色')
+    await click('[data-ink-color="#ffbd00"]')
     await inkGesture([[150, 200, 0.5], [260, 210, 0.5]], { pointerType: 'mouse' })
     assert.equal(await js(strokeNodes), 2, '荧光笔支持鼠标')
     await shot('画布-手写')
@@ -388,6 +402,7 @@ export async function run(window, bridge) {
     })()`)
     await until("document.querySelector('#mb-canvas-zoom').textContent === '1600%'", 'A4 模式放大到 1600%')
     await click('#mb-canvas-ink-pen')
+    await setPickerColor('#8a23ff')
     await js(`(() => {
       const width = document.getElementById('mb-canvas-ink-width')
       width.value = '0.25'
@@ -447,16 +462,16 @@ export async function run(window, bridge) {
     window.webContents.sendInputEvent({ type: 'mouseUp', ...atLine })
     assert.ok(Math.abs(pressed.cx - before.cx) < 3 && Math.abs(pressed.cy - before.cy) < 3, '按住时图形选项保持在指针下')
     await until("document.querySelector('[data-shape-tool=line]').getAttribute('aria-pressed')==='true'", '真实点击切换图形')
-    const setShapeColor = value => js(`(() => {
-      const input = document.querySelector('#mb-canvas-shape-color')
-      input.value = ${JSON.stringify(value)}
-      input.dispatchEvent(new Event('change', { bubbles:true }))
-    })()`)
+    const setShapeColor = value => setPickerColor(value, '#mb-canvas-shape-color')
     await setShapeColor('#ff3652')
     assert.equal((await drawingDot()).color, 'rgb(255, 54, 82)', '新图形颜色同步到圆点')
-    assert.equal(await js("document.querySelector('[data-shape-kind=arrow]').getAttribute('stroke')"), '#1267ed', '更换新图形的颜色只影响接下来的绘制')
+    assert.equal(await js("document.querySelector('[data-shape-kind=arrow]').getAttribute('stroke')"), '#8a23ff', '图形沿用画笔颜色，旧笔迹保持原色')
     for (const [index, kind] of ['line', 'circle', 'square'].entries()) {
-      if (kind !== 'line') await click(`[data-shape-tool="${kind}"]`)
+      if (kind !== 'line') {
+        await keydown('q')
+        await click('[data-quick-panel=shapes]')
+        await click(`[data-quick-shape="${kind}"]`)
+      }
       await paperGesture([[220 + index * 130, 710], [310 + index * 130, 790]])
       assert.equal(await js(`document.querySelector('[data-shape-kind="${kind}"]').getAttribute('stroke')`), '#ff3652')
     }
@@ -475,7 +490,9 @@ export async function run(window, bridge) {
     await click('#mb-canvas-redo')
     assert.equal(await js("document.querySelector('[data-shape-kind=square]').getAttribute('stroke')"), '#22c65d', '改色可重做')
     await click('#mb-canvas-ink-tool')
+    assert.equal(await js("document.querySelector('#mb-canvas-ink-color').value"), '#ff3652', '切回画笔仍沿用新图形的颜色')
     await click('#mb-canvas-ink-marker')
+    await click('[data-ink-color="#ffbd00"]')
     const bottomStroke = await js(`(() => {
       const paper = document.querySelector('.mb-canvas-sheet').getBoundingClientRect()
       const surface = document.querySelector('.mb-canvas-surface').getBoundingClientRect()
@@ -901,6 +918,10 @@ export async function run(window, bridge) {
     await click('#mb-canvas-button')
     await until("document.querySelector('#mb-canvas').hidden===false", '重载后打开画布')
     await until(`${cards}===3`, '重载后画布仍有 3 张卡片')
+    await keydown('q')
+    await click('[data-quick-panel=colors]')
+    await until("Boolean(document.querySelector('[data-quick-color=\"#8a23ff\"]'))", '重载后恢复常用色')
+    await keydown('Escape')
 
     // —— 完整错题引用、显示范围和画布内编辑 ——
     const stem = '求 $f(x)=x^{2}$ 的最小值。\n\n' + '已知条件和推导细节。\n\n'.repeat(28) + '题干末尾应保留。'

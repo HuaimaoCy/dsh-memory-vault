@@ -318,11 +318,11 @@ export function normalizeDocument(raw) {
 /** 序列化后的大小（UTF-16 字符数），写库前的字节闸门。 */
 export const documentSize = document => JSON.stringify(document).length
 
-export function checkInkBudget(document) {
+export function checkInkBudget(document, measureInk = documentSize) {
   let size = 0
   for (const canvas of document.canvases) {
     if (canvas.ink.length > INK_LIMITS.strokes) throw new Error(`每张画布最多 ${INK_LIMITS.strokes} 笔`)
-    size += documentSize(canvas.ink)
+    size += measureInk(canvas.ink)
   }
   if (size > INK_LIMITS.bytes) throw new Error('手写已达到本笔记本的存储上限，请擦除部分笔迹后再书写')
 }
@@ -399,17 +399,6 @@ export function updateCard(canvas, id, patch) {
     cards: canvas.cards.map(card => card.id === id ? normalizeCard({ ...card, ...patch }, new Set(canvas.cards.map(row => row.id).filter(row => row !== id))) : card),
     updatedAt: new Date().toISOString(),
   }
-}
-
-/** 连接两张卡片；同一对卡片只保留一条线。 */
-export function linkCards(canvas, from, to) {
-  if (from === to) throw new Error('请选择两张不同的卡片')
-  const ids = new Set(canvas.cards.map(card => card.id))
-  if (!ids.has(from) || !ids.has(to)) throw new Error('请选择画布上的卡片')
-  const key = [from, to].sort().join('|')
-  if (canvas.edges.some(edge => [edge.from, edge.to].sort().join('|') === key)) throw new Error('这两张卡片已经连在一起了')
-  if (canvas.edges.length >= CANVAS_LIMITS.edges) throw new Error(`每个画布最多 ${CANVAS_LIMITS.edges} 条连线`)
-  return { ...canvas, edges: [...canvas.edges, { id: `edge-${uuid()}`, from, to }], updatedAt: new Date().toISOString() }
 }
 
 /** 移除一条连线。 */
