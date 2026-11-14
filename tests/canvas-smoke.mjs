@@ -60,6 +60,10 @@ try {
   const strokeBounds = inkBounds(stroke)
   assert.ok(inkIntersects(stroke, strokeBounds, [30, 370], [30, 430], 3), '橡皮快速穿过笔迹时命中')
   assert.ok(!inkIntersects(stroke, strokeBounds, [300, 400], [370, 400], 3), '共线但相隔的笔迹不会被擦除')
+  const thickCorner = { ...stroke, width: 20, points: [[0, 0, 100], [100, 0, 100], [100, 100, 100]] }
+  const thickBounds = inkBounds(thickCorner)
+  assert.ok(inkIntersects(thickCorner, thickBounds, [50, 18], [60, 18], 2), '橡皮扫到压感外缘时命中')
+  assert.ok(!inkIntersects(thickCorner, thickBounds, [50, 35], [60, 60], 2), '橡皮扫过笔迹边界框中的空白时保持笔迹')
   const staircase = { ...stroke, points: [[0, 0, 50], [1, 0, 50], [1, 1, 50], [2, 1, 50], [2, 2, 50], [10, 10, 50]] }
   const smooth = inkSVGAttributes(staircase)
   assert.match(smooth.d, /^M0 0.*Q.*L10 10$/, '平滑触控板的细碎台阶，保留落笔与收笔位置')

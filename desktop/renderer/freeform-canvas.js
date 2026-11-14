@@ -248,7 +248,8 @@ export function createCanvasView(options) {
         if (++rounds > 5) { queued = true; break }
         const at = pendingRevision
         setSaveState('正在保存…')
-        await call('save', { docs: normalizeDocument(doc) })
+        // The store normalizes and validates the document before writing it.
+        await call('save', { docs: doc })
         if (pendingRevision === at) {
           pendingChanges = false
           setSaveState('已保存')
@@ -627,7 +628,7 @@ export function createCanvasView(options) {
     const before = snapshot()
     replaceCanvas(next)
     pushHistory(before)
-    ink.paint()
+    ink.paint(appended)
     markDirty()
     return true
   }

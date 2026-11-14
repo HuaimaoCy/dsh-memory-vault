@@ -6,7 +6,8 @@ const SVG = 'http://www.w3.org/2000/svg'
 const ERASER_RADIUS = 9
 
 export function createCanvasInk({ surface, layer, h, icon, current, setView, commit, notify, onToolChange, onCursorChange, openColors, allowsPoint }) {
-  const nodes = new Map()
+  const boundsByStroke = new WeakMap()
+  let nodes = new Map()
   const gpuPreview = createGpuInkPreview(surface)
   const styles = { pen: { width: 2 }, marker: { width: 16 } }
   let color = '#1267ed'
@@ -103,39 +104,48 @@ export function createCanvasInk({ surface, layer, h, icon, current, setView, com
     return node
   }
 
-  function paintStroke(node, stroke, range) {
-    const { d, ...attributes } = inkSVGAttributes(stroke, range)
-    // Composite the marker once even when its preview has multiple paths.
-    const style = range ? node.parentElement : node
-    for (const [name, value] of Object.entries(attributes)) {
-      if (style.getAttribute(name) !== String(value)) style.setAttribute(name, String(value))
+  function paintStroke(node, stroke, range, style = node) {
+    const attributes = inkSVGAttributes(stroke, range)
+    if (style) {
+      for (const name in attributes) {
+        if (name !== 'd') style.setAttribute(name, attributes[name])
+      }
     }
-    node.setAttribute('d', d)
+    node.setAttribute('d', attributes.d)
   }
 
-  function paint() {
+  function paint(appended) {
     const ink = current()?.ink
     if (ink === paintedInk) return
-    if (paintedInk && ink?.length === paintedInk.length + 1 && paintedInk.every((stroke, index) => stroke === ink[index])) {
-      const stroke = ink.at(-1), node = strokeNode(stroke)
-      paintStroke(node, stroke)
-      nodes.set(stroke.id, { stroke, node })
+    paintedInk = ink
+    if (appended) {
+      const node = strokeNode(appended)
+      paintStroke(node, appended)
+      nodes.set(appended.id, { stroke: appended, node })
       layer.insertBefore(node, gesture?.node ?? null)
-      paintedInk = ink
       return
     }
-    paintedInk = ink
-    const previous = new Map(nodes)
-    nodes.clear()
-    const paths = (ink ?? []).map(stroke => {
+    const previous = nodes
+    nodes = new Map()
+    for (const stroke of ink ?? []) {
       const old = previous.get(stroke.id)
-      const node = old?.stroke === stroke ? old.node : strokeNode(stroke)
-      if (node !== old?.node) paintStroke(node, stroke)
-      nodes.set(stroke.id, { stroke, node })
-      return node
-    })
-    if (gesture?.node) paths.push(gesture.node)
-    layer.replaceChildren(...paths)
+      if (old?.stroke === stroke) {
+        nodes.set(stroke.id, old)
+      } else {
+        const node = strokeNode(stroke)
+        paintStroke(node, stroke)
+        nodes.set(stroke.id, { stroke, node })
+      }
+    }
+    for (const [id, entry] of previous) {
+      if (nodes.get(id) !== entry) entry.node.remove()
+    }
+    // Keep unchanged paths attached so erasing one stroke doesn't invalidate the rest of the layer.
+    let next = layer.firstChild
+    for (const { node } of nodes.values()) {
+      if (node === next) next = node.nextSibling
+      else layer.insertBefore(node, next)
+    }
   }
 
   function capture(pointerId) {
@@ -147,12 +157,9 @@ export function createCanvasInk({ surface, layer, h, icon, current, setView, com
   function point(event, rect) {
     return { x: event.clientX - rect.left, y: event.clientY - rect.top }
   }
-  function inkPoint(event, rect, view) {
-    const worldPoint = screenToWorld(view, point(event, rect))
+  function coordinate(value) {
     const limit = CANVAS_LIMITS.coordinate
-    const coordinate = value => inkCoordinate(Math.max(-limit, Math.min(limit, value)))
-    const pressure = event.pointerType === 'pen' && event.pressure > 0 ? inkPressure(event.pressure * 100) : 50
-    return [coordinate(worldPoint.x), coordinate(worldPoint.y), pressure]
+    return inkCoordinate(Math.max(-limit, Math.min(limit, value)))
   }
 
   function touchCenter() {
@@ -204,8 +211,15 @@ export function createCanvasInk({ surface, layer, h, icon, current, setView, com
     const type = hardwareEraser ? 'erase' : tool
     const base = { id: event.pointerId, pointerType: event.pointerType, canvasId: canvas.id, type, rect, view: { ...canvas.view } }
     if (type === 'erase') {
-      const candidates = canvas.ink.map(stroke => ({ stroke, bounds: inkBounds(stroke) }))
-      gesture = { ...base, candidates, erased: new Set(), previous: inkPoint(event, rect, base.view) }
+      const candidates = canvas.ink.map(stroke => {
+        let bounds = boundsByStroke.get(stroke)
+        if (!bounds) {
+          bounds = inkBounds(stroke)
+          boundsByStroke.set(stroke, bounds)
+        }
+        return { stroke, bounds }
+      })
+      gesture = { ...base, candidates, erased: new Set(), radius: ERASER_RADIUS / base.view.scale }
       onCursorChange?.()
     } else {
       const stroke = { id: globalThis.crypto.randomUUID(), tool: type, color, ...styles[type], points: [] }
@@ -215,7 +229,7 @@ export function createCanvasInk({ surface, layer, h, icon, current, setView, com
       node.append(tail)
       layer.append(node)
       const gpu = gpuPreview.begin(rect, base.view, canvas.paper)
-      gesture = { ...base, stroke, node, tail, gpu, previewStart: 1, previewOutline: false, previousSample: null }
+      gesture = { ...base, stroke, node, tail, gpu, previewStart: 1, previousSample: null }
     }
     surface.classList.add('ink-stroking')
     record(event)
@@ -223,13 +237,25 @@ export function createCanvasInk({ surface, layer, h, icon, current, setView, com
   }
 
   function record(event) {
-    gesture.lastPoint = point(event, gesture.rect)
-    const sample = inkPoint(event, gesture.rect, gesture.view)
+    const { rect, view, pointerType } = gesture
+    const x = event.clientX - rect.left, y = event.clientY - rect.top
+    if (pointerType === 'touch') gesture.lastPoint = { x, y }
+    const worldX = coordinate((x - view.x) / view.scale), worldY = coordinate((y - view.y) / view.scale)
     if (gesture.type === 'erase') {
-      for (const { stroke, bounds } of gesture.candidates) {
-        if (gesture.erased.has(stroke.id) || !inkIntersects(stroke, bounds, gesture.previous, sample, ERASER_RADIUS / gesture.view.scale)) continue
-        gesture.erased.add(stroke.id)
+      const { candidates, erased, previous, radius } = gesture
+      if (previous?.[0] === worldX && previous[1] === worldY) return
+      const sample = [worldX, worldY]
+      for (let index = 0; index < candidates.length;) {
+        const { stroke, bounds } = candidates[index]
+        if (!inkIntersects(stroke, bounds, previous ?? sample, sample, radius)) {
+          index += 1
+          continue
+        }
+        erased.add(stroke.id)
         nodes.get(stroke.id)?.node.setAttribute('visibility', 'hidden')
+        // The order of hit tests doesn't affect the stacking order of strokes.
+        candidates[index] = candidates.at(-1)
+        candidates.pop()
       }
       gesture.previous = sample
       return
@@ -237,10 +263,14 @@ export function createCanvasInk({ surface, layer, h, icon, current, setView, com
     const points = gesture.stroke.points
     const last = points.at(-1)
     const finishing = event.type === 'pointerup'
-    if (last && finishing) sample[2] = last[2]
-    const distance = last ? Math.hypot(sample[0] - last[0], sample[1] - last[1]) * gesture.view.scale : Infinity
-    if (distance === 0 || (!finishing && distance < 0.6)) return
+    if (last) {
+      const dx = (worldX - last[0]) * view.scale, dy = (worldY - last[1]) * view.scale
+      const distanceSquared = dx * dx + dy * dy
+      if (distanceSquared === 0 || (!finishing && distanceSquared < 0.36)) return
+    }
     if (points.length >= INK_LIMITS.points) { gesture.full = true; return }
+    const pressure = pointerType === 'pen' && event.pressure > 0 ? inkPressure(event.pressure * 100) : 50
+    const sample = [worldX, worldY, last && finishing ? last[2] : pressure]
     if (gesture.stroke.tool === 'pen' && last && sample[2] !== last[2]) gesture.variableWidth = true
     // Leave the live tip under the pointer. Its position becomes final as soon as the next sample arrives.
     if (gesture.previousSample) points[points.length - 1] = stabilizeInkPoint(gesture.previousSample, last, sample, gesture.view.scale)
@@ -259,10 +289,11 @@ export function createCanvasInk({ surface, layer, h, icon, current, setView, com
       gpuPreview.clear()
     }
     const variableWidth = Boolean(gesture.variableWidth)
-    if (gesture.previewOutline !== variableWidth) {
+    const styleChanged = gesture.previewOutline !== variableWidth
+    if (styleChanged) {
       // The first pressure change can turn a formerly uniform line into an outline.
       node.replaceChildren(tail)
-      gesture.previewStart = 0
+      gesture.previewStart = variableWidth ? 0 : 1
       gesture.previewOutline = variableWidth
     }
     const chunk = 96
@@ -272,10 +303,11 @@ export function createCanvasInk({ surface, layer, h, icon, current, setView, com
       const part = document.createElementNS(SVG, 'path')
       node.insertBefore(part, tail)
       const start = gesture.previewStart, end = start + chunk
-      paintStroke(part, stroke, { variableWidth, start, end })
+      paintStroke(part, stroke, { variableWidth, start, end }, null)
       gesture.previewStart = end
     }
-    paintStroke(tail, stroke, { variableWidth, start: gesture.previewStart })
+    // Apply style to the group once so overlapping marker chunks share one opacity.
+    paintStroke(tail, stroke, { variableWidth, start: gesture.previewStart }, styleChanged ? node : null)
   }
 
   function pointerMove(event) {
@@ -290,8 +322,10 @@ export function createCanvasInk({ surface, layer, h, icon, current, setView, com
     if (!gesture) return false
     if (event.pointerId !== gesture.id) return true
     if (event.pointerType === 'mouse' && event.buttons === 0) return finish(event, true)
-    for (const sample of event.getCoalescedEvents?.() ?? []) record(sample)
-    record(event)
+    const samples = event.getCoalescedEvents?.() ?? []
+    for (const sample of samples) record(sample)
+    const last = samples.at(-1)
+    if (last?.clientX !== event.clientX || last.clientY !== event.clientY || last.pressure !== event.pressure) record(event)
     return true
   }
 

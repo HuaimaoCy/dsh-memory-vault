@@ -17,7 +17,7 @@ export function stabilizeInkPoint(previous, point, next, scale) {
   if (fraction <= 0 || fraction >= 1) return point
   const shiftX = previous[0] + dx * fraction - point[0]
   const shiftY = previous[1] + dy * fraction - point[1]
-  const deviation = Math.hypot(shiftX, shiftY) * scale
+  const deviation = Math.sqrt(shiftX * shiftX + shiftY * shiftY) * scale
   // Measure the correction on screen so zooming does not change the jitter threshold.
   if (deviation === 0 || deviation >= 2.5) return point
   const weight = 0.6 * Math.min(1, (2.5 - deviation) / 1.25)
@@ -85,15 +85,24 @@ function segmentsCross(a, b, c, d) {
 
 /** 橡皮检测整段移动，快速扫过笔迹也能擦除。 */
 export function inkIntersects(stroke, bounds, start, end, radius) {
-  if (Math.max(start[0], end[0]) + radius < bounds.x || Math.min(start[0], end[0]) - radius > bounds.x + bounds.w
-    || Math.max(start[1], end[1]) + radius < bounds.y || Math.min(start[1], end[1]) - radius > bounds.y + bounds.h) return false
+  const left = Math.min(start[0], end[0]), right = Math.max(start[0], end[0])
+  const top = Math.min(start[1], end[1]), bottom = Math.max(start[1], end[1])
+  if (right + radius < bounds.x || left - radius > bounds.x + bounds.w
+    || bottom + radius < bounds.y || top - radius > bounds.y + bounds.h) return false
   const points = stroke.points
   if (points.length === 1) return pointDistance(points[0], start, end) <= radius + inkRadius(stroke, points[0])
+  // The full stroke width bounds every pressure radius without sampling it per segment.
+  const padding = radius + stroke.width
+  const minX = left - padding, maxX = right + padding
+  const minY = top - padding, maxY = bottom + padding
   for (let index = 1; index < points.length; index += 1) {
     const a = points[index - 1], b = points[index]
+    if ((a[0] < minX && b[0] < minX) || (a[0] > maxX && b[0] > maxX)
+      || (a[1] < minY && b[1] < minY) || (a[1] > maxY && b[1] > maxY)) continue
+    if (segmentsCross(a, b, start, end)) return true
     const reach = radius + Math.max(outlineRadius(stroke, index - 1), outlineRadius(stroke, index))
-    if (segmentsCross(a, b, start, end) || Math.min(pointDistance(a, start, end), pointDistance(b, start, end),
-      pointDistance(start, a, b), pointDistance(end, a, b)) <= reach) return true
+    if (pointDistance(a, start, end) <= reach || pointDistance(b, start, end) <= reach
+      || pointDistance(start, a, b) <= reach || pointDistance(end, a, b) <= reach) return true
   }
   return false
 }
@@ -106,7 +115,7 @@ function roundedCorner(points, index, span) {
   const [nextX, nextY] = points[index + 1]
   const inX = x - previousX, inY = y - previousY
   const outX = nextX - x, outY = nextY - y
-  const incoming = Math.hypot(inX, inY), outgoing = Math.hypot(outX, outY)
+  const incoming = Math.sqrt(inX * inX + inY * inY), outgoing = Math.sqrt(outX * outX + outY * outY)
   const cosine = incoming && outgoing ? (inX * outX + inY * outY) / (incoming * outgoing) : 1
   // A tiny staircase step may be perpendicular, but a longer corner is intentional.
   if (cosine > 0.9998 || cosine < -0.65 || (cosine < 0.35 && Math.min(incoming, outgoing) > span)) return null
@@ -149,21 +158,28 @@ export function inkSVGAttributes(stroke, { variableWidth, start, end } = {}) {
 
 // One compound fill keeps the pressure-sensitive outline continuous at its joins.
 export function inkOutline(stroke, start = 0, end = stroke.points.length) {
+  const { points } = stroke
+  let previous = points[start - 1]
+  let previousRadius = previous ? inkCoordinate(outlineRadius(stroke, start - 1)) : 0
   let path = ''
   for (let index = start; index < end; index += 1) {
-    const [x, y] = stroke.points[index]
+    const point = points[index]
+    const [x, y] = point
     const r = inkCoordinate(outlineRadius(stroke, index))
     const diameter = inkCoordinate(r * 2)
     path += `M${pair(x - r, y)}a${r} ${r} 0 1 0 ${diameter} 0a${r} ${r} 0 1 0 -${diameter} 0Z`
-    const previous = stroke.points[index - 1]
-    if (!previous) continue
-    const [px, py] = previous
-    const length = Math.hypot(x - px, y - py)
-    if (!length) continue
-    const nx = (py - y) / length, ny = (x - px) / length
-    const previousRadius = inkCoordinate(outlineRadius(stroke, index - 1))
-    path += `M${pair(px + nx * previousRadius, py + ny * previousRadius)}L${pair(x + nx * r, y + ny * r)}`
-      + `L${pair(x - nx * r, y - ny * r)}L${pair(px - nx * previousRadius, py - ny * previousRadius)}Z`
+    if (previous) {
+      const [px, py] = previous
+      const dx = x - px, dy = y - py
+      const length = Math.sqrt(dx * dx + dy * dy)
+      if (length) {
+        const nx = -dy / length, ny = dx / length
+        path += `M${pair(px + nx * previousRadius, py + ny * previousRadius)}L${pair(x + nx * r, y + ny * r)}`
+          + `L${pair(x - nx * r, y - ny * r)}L${pair(px - nx * previousRadius, py - ny * previousRadius)}Z`
+      }
+    }
+    previous = point
+    previousRadius = r
   }
   return path
 }
