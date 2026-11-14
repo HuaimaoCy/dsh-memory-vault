@@ -5,9 +5,9 @@
 //   独立演进，发布标签 notebook-vX.Y.Z，安装包与更新清单随它走。
 // 两者可以长期不同号；构建守卫只要求各自与自己的 package.json 一致。
 export const CORE_VERSION = '0.7.23'
-export const NOTEBOOK_VERSION = '0.8.2'
-export const NOTEBOOK_DISPLAY_VERSION = '0.8.2'
-export const NOTEBOOK_RELEASE_NAME = '错题 PDF 排版'
+export const NOTEBOOK_VERSION = '0.8.3'
+export const NOTEBOOK_DISPLAY_VERSION = NOTEBOOK_VERSION
+export const NOTEBOOK_RELEASE_NAME = '自由画布手写与工具盘'
 
 // 兼容别名：核心侧（MCP serverInfo、CLI）沿用 VERSION。
 export const VERSION = CORE_VERSION

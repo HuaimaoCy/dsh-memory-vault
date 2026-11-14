@@ -99,6 +99,11 @@ try {
   const published = await writeReleaseManifest({ installer, output, version: '0.6.2', notes: '发布测试' })
   assert.equal(published.assets['win32-x64'].sha256, sha256)
   assert.equal(JSON.parse(await readFile(output, 'utf8')).version, '0.6.2')
+  const notebookInstaller = join(dir, 'Alaya-0.8.3-Setup.exe')
+  await writeFile(notebookInstaller, binary)
+  const notebook = await writeReleaseManifest({ installer: notebookInstaller, output, version: '0.8.3', notes: '发布测试', tag: 'notebook-v0.8.3' })
+  assert.equal(new URL(notebook.releaseUrl).pathname, '/HuaimaoCy/Alaya-Database/releases/tag/notebook-v0.8.3')
+  assert.equal(new URL(notebook.assets['win32-x64'].url).pathname, '/HuaimaoCy/Alaya-Database/releases/download/notebook-v0.8.3/Alaya-0.8.3-Setup.exe')
   console.log('Updates: feed validation, version ordering, redirects, errors, deduplication, progress, cancellation, hash verification, read-only adapters and release manifest passed')
 } finally {
   checker.dispose(); updater.dispose(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); await rm(dir, { recursive: true, force: true })

@@ -49,8 +49,11 @@ function checkDataTarget(path) {
   if (protectedFiles.includes(target) || existsSync(`${path}-wal`) || existsSync(`${path}-shm`)) throw new Error('请选择独立于正在使用的数据文件的导出或备份路径')
 }
 async function desktopInfo() {
+  const version = app.getVersion()
+  const isNotebookProduct = product.kind !== 'database'
   return {
-    ...await bridge.info(), version: app.getVersion(), displayVersion:NOTEBOOK_DISPLAY_VERSION, releaseName:NOTEBOOK_RELEASE_NAME,product:{kind:product.kind,name:product.name}, model: preferences.model ?? {}, hasKey: Boolean(preferences.encryptedKey), updates: updater.status(),
+    ...await bridge.info(), version, displayVersion: isNotebookProduct ? NOTEBOOK_DISPLAY_VERSION : version,
+    releaseName: isNotebookProduct ? NOTEBOOK_RELEASE_NAME : undefined, product:{kind:product.kind,name:product.name}, model: preferences.model ?? {}, hasKey: Boolean(preferences.encryptedKey), updates: updater.status(),
     connectors: connectorConfig({
       kind:product.kind,pluginPath:app.isPackaged?join(process.resourcesPath,'dsh-plugin','index.js'):resolve(here,'..',product.kind==='notebook'?'notebook-plugin.js':'index.js'),
       command: process.execPath,

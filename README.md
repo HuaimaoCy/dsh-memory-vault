@@ -2,7 +2,7 @@
 
 **独立的学习笔记本桌面端。** 错题、物理模型、解题方法、英语词汇、手写与普通笔记统一收纳；数据保存在本机，界面只属于笔记本——数据库产品是另一个独立发行版，两者共用同一套存储与校验，但界面与数据域严格分离。
 
-当前版本 **0.8.2**（Windows x64）。另有数据库产品 [Alaya Database](README.database.md)；`Alaya`（unified 发行版）同时包含两个界面并可在其间切换。
+当前源码版本 **0.8.3**（Windows x64）。更新内容见 [0.8.3 版本说明](docs/releases/0.8.3.zh.md)，可下载的版本见 [GitHub Releases](https://github.com/HuaimaoCy/Alaya-Database/releases)。`Alaya`（统一发行版）包含 Notebook 与 [Alaya Database](README.database.md)，可在应用内切换。
 
 ## 功能
 
@@ -67,6 +67,8 @@
 ### 自由画布
 
 - 满窗点阵画布，支持压感手写、荧光笔、整笔橡皮、文字、图形和导入图片。错题可在画布内完整阅读、选择显示范围和单独修改。支持多张 A4，导出多页 PDF 或当前页 PNG、JPG。
+- 右键或按 `Q` 打开工具盘，可切换画笔、图形、粗细及常用色。手写与新图形共用颜色，最多可收藏 8 种自定义色。顶部框选或按 `M` 可一起移动笔迹、图形与卡片。
+- 正在绘制的笔迹支持 GPU 加速，纯 CPU 预览按段更新。放大后仍按矢量路径绘制已保存的笔迹。
 
 ### 导出 PDF（自由排版）
 
@@ -142,5 +144,5 @@ Windows x64；AI 解答与图片识别为可选项，需要兼容 OpenAI 的服�
 - [在 Codex 里读写笔记本](docs/codex-notebook.zh.md)
 - [独立部署](docs/standalone.zh.md)、[图片](docs/images.zh.md)、[更新](docs/updates.zh.md)
 - 玻璃与视觉：[材质规范](docs/liquid-glass.zh.md)、[光学引擎](docs/optical-engine.zh.md)
-- 版本说明：[0.8.2](docs/releases/0.8.2.zh.md)、[0.8.1Alpha](docs/releases/0.8.1-alpha.zh.md)
+- 版本说明包括 [0.8.3](docs/releases/0.8.3.zh.md)、[0.8.2](docs/releases/0.8.2.zh.md) 和 [0.8.1Alpha](docs/releases/0.8.1-alpha.zh.md)。
 - 同类产品：[Alaya Database](README.database.md)（数据库发行版）

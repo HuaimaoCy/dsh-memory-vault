@@ -12,10 +12,10 @@ Memory Vault 0.6.2 支持 GitHub Releases 更新。软件启动后检查一次�
 
 ## 发布新版本
 
-1. 将根目录 `package.json`、`desktop/package.json`、`desktop/package-lock.json` 的应用版本与 `src/version.js` 改为相同版本，更新 `docs/release-notes.txt`。
-2. 运行 `npm run build:desktop`。构建同时生成安装包与 `desktop/dist/latest.json`，自动写入安装包的大小与 SHA-256。
-3. 在现有仓库创建 **正式 Release**，标签为 `v<版本号>`，如 `v0.6.2`。将对应的 `Memory-Vault-0.6.2-Setup.exe` 和 `latest.json` 一起作为附件上传。源代码 ZIP 可一并上传。
-4. 发布后从上方默认清单地址确认可读取 JSON，再用旧版本手动检查并下载验证。
+1. Notebook 与统一桌面版使用 `src/version.js` 中的 `NOTEBOOK_VERSION`，同步 `desktop/package.json` 和 `desktop/package-lock.json` 的顶层版本及 `packages[""]` 版本。正式版的界面版本与包内版本相同，预览版可用 `0.8.1-alpha` 这类后缀。数据库核心使用 `CORE_VERSION`，与根目录 `package.json` 对应，独立编号。
+2. 为 Notebook 更新 `docs/release-notes.txt`，这是更新弹窗使用的纯文本说明。完整 Markdown 放在 `docs/releases/<版本号>.zh.md`，从 README 链入。提交后在对应源码提交上创建 `notebook-v<版本号>` 标签，例如 `notebook-v0.8.3`。数据库核心发布标签使用 `database-v<版本号>`。
+3. 在源码根目录运行 `npm run build:desktop` 生成统一版 `Alaya-<界面版本>-Setup.exe`，或加 `-- --product notebook` 构建 Notebook 独立版。正式版用实际安装包调用 `desktop/lib/release.mjs` 的 `writeReleaseManifest`，传入 `installer`、`output`、`version`、`notes` 和发布 `tag`，生成包含下载地址、大小与 SHA-256 的 `latest.json`。
+4. 在 [Alaya-Database Releases](https://github.com/HuaimaoCy/Alaya-Database/releases) 使用相同标签发布，并附上匹配的安装包和 `latest.json`。预览版使用 prerelease。正式版发布后确认默认清单可读，再从旧版应用检查更新和下载。
 
 清单里的下载地址包含版本标签与安装包文件名，两者必须与实际 Release 一致。修改安装包后必须重新构建或重新生成校验清单。软件当前提供 Windows x64 正式版本通道；不安装旧版本或预发布版本。
 
